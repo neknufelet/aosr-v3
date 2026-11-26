@@ -1,6 +1,7 @@
 """本機單人網頁：輸入、驗證、存檔、2D 圖與獨立計算。"""
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import json
 import os
@@ -56,7 +57,7 @@ from aosr.gui.zone_limits import zone_limit_routes
 from aosr.gui.zone_modes import zone_material_routes
 from aosr.gui.zone_result_routes import ZoneResultDeps, zone_result_routes
 from aosr.gui.scheme_archive import SchemeArchive
-from aosr.gui.plan_view import plan_for
+from aosr.gui.plan_view import out_of_room_scheme, plan_for
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
@@ -524,7 +525,9 @@ class GuiHandlers:
                         plan = plan_for(Scheme.model_validate(document), self.directivity, mark_blockers=True)
                         data.update(plan=plan, problems=plan_problems(problems, document, plan))
                     except ValueError:
-                        pass
+                        # 座標跑出房間也照樣帶圖（#1265）：超出的點列在 outside_keys、圖上標紅；問題清單照舊，不另判擋路。
+                        with contextlib.suppress(ValueError):
+                            data["plan"] = plan_for(out_of_room_scheme(document), self.directivity)
                     return JSONResponse(data, status_code=422)
                 return JSONResponse({**plan_for(Scheme.model_validate(document), self.directivity),
                                      "message": "檢查通過"})

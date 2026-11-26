@@ -65,6 +65,32 @@ def _listening_zoom(scheme: Scheme, vertical: bool) -> dict[str, list[float]]:
             "v": [primary[axis] - dv, primary[axis] + dv]}
 
 
+class _AnyPlacementScheme(Scheme):
+    """只給圖面用：方案其餘規則照驗，只有「點要在房間閉區間內」不擋，跑出房間的點照樣畫得出來（#1265）。"""
+
+    def _inside(self, point: Point, name: str) -> None:
+        return None
+
+
+def out_of_room_scheme(document: object) -> Scheme:
+    """嚴格驗證不過時畫圖用的方案：再驗一次、只放過點在房間外，別的錯照樣丟 ``ValueError``（長寬高不是數字就畫不出來）。
+    ``Scheme`` 本身的驗證規則不變，存檔、計算、檢查仍只收嚴格的那一份。"""
+    return _AnyPlacementScheme.model_validate(document)
+
+
+def _outside_keys(scheme: Scheme) -> list[str]:
+    """跑出房間的喇叭與座位（圖上標紅）；判準直接叫 ``Scheme._inside``，跟驗證同一條。"""
+    points = [(f"speaker:{name}", point) for name, point in scheme.speakers.items()]
+    points += [(f"receiver:{item.receiver_id}", Point(*item.position_m)) for item in scheme.receiver_set.points]
+    outside = []
+    for key, point in points:
+        try:
+            Scheme._inside(scheme, point, key)
+        except ValueError:
+            outside.append(key)
+    return outside
+
+
 def plan_for(scheme: Scheme, directivity: DirectivityDefaults, *,
              mark_blockers: bool = False) -> dict[str, object]:
     primary = Point(*scheme.receiver_set.primary.position_m)
@@ -98,7 +124,10 @@ def plan_for(scheme: Scheme, directivity: DirectivityDefaults, *,
                                          "other_seat": "其他座位"}[role],
                           "point": position, "marker": marker,
                           "detail_text": _point_detail(name, receiver.receiver_id, position)})
+    # 跑出房間的點才加這個鍵（out_of_room_scheme 那條路）；合法方案的回覆一字不變。
+    outside = _outside_keys(scheme)
     return {
+        **({"outside_keys": outside} if outside else {}),
         "room": {"Lx": room.Lx, "Ly": room.Ly, "Lz": room.Lz},
         "speakers": speakers, "receivers": receivers,
         "views": {"plan": _plan_views(speakers, receivers, False),
