@@ -17,6 +17,8 @@ from aosr.materials.library import builtin_entries
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import RAW_VALUES, _open, _serve, browser as browser
 
+BUILTINS = len(builtin_entries())
+
 REFUSED = re.compile(r"Failed to load resource: the server responded with a status of 400")
 
 
@@ -43,7 +45,7 @@ def _user_row(page: Page, material_id: str) -> Locator:
 def test_copy_a_builtin_family_change_its_thicknesses_and_save(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 0 筆")
+        expect(page.locator("#list-state")).to_have_text(f"內建 {BUILTINS} 筆、我的材料 0 筆")
         _row(page, "optimizable", "glass_wool_48k", "copy")
         page.locator("#name").fill("我的 48K 棉")
         page.locator(".layer-select").first.click()
@@ -148,7 +150,7 @@ def test_builtins_open_read_only_and_user_materials_can_be_deleted(tmp_path: Pat
         _saved(page)
         page.once("dialog", lambda dialog: dialog.accept())
         _row(page, "fixed", "glass_wool_48k_50mm_copy", "delete")
-        expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 0 筆；已刪除「板 A」")
+        expect(page.locator("#list-state")).to_have_text(f"內建 {BUILTINS} 筆、我的材料 0 筆；已刪除「板 A」")
         expect(page.locator("#editor")).to_be_hidden()
         assert (watched.console_errors, watched.page_errors) == ([], [])
     assert _materials(tmp_path) == {}
@@ -507,7 +509,7 @@ def test_closing_the_editor_during_a_save_says_only_that_it_was_saved(tmp_path: 
         page.locator("#close").click()
         route.continue_()
         expect(_user_row(page, "hard_wall")).to_contain_text("很硬的牆")
-        expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 1 筆；已儲存「很硬的牆」")
+        expect(page.locator("#list-state")).to_have_text(f"內建 {BUILTINS} 筆、我的材料 1 筆；已儲存「很硬的牆」")
         expect(page.locator("#editor")).to_be_hidden()
         assert watched.page_errors == []
 
@@ -520,7 +522,7 @@ def test_a_tunable_vpr_in_the_library_is_listed_and_does_not_break_the_page(tmp_
     _write_library(user_library_path(tmp_path), with_vpr=True)
     with _serve(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
-        expect(page.locator("#list-state")).to_have_text("內建 18 筆、我的材料 5 筆")
+        expect(page.locator("#list-state")).to_have_text(f"內建 {BUILTINS} 筆、我的材料 5 筆")
         page.locator("#tab-optimizable").click()
         row = page.locator(f'#panel-optimizable [data-id="{VPR}"]')
         row.get_by_text("細節", exact=True).click()

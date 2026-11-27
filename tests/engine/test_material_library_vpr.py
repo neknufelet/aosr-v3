@@ -5,7 +5,9 @@
 兩半：
 - 逐位不變：內建材料、一份自編的使用者材料庫、家族快照（v1、v2）、接上材料庫的搜尋設定與指紋、舊材料的搜尋計畫、
   材料頁清單（``/api/materials``）、分區頁限制檢查（``/api/zone-limits``）——每一樣的 SHA-256 與長度釘在 ``PINNED``
-  （在主線 aff9e22e 的產品程式上用同一支 :func:`artifacts` 存的）。材料庫裡多一筆可調 VPR 時同樣這幾樣也要等於釘的值
+  （在主線 aff9e22e 的產品程式上用同一支 :func:`artifacts` 存的；內建材料多了 12 筆文獻硬面之後，
+  ``builtin.json`` 與 ``api_materials_rows.json`` 兩份清單照新的內建材料重存，其餘八份一個位元都沒動；#1326 分組之後材料頁每一列的 ``placement`` 多一格 ``family``（四組之一），整面類與舊門窗換了能用的面，
+  ``api_materials_rows.json`` 再照分支重存一次，其餘九份照舊）。材料庫裡多一筆可調 VPR 時同樣這幾樣也要等於釘的值
   （使用者材料庫與材料頁清單先拿掉那一筆再比）。
 - 新格式：每一條拒收理由一題；轉家族；交給第三階段時計畫那一步用白話拒收。
 
@@ -49,13 +51,13 @@ REFUSAL = "材料「鋼板 VPR（自編）」（steel_vpr）是可調 VPR：還�
 # 主線 aff9e22e 的產品程式上 artifacts(…, with_vpr=False) 每一樣的（SHA-256, 位元組數）；樹外
 # baseline/ 存的是同一批位元組。
 PINNED: dict[str, tuple[str, int]] = {
-    "builtin.json": ("2886008af20f124a749debf5c3eb16381d7e45817e9cb707c2f0530c607f5a3e", 32852),
+    "builtin.json": ("cbb101fb6bd246d43ae1b917e976baf091c88d932d9b9d8f6ecad0df9c26de81", 120491),
     "user_library.json": ("dfdbb6d69d52d79dd1a35fba1fe62c7644e5554c713c4ab27ed5f7f7cc99f9d5", 3181),
     "snapshot_v1.json": ("cbb87d20d9335d04fdb1ca08f78cc054b44109ad28faaa5210fcb955e8ed9477", 1014),
     "snapshot_v2.json": ("a8711bcf8dc5580f4eef70b9bcf86b776077d82d7a689bc8235359c6306595a2", 2461),
     "search_materials.json": ("e779070cfddb3dd095b23eccd93655df06388c0126cbdd516be17038fd76916c", 10428),
     "plan.json": ("6a743d091e87f5d333f25931f2f7cf106ee90a99dc49ccc1e4d490b253adb831", 2442),
-    "api_materials_rows.json": ("5966007c1f8495b136dd94b813d3a00f5413acea163a6b634edba91fa3610931", 44352),
+    "api_materials_rows.json": ("9cb065dd945b2726d7a3a09fc9e35d08c49cf7ab7640effd0fd67f5c44d99892", 142217),
     "api_materials_old_kind_labels.json": ("3bcd2f32eaaaca4e02ca9633ab80d1fefabdabb428e044fb335d78b9c32bdf8c", 69),
     "api_materials_rest.json": ("f39da21a44d281354d0469e793177a77a8bbfab3f07550becfa307983d10391d", 14634),
     "api_zone_limits.json": ("c481a05b047016e09044d100b8b184b0eade65002be412f7b7c596cefb0081ff", 3446),

@@ -27,8 +27,17 @@ BUILTIN_GROUPS = {
     "perforated_0p8mm_d10_gw24k_50mm": "wall", "mpp_t1mm_d0p5_gap50": "wall", "mpp_t0p5mm_d0p5_gap50": "wall",
     "slotted_gypsum_b6_backed_gap65": "wall", "slotted_wood_typ9_absorber40_gap98": "wall",
     "carpet_on_concrete": "floor",
+    # 文獻硬面是整面的表面阻抗（阻抗表），只能整面換掉，歸「牆面、地面本身」。
+    "door_wood_solid": "surface_itself", "glass_single_3mm": "surface_itself", "glass_double_gap30": "surface_itself",
+    "wood_floor_on_joists": "surface_itself", "wood_floor_on_sleepers": "surface_itself",
+    "gypsum_double_13mm_stud": "surface_itself", "plasterboard_ceiling": "surface_itself",
+    "brick_rendered": "surface_itself", "brick_painted": "surface_itself", "concrete_smooth": "surface_itself",
+    "concrete_floor": "surface_itself", "hard_surface_average": "surface_itself",
     "glass_wool_48k": "wall", "glass_wool_24k": "wall", "glass_wool_96k": "wall",
 }
+# 文獻硬面裡講地板的只鋪地板；名字同時講牆與地板的六面都能用；其餘在牆與天花。
+CATALOG_SURFACES = {"wood_floor_on_joists": ("floor",), "wood_floor_on_sleepers": ("floor",), "concrete_floor": ("floor",),
+                    "hard_surface_average": ("x0", "xL", "y0", "yL", "ceiling", "floor")}
 # 合成材料庫：玻璃窗表列上限是實測表，照規則先後歸「牆面、地面本身」（在牆面與天花可選）。
 SAMPLE_GROUPS = {
     "demo109_rockwool60k_capped": "demo109", "demo109_measured_pet35_synthetic_b7": "demo109",
@@ -52,14 +61,17 @@ def test_every_current_material_lands_in_its_pinned_group() -> None:
     found = {entry.id: placement(entry) for entry in (*builtin_entries(), *_sample())}
     assert {key: item.group for key, item in found.items()} == BUILTIN_GROUPS | SAMPLE_GROUPS
     for key, item in found.items():
-        assert item.surfaces == (("floor",) if key == "joist_floor_plank_fixed" else SURFACES[item.group]), key
+        assert item.surfaces == (CATALOG_SURFACES.get(key) or (("floor",) if key == "joist_floor_plank_fixed" else SURFACES[item.group])), key
         assert item.reason and item.group in GROUP_WORDS, key
     walls = {key for key, item in found.items() if "x0" in item.surfaces}
     expected = {key for key, group in (BUILTIN_GROUPS | SAMPLE_GROUPS).items() if group in ("wall", "door_window")}
-    assert walls == expected | {"side_window_glass_table_upper"}
-    assert {key for key, item in found.items() if "floor" in item.surfaces} == {"carpet_on_concrete", "joist_floor_plank_fixed"}
+    hard_walls = {"door_wood_solid", "glass_single_3mm", "glass_double_gap30", "gypsum_double_13mm_stud", "plasterboard_ceiling",
+                  "brick_rendered", "brick_painted", "concrete_smooth", "hard_surface_average"}
+    assert walls == expected | {"side_window_glass_table_upper"} | hard_walls
+    assert {key for key, item in found.items() if "floor" in item.surfaces} == {
+        "carpet_on_concrete", "joist_floor_plank_fixed", "wood_floor_on_joists", "wood_floor_on_sleepers", "concrete_floor", "hard_surface_average"}
     assert {key for key, item in found.items() if "ceiling" in item.surfaces} == {
-        key for key, group in (BUILTIN_GROUPS | SAMPLE_GROUPS).items() if group in ("wall", "ceiling_build")} | {"side_window_glass_table_upper"}
+        key for key, group in (BUILTIN_GROUPS | SAMPLE_GROUPS).items() if group in ("wall", "ceiling_build")} | {"side_window_glass_table_upper"} | hard_walls
 
 
 def test_the_ceiling_label_rule_and_the_floor_name_rule_each_hold_a_material() -> None:
