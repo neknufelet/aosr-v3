@@ -6,12 +6,14 @@
   <title>自訂房間</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/room_model.css">
+  <link rel="stylesheet" href="/static/room_model_high.css">
   <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/room_model.js" defer></script>
+  <script src="/static/room_model_high.js" defer></script>
 </head>
 <body><main>
-  <header><h1>自訂房間（低頻）</h1>
+  <header><h1>自訂房間</h1>
     <p><a href="/">回首頁</a></p>
     <label>Rhino 檔 <input id="file" type="file" accept=".3dm"></label>
     <p id="state" aria-live="polite"></p>
@@ -22,13 +24,29 @@
       <table><thead><tr><th>圖層</th><th>面積 m²</th><th>材料</th></tr></thead><tbody id="layers"></tbody></table>
       <figure id="preview"></figure>
     </div>
-    <div class="actions"><button id="run" type="button">算低頻</button></div>
+    <div class="actions"><button id="run" type="button">算低頻</button><button id="run-high" type="button" disabled>算高音</button></div>
   </section>
   <section id="result" hidden>
     <div id="chart"></div>
     <p id="modes"></p>
     <figure id="mesh"></figure>
     <p id="facts"></p>
+  </section>
+  <section id="high" hidden>
+    <h2>高音</h2>
+    <p id="high-state" aria-live="polite"></p>
+    <div id="high-body" hidden>
+      <div class="high-controls"><select id="high-speaker" aria-label="喇叭"></select><span id="high-legend"></span></div>
+      <h3>反射路徑 <small>按住拖曳旋轉；紅色虛線＝被擋掉</small></h3>
+      <canvas id="high-3d"></canvas>
+      <h3>早期回聲 <small>500–2000 Hz，直達＝0 dB</small></h3>
+      <svg id="high-echo" viewBox="0 0 900 300"></svg>
+      <h3>晚期衰減</h3>
+      <svg id="high-decay" viewBox="0 0 900 260"></svg>
+      <h3>聽位能量（逐頻）</h3>
+      <svg id="high-energy" viewBox="0 0 900 300"></svg>
+      <p id="high-facts"></p>
+    </div>
   </section>
 </main></body>
 </html>

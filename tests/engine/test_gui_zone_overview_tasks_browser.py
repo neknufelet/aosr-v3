@@ -735,8 +735,11 @@ def test_no_item_on_the_bottom_bar_breaks_in_the_middle_whether_the_button_is_gr
         expect(page.locator("#zone-page-search")).to_be_disabled()
         assert page.evaluate(lines) == [1, 1, 1]
         expect(page.locator("#zone-page-search-why")).to_be_visible()
-        why, go = page.locator("#zone-page-search-why").bounding_box(), page.locator("#zone-page-search").bounding_box()
-        assert why is not None and go is not None
+        # 兩個外框在同一段 JS 裡一起量：頁面背景重畫會換掉底列的節點，分兩次問瀏覽器時中間被換掉就拿到 None（雲端負載高時連紅兩次）。
+        why, go = cast(list[dict[str, float]], page.evaluate("""() => ['zone-page-search-why', 'zone-page-search'].map(id => {
+            const box = document.getElementById(id).getBoundingClientRect();
+            return {x: box.x, y: box.y, width: box.width, height: box.height};
+        })"""))
         assert why["y"] >= go["y"] + go["height"] and abs((why["x"] + why["width"] / 2) - (go["x"] + go["width"] / 2)) < 2
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-search").check()
