@@ -21,7 +21,7 @@ from pydantic import TypeAdapter
 from aosr.materials.library import LibraryEntry, dump_user_library
 from tests.engine._zone_material_steps import open_groups
 from tests.engine._zone_material_steps import pick_fixed_row, row_options
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_scheme, open_zone_page
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
@@ -83,8 +83,7 @@ def _prepare(tmp_path: Path, design: dict[str, object] | None = None) -> None:
 
 def _open_overview(page: Page) -> None:
     _open_scheme(page, SAMPLE)
-    page.locator("#zone-page-open").click()
-    expect(page.locator("#zone-map")).to_be_visible()
+    open_zone_page(page)
 
 
 def _click_zone(page: Page, zone: str) -> None:
@@ -424,8 +423,12 @@ def test_picking_the_ceiling_or_the_floor_lists_only_what_can_go_there_and_has_n
     """天花、地板也點得到，同一個面板；材料只列那一面能貼的（伺服器每一筆給的「能用在哪幾面」），地板能貼的跟牆不一樣。
     「＝其他牆面」只在選到的都是算進規則的牆區時才標。"""
     _prepare(tmp_path)
-    usable = """walls => (zoneLibrary || []).filter(entry => entry.kind === 'fixed' && walls.every(wall => entry.placement.surfaces.includes(wall)))
-        .map(entry => entry.id)"""
+    usable = """walls => {
+        const families = walls.length === 1 && ['floor', 'ceiling'].includes(walls[0])
+            ? ['surface', 'porous', 'resonant', 'custom'] : ['porous', 'resonant', 'surface', 'custom'];
+        return families.flatMap(family => zoneLibrary.filter(entry => entry.kind === 'fixed' &&
+            entry.placement.family === family && walls.every(wall => entry.placement.surfaces.includes(wall))).map(entry => entry.id));
+    }"""
     options = "options => options.map(option => option.value).filter(Boolean)"
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -691,7 +694,7 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
         # （#1199：是哪幾種改在底下的材料框一種一列勾著，這一句只講幾種。）
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
         assert page.locator("#zone-panel-list [data-state=all]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == [
-            "glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+            "none", "glass_wool_48k", "glass_wool_24k", "glass_wool_96k"]
         page.screenshot(path=str(tmp_path / "first-time-reader.png"))
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/z3"] == WOOLS
@@ -732,8 +735,11 @@ def test_no_item_on_the_bottom_bar_breaks_in_the_middle_whether_the_button_is_gr
         expect(page.locator("#zone-page-search")).to_be_disabled()
         assert page.evaluate(lines) == [1, 1, 1]
         expect(page.locator("#zone-page-search-why")).to_be_visible()
-        why, go = page.locator("#zone-page-search-why").bounding_box(), page.locator("#zone-page-search").bounding_box()
-        assert why is not None and go is not None
+        # 兩個外框在同一段 JS 裡一起量：頁面背景重畫會換掉底列的節點，分兩次問瀏覽器時中間被換掉就拿到 None（雲端負載高時連紅兩次）。
+        why, go = cast(list[dict[str, float]], page.evaluate("""() => ['zone-page-search-why', 'zone-page-search'].map(id => {
+            const box = document.getElementById(id).getBoundingClientRect();
+            return {x: box.x, y: box.y, width: box.width, height: box.height};
+        })"""))
         assert why["y"] >= go["y"] + go["height"] and abs((why["x"] + why["width"] / 2) - (go["x"] + go["width"] / 2)) < 2
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-search").check()

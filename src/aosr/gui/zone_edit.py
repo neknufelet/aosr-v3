@@ -28,6 +28,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.geometry.shoebox import Room
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme
+from aosr.gui.wall_words import LEFT, OPPOSITE, RIGHT, draft_wall_words
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
 from aosr.reporting.scheme import Scheme
 from aosr.physics.zone_fill import FILL_PREFIX, Box, FillResult, fill_wall, wall_size_m
@@ -65,6 +67,8 @@ class MirrorChange(BaseModel):
     after: CutBox | None
     complete: bool = False
     protected_walls: tuple[WallName, ...] = ()
+    # 上次確認這個框的配對；只在草稿算不出軸時排結果文字，不用來切牆。
+    previous_pair: Literal["left", "right", "same_wall", "unpaired"] | None = None
 
 
 class ZoneCut(BaseModel):
@@ -317,6 +321,14 @@ def _follow_mirror(change: MirrorChange, frame: Frame, shape: ZoneFrame, partner
     return change.after is not None and frame.mirror_refusal(before) is not None
 
 
+def _edit_without_axis(body: ZoneCut, change: MirrorChange, problem: str) -> str:
+    name = {"left": LEFT, "right": RIGHT}.get(change.previous_pair or "") or draft_wall_words(body.scheme)[body.wall]
+    if name in (LEFT, RIGHT):
+        other = RIGHT if name == LEFT else LEFT
+        return f"只改了{name}，{other}沒跟著改：{problem}"
+    return f"只改了選取的框，另一邊沒跟著改：{problem}"
+
+
 def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -> dict[str, object]:
     """檢查鏡像畫框。拖曳預覽只回放置判決；放開才切牆、回傳新的分區。"""
     from aosr.gui.zone_symmetry import Frame, ZoneFrame, drawn_partners, same_frame, symmetry_axis
@@ -326,12 +338,22 @@ def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -
     source_only = partial(_source_cut, body, change, key, source, preview=preview)
     editing = change.before is not None and not change.complete
     try:
-        scheme = Scheme.model_validate(doc)
-    except ValidationError:
-        return source_only() if editing else source_only("的方案還有沒填好的地方，定不出對稱軸", fix="請先檢查方案。")
+        scheme = checked_scheme(doc)
+    except SchemeProblemsError as exc:
+        if editing and change.previous_pair == "unpaired":
+            return source_only()
+        problem = exc.first_fix()
+        if preview:
+            return source_only(problem)
+        message = _edit_without_axis(body, change, problem) if editing else f"另一邊沒有跟著畫：{problem}"
+        return {**source_only(), "invalid_scheme": True, "message": message}
     axis = symmetry_axis(scheme)
     if isinstance(axis, str):
-        return source_only() if editing else source_only(axis, fix="請調整喇叭或主位，再選框按「補畫另一邊」。")
+        if editing and change.previous_pair == "unpaired":
+            return source_only()
+        if editing:
+            return source_only(axis) if preview else {**source_only(), "invalid_scheme": True, "message": _edit_without_axis(body, change, axis)}
+        return source_only(axis, fix="請調整喇叭或主位，再選框按「補畫另一邊」。")
     frame = Frame(scheme, axis)
     active = change.after or change.before
     assert active is not None
@@ -339,17 +361,21 @@ def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -
     partners = drawn_partners(scheme, frame, added=shape if change.before is None else None)
     partner = partners.get(shape.surface)
     if frame.side(wall) and not axis.centred and change.after:
-        distance = axis.across_m if axis.left.endswith("0") else frame.across_length - axis.across_m
-        reason = f"左右牆不跟著畫：對稱軸離左牆 {distance:.2f} 公尺，房間正中是 {frame.across_length / 2:.2f} 公尺"
-        shift = frame.across_length / 2 - axis.across_m
-        amount = f"{abs(shift):.4f}".rstrip("0").ljust(4, "0")
-        coordinate = "y" if axis.along == "x" else "x"
-        guidance = (f"要左右牆跟著畫，到上面『房間和擺位』的『座標數字』，把兩支喇叭、主位與周圍點的 {coordinate} "
-                    f"都{'加上' if shift > 0 else '減掉'} {amount}，對稱軸就在房間正中")
-        reply = source_only(reason)
-        return {**reply, "cause": reason, "reason": f"{reason}。{guidance}", "source_edit": editing,
-                "message": f"{reason}（軸不在房間正中）。{guidance}。"}
+        other = OPPOSITE[wall]
+        if preview:
+            return {**source_only(f"只切{frame.names[wall]}"), "single_wall": True}
+        reply = source_only()
+        if change.complete:
+            result = "沒有補畫：鏡子不在正中"
+        else:
+            cuts = cast(dict[str, dict[str, list[object]]], reply["walls"])
+            opposite = _old_entries(doc, other)
+            remaining = "整面" if opposite[0]["area"] == "whole_wall" else f"{len(opposite)} 區"
+            result = f"{frame.names[wall]}切成 {len(cuts[wall]['zones'])} 區，{frame.names[other]}仍是{remaining}"
+        return {**reply, "reason": result, "message": result, "single_wall": True, "source_edit": editing}
     if not _follow_mirror(change, frame, shape, partner):
+        if change.before is None and partner and not preview:
+            return {**source_only(), "paired": partner, "left_wall": axis.left}
         return source_only()
     destination, u, v = frame.mirrored(shape)
     target = cast(WallName, destination)
@@ -360,7 +386,10 @@ def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -
         return {**reply, "centred": True}
     if change.after and (refused := frame.mirror_refusal(shape)):
         return {**source_only(refused[1]), "reason": refused[1], "refusal": refused[0]}
-    return _cut_partner(body, change, source, partners, partner, target, u, v, preview=preview)
+    reply = _cut_partner(body, change, source, partners, partner, target, u, v, preview=preview)
+    if not preview and (reply.get("paired") or reply.get("completed")):
+        reply["left_wall"] = axis.left
+    return reply
 
 
 def _cut_partner(body: ZoneCut, change: MirrorChange, source: list[CutBox], partners: dict[str, str],

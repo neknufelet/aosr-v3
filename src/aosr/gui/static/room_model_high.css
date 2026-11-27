@@ -1,0 +1,10 @@
+/* 自訂房間頁的高音那一段：3D 路徑圖可拖曳旋轉，圖例可勾選，下面三張圖都是內嵌 SVG。 */
+#high-3d{width:100%;height:480px;display:block;cursor:grab;touch-action:none;border:1px solid #cddde2;border-radius:6px;background:#f8fbfc}
+.high-controls{display:flex;flex-wrap:wrap;gap:.4rem 1rem;align-items:center}
+#high-legend label{margin:0 .8rem 0 0;color:#53636b}
+.sw{display:inline-block;width:18px;border-top:3px solid currentColor;vertical-align:middle}
+.sw.dash{border-top-style:dashed}
+#high svg text{fill:#53636b;font-size:12px}
+#high h3 small{font-weight:400;color:#53636b;margin-left:.4rem}
+#high-state{white-space:pre-line}
+@media (max-width:600px){#high-3d{height:360px}}

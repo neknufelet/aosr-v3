@@ -125,7 +125,7 @@ def test_fitted_vpr_library_rows_apply_as_fixed_materials(tmp_path: Path) -> Non
     for key in FITTED_VPR_IDS:
         entry = library.FixedEntry.model_validate(rows[key])
         assert isinstance(entry.material, Assembly)
-        applied = zone_material(wall, Origin(wall, "current"), entry)
+        applied = zone_material(wall, Origin(wall, "current"), entry, "x0")
         assert isinstance(applied.material, MountedOnWall)
         assert applied.material.layers == entry.material.layers and applied.material.wall == wall
 
@@ -174,3 +174,22 @@ def test_whole_wall_fitted_vpr_backs_only_the_searchable_front_layers(tmp_path: 
     bare, _ = swap(start, baseline_theta(start), "x0", "none", context)
     kept = next(item for item in bare if item.surface_id == "x0")
     assert kept.material is None and kept.kept_material == expected and design_names(bare) == ()
+
+def test_wall_porous_bytes_match_main() -> None:
+    base = ConstantImpedance(impedance_pa_s_m=7654.0)
+    entry = next(item for item in legacy_entries() if item.id == "pin_rigid")
+    change = zone_material(base, Origin(base, "current"), entry, "yL")
+    actual = {"material": change.material.model_dump(mode="json"), "note": change.note, "same_as_original": change.same_as_original}
+    assert json.dumps(actual, ensure_ascii=False, separators=(",", ":")).encode() == ANSWER.with_name("zone_porous_main.json").read_bytes()
+
+
+def test_legacy_door_and_ceiling_replace_the_zone() -> None:
+    base = ConstantImpedance(impedance_pa_s_m=7654.0)
+    for identifier, wall, face in (("pin_air", "yL", "牆面"), ("pin_rigid", "ceiling", "天花")):
+        entry = next(item for item in legacy_entries() if item.id == identifier)
+        if wall == "ceiling":
+            entry = entry.model_copy(update={"id": "exam_ceiling"})
+        change = zone_material(base, Origin(base, "original_scheme"), entry, wall)
+        assert change.material == library.fixed_surface(entry)
+        assert change.note == f"記成選上去的「{entry.label}」，整塊構造直接取代這一區的{face}。"
+        assert change.same_as_original is False

@@ -341,7 +341,7 @@ def test_a_construction_put_back_by_a_new_method_is_not_named_until_the_verdict_
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-ceiling").click()
         _verdict_shown(page)
-        choose_fixed(page, "ceiling", "whole_wall", "table_sample", show_all=True)
+        choose_fixed(page, "ceiling", "whole_wall", "table_sample")
         _verdict_shown(page)
         what = page.locator("#wall-zone-what-ceiling-whole_wall")
         held = _hold_limits_and_apply(page, "ceiling", "whole_wall", "search")
@@ -436,7 +436,7 @@ def test_opening_another_scheme_never_pairs_its_zones_with_the_last_schemes_verd
         page.evaluate(_RECORD_PAIR_MARKS)
         held: list[Route] = []
         page.route("**/api/zone-limits", lambda route: held.append(route))
-        _open_scheme(page, "plain109")
+        _open_scheme(page, "plain109", checks_held=True)
         page.wait_for_function("name => document.getElementById('save-id').value === name", arg="plain109")
         _settled(page)
         seen = cast(list[dict[str, object]], page.evaluate("window.pairMarksSeen"))

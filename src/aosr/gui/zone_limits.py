@@ -50,7 +50,7 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import NONE_TARGET, SCHEME_MATERIAL, MaterialGradientSettings, centimeters, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, range_problem, ranged_misfits, target_fit
+from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, narrowed_family, range_problem, ranged_misfits, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
@@ -83,9 +83,49 @@ class DepthTargets:
     standalone_constructions: frozenset[str] = frozenset()
     wall_dependent: frozenset[str] = frozenset()
     read_original: OriginalReader | None = None
+    legacy_replacements: frozenset[str] = frozenset()
 
     def label(self, identifier: str) -> str:
         return self.labels.get(identifier, identifier)
+
+
+class CandidateSelection(BaseModel):
+    """一區原來的勾選、草稿可調範圍、當下生效的總深上限。"""
+
+    allowed: tuple[str, ...]
+    ranges: dict[str, ZoneRange] | None = None
+    cap: float | None = None
+
+
+class EffectiveCandidates(BaseModel):
+    allowed: tuple[str, ...]
+    covered: dict[str, str]
+
+
+def effective_candidates(selection: CandidateSelection, targets: DepthTargets) -> EffectiveCandidates:
+    """畫面與開跑共用；設計檔保留原勾選，以便移除家族時回復固定款。"""
+    covered: dict[str, str] = {}
+    for family in targets.settings.family:
+        if family.id not in selection.allowed:
+            continue
+        given = (selection.ranges or {}).get(family.id)
+        bounds = narrowed_family(family, given) if given else family
+        cap = min(family.max_total_depth_m, selection.cap if selection.cap is not None else family.max_total_depth_m)
+        for member in family.presets:
+            material = targets.fixed.get(member)
+            if not isinstance(material, Assembly) or member == family.id:
+                continue
+            wool = sum(layer.thickness_m for layer in material.layers if layer.kind == "porous")
+            air = sum(layer.thickness_m for layer in material.layers if layer.kind == "air")
+            cavity = bounds.cavity_range_m if bounds.initial_cavity_m is not None else (0.0, 0.0)
+            if wool in bounds.thicknesses_m and cavity[0] <= air <= cavity[1] and wool + air <= cap + 1e-12:
+                covered[member] = family.id
+    excluded = set(covered)
+    if selection.cap is not None:
+        _, valid = zone_range_problems(selection.ranges, targets)
+        fits = target_fits(selection.allowed, selection.cap, targets, valid)
+        excluded.update(fit.target.removeprefix("fixed:") for fit in fits or () if not fit.usable)
+    return EffectiveCandidates(allowed=tuple(code for code in selection.allowed if code not in excluded), covered=covered)
 
 
 @dataclass(frozen=True)
@@ -317,12 +357,16 @@ def _depth_problems(material: ComparisonMaterial, mode: ZoneMode, cap: DepthCap 
     return []
 
 
+def _default_candidates(targets: DepthTargets) -> tuple[str, ...]:
+    return (*(family.id for family in targets.settings.family), NONE_TARGET)
+
+
 def zone_targets(allowed: Sequence[str] | None, targets: DepthTargets) -> tuple[str, ...] | None:
     """一區可選的目標（引擎的寫法：家族代號、``fixed:<代號>``、none）：沒寫清單是全部家族加不貼；清單有不認識的代號回 None
     （開跑那邊照講拒收，這裡不猜）。"""
     families = {family.id for family in targets.settings.family}
     if allowed is None:
-        return (*(family.id for family in targets.settings.family), NONE_TARGET)
+        return _default_candidates(targets)
     found: list[str] = []
     for item in allowed:
         if item == NONE_TARGET or item in families:
@@ -470,7 +514,7 @@ def _design_of(value: object, scheme_id: str) -> tuple[DesignSettings | None, li
 
 def zone_limits(document: Mapping[str, object], design_value: object = None,
                 range_check: RangeCheck | None = None,
-                depth_targets: Callable[[], DepthTargets] | None = None) -> dict[str, object]:
+                depth_targets: Callable[[], DepthTargets] | None = None, *, include_candidate_rows: bool = False) -> dict[str, object]:
     """一份方案（草稿也可以）逐面逐區的限制檢查；回 ``zones``（牆 → 區 → 幾條）、``walls``（整面的）、``caps``（每區生效上限；
     搜尋區另有 ``targets``：每一組的生效上限與哪一條擋住）、``red``（擋下的條數）與 ``refusals``（擋下的每一條，給開跑與
     「拿去搜尋」照講）。``depth_targets`` 用來查裸構造的身分（即使沒有深度上限），也查固定區和搜尋區的深度、可調範圍。
@@ -514,6 +558,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             construction = catalog.construction(room, wall, key, entry, current, setting, lines)
             lines.extend(_depth_problems(current, mode, cap, catalog.required, construction=construction))
             if mode == "search":
+                catalog.record_candidates(wall, key, setting, cap, include_candidate_rows)
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
                 lines.extend(problems)
                 if lines_by_group:
@@ -528,7 +573,8 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
     refusals += [f"{names.get(wall, wall)}：{problem.text}" for wall, lines in walls.items() for problem in lines if problem.level == "red"]
     refusals += [f"{zone_words(wall, key, names)}：{problem.text}" for wall, items in zones.items() for key, lines in items.items()
                  for problem in lines if problem.level == "red"]
-    return {**({"picked_constructions": catalog.picked} if catalog.picked else {}), "status": "checked", "design": [problem.model_dump() for problem in top],
+    return {**({"candidates": catalog.candidates} if catalog.candidates else {}),
+            **({"picked_constructions": catalog.picked} if catalog.picked else {}), "status": "checked", "design": [problem.model_dump() for problem in top],
             "zones": {wall: {key: [problem.model_dump() for problem in lines] for key, lines in items.items()}
                       for wall, items in zones.items() if items},
             "walls": {wall: [problem.model_dump() for problem in lines] for wall, lines in walls.items() if lines},
@@ -543,7 +589,17 @@ class _ZoneCatalog:
     original_id: str | None
     problems: list[Problem]
     picked: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    candidates: dict[str, dict[str, dict[str, object]]] = field(default_factory=dict)
     load_error: Problem | None = None
+
+    def record_candidates(self, wall: str, key: str, setting: ZoneDesign | None, cap: DepthCap | None, include_candidate_rows: bool) -> None:
+        if setting is None or (setting.allowed is None and not include_candidate_rows) or self.targets is None:
+            return
+        allowed = setting.allowed if setting.allowed is not None else _default_candidates(self.targets)
+        selection = CandidateSelection(allowed=allowed, ranges=setting.ranges, cap=cap.value_m if cap else None)
+        effective = effective_candidates(selection, self.targets)
+        if include_candidate_rows or effective.allowed != allowed:
+            self.candidates.setdefault(wall, {})[key] = effective.model_dump()
 
     @cached_property
     def targets(self) -> DepthTargets | None:
@@ -583,7 +639,10 @@ class _ZoneCatalog:
         targets = self.required() if recorded else self.targets
         if targets is None and recorded is None:
             return None
-        pick = construction_pick(material, self.standalone, recorded, lambda: self.original,
+        standalone = self.standalone
+        if targets and recorded in targets.legacy_replacements and recorded is not None:
+            standalone = {**standalone, recorded: targets.fixed[recorded]}
+        pick = construction_pick(material, standalone, recorded, lambda: self.original,
                                  room, wall, key, _zone_bounds(room, wall, entry))
         if pick is None:
             return None
@@ -635,10 +694,11 @@ def zone_limit_routes(range_check: RangeCheck | None,
                       symmetry: Callable[[object, object], dict[str, object]] | None = None) -> list[Route]:
     """``POST /api/zone-limits``：收 ``{"scheme": 草稿, "design": 設計設定或 null}``，內容有問題一律回 200 照講。
     ``symmetry`` 給了就順便回左右對稱的配對（#1206，鍵 ``symmetry``；算法在 ``zone_symmetry``，網頁只照著畫）：
-    分區頁每次改動後本來就會問這一支，配對跟著同一份草稿、同一個世代號回來。"""
+    分區頁每次改動後本來就會問這一支，配對跟著同一份草稿、同一個世代號回來。
+    分區畫面傳 include_candidate_rows 取得每個搜尋區算好的候選；其他呼叫沿用只傳清單有變的區。"""
 
-    def judged(scheme: dict[str, object], design: object) -> dict[str, object]:
-        result = zone_limits(scheme, design, range_check, depth_targets)
+    def judged(scheme: dict[str, object], design: object, include_candidate_rows: bool) -> dict[str, object]:
+        result = zone_limits(scheme, design, range_check, depth_targets, include_candidate_rows=include_candidate_rows)
         refused = _draft_reference_only(scheme, design, depth_targets)
         if refused:
             result["reference_only"] = refused
@@ -653,8 +713,18 @@ def zone_limit_routes(range_check: RangeCheck | None,
             return JSONResponse({"error": "限制檢查的請求不是 JSON"}, status_code=400)
         if not isinstance(body, dict) or not isinstance(body.get("scheme"), dict):
             return JSONResponse({"error": "限制檢查的請求要有 scheme（整份方案）"}, status_code=400)
-        return JSONResponse(await run_in_threadpool(judged, body["scheme"], body.get("design")))
+        return JSONResponse(await run_in_threadpool(judged, body["scheme"], body.get("design"), body.get("include_candidate_rows") is True))
 
-    return [Route("/api/zone-limits", limits, methods=["POST"])]
+    async def candidates(request: Request) -> Response:
+        if depth_targets is None:
+            return JSONResponse({"error": "還沒有材料庫，無法核對候選"}, status_code=400)
+        try:
+            selections = TypeAdapter(list[CandidateSelection]).validate_python(await request.json())
+            targets = await run_in_threadpool(depth_targets)
+            return JSONResponse([effective_candidates(selection, targets).model_dump() for selection in selections])
+        except (ValueError, OSError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    return [Route("/api/zone-limits", limits, methods=["POST"]), Route("/api/zone-candidates", candidates, methods=["POST"])]
 
 

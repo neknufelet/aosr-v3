@@ -148,8 +148,6 @@ body.zone-page-open{background:#f2f4f1}
 /* 「最深」打的字讀不出來、小框重畫後格子放不回去時格子旁那一句（#1265 單元 3 之二第二趟追加設計洞）：同「不是這一面用的」那一句的字級與顏色。 */
 #zone-page .zv-depth-lost{display:block;font-size:13px;color:#a33;line-height:1.4}
 /* 「顯示全部材料」開關與「不是這一面用的」那一句（#1176 舊做法表那一個搬到小框，#1265；舊表後來拆了）。 */
-#zone-page .zv-show-all{display:flex;gap:6px;align-items:flex-start;margin-top:6px;font-size:13px;color:var(--soft);line-height:1.4}
-#zone-page .zv-show-all input{margin-top:2px}
 #zone-page .zv-away{margin:6px 0 0;font-size:13px;color:#a33;line-height:1.4}
 #zone-page .zv-same{display:inline-block;margin-left:8px;padding:0 7px;border:1.2px solid var(--ink);border-radius:9px;font-size:12.5px;line-height:18px;
   vertical-align:2px;background:#fff;color:var(--ink);white-space:nowrap}
@@ -392,7 +390,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
   text-align:left;padding:7px 5px;background:#fff;color:var(--ink);border:0;border-bottom:1px solid #dce3e3;border-radius:0;font:inherit;font-size:14px}
 #zone-page .zv-material[hidden],#zone-page .zv-candidate[hidden]{display:none}
 #zone-page .zv-material:hover,#zone-page .zv-material:focus-visible{background:#eef5f7}
-#zone-page .zv-material[aria-checked=true],#zone-page .zv-material[aria-checked=mixed]{background:#fff8e6}
+#zone-page .zv-material[role=radio][aria-checked=true]{background:#fff8e6}
 #zone-page .zv-mark{width:16px;height:16px;border:1.5px solid var(--ink);border-radius:3px;display:grid;place-content:center}
 #zone-page .zv-material[role=radio] .zv-mark{border-radius:50%}
 #zone-page .zv-material[aria-checked=true] .zv-mark{background:var(--ink);color:white}
@@ -405,7 +403,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-material-text small{display:block;font-size:13px;color:#495c66}
 #zone-page .zv-material-text .zv-kind{margin-left:5px}
 #zone-page svg.zv-spark{width:72px;height:26px;border:0;background:none;color:#15617b}
-#zone-page .zv-form details.zv-row-options{border:0;margin:0;padding:0 5px 2px 63px;background:#fff8e6}
+#zone-page .zv-form details.zv-row-options{border:0;margin:0;padding:0 5px 2px 63px;background:transparent}
 #zone-page .zv-form .zv-row-options summary{font-size:13px;font-weight:400}
 #zone-page .zv-build{width:100%;margin:10px 0;padding:9px 12px;border:1px dashed #15617b;border-radius:8px;color:#155972;background:#f2f8fa;text-align:left;font:inherit}
 #zone-builder{position:fixed;inset:56px 0 0 auto;margin:0;width:min(700px,100vw);height:calc(100dvh - 56px);
@@ -417,14 +415,12 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-builder iframe{width:100%;flex:1;min-height:0;border:0}
 #zone-page .zv-main{grid-template-columns:minmax(0,1fr) clamp(350px,31vw,440px)}
 #zone-page .zv-mapwrap{max-width:100%}
-#zone-page .zv-row-options summary{width:fit-content;margin-left:auto}
+/* 明細滑入就展開，開關要一直留在原來的點擊位置。 */
+#zone-page .zv-row-options > summary{position:absolute;right:3px;top:8px;width:fit-content}
 #zone-page .zv-material .zv-covered-why{grid-column:3/-1;font-size:13px}
-#zone-page .zv-candidate:has(.zv-row-options:not([open])){padding-right:38px;background:#fff8e6}
-#zone-page .zv-form details.zv-row-options:not([open]){position:absolute;right:3px;top:8px;padding:0}
+#zone-page .zv-form details.zv-row-options:not([open]){display:contents}
 #zone-page .zv-slab.porous{background:repeating-linear-gradient(35deg,transparent 0 4px,#c5a75a 4px 5px,transparent 5px 9px),#f6e7b0}
 #zone-page .zv-edit > .zv-build{flex:none;width:calc(100% - 32px);margin:4px 16px 8px}
-
-#zone-page .zv-candidate:not(:hover):not(:focus-within) .zv-row-options:not([open]) summary{clip-path:inset(50%);pointer-events:none}
 
 #zone-page #zone-groups {font-size:14px;color:var(--ink)}
 #zone-page #zone-groups > summary {cursor:pointer}
@@ -433,8 +429,8 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-group-choices small {display:block;font-size:13px}
 #zone-page .zv-owned {font-size:13px}
 
-#zone-page .zv-material:disabled {opacity:1;background:#f2f4f4;color:#46545b}
-#zone-page .zv-material[data-covered]{cursor:default}
+#zone-page .zv-material:disabled {opacity:1;background:white;color:#46545b}
+
 #zone-page #zone-groups .zv-num {font-size:13px}
 
 /* 分區頁借用輸入頁的立面圖；左欄可捲，完成鈕在同一欄頂端。 */
@@ -445,8 +441,10 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page #elevation-original-line,#zone-page #elevation-depth-line{display:none}
 #zone-page .walls-row{position:sticky;top:0;z-index:2;align-items:center;gap:10px;padding:2px 0 8px;background:var(--paper)}
 #zone-page .zv-cut-title{font-size:17px}
-#zone-page #elevation-symmetry{margin:0}
-#zone-page #elevation-axis-words{display:none}
+#zone-page #elevation-symmetry{margin:0;display:grid;column-gap:.6rem;align-items:center}
+#zone-page #elevation-centre-axis{grid-column:2;grid-row:1}
+#zone-page #elevation-axis-words{grid-column:1/-1;grid-row:2}
+#zone-page #elevation-symmetry:has(#elevation-centre-axis[hidden]) #elevation-axis-words{display:none}
 #zone-page #elevation-clear,#zone-page .zv-cut-done{padding:5px 12px;border-radius:7px;font-size:14px}
 #zone-page #elevation-clear{background:white;color:var(--ink);border:1px solid #97aeb8;text-decoration:none}
 #zone-page .zv-cut-done{margin-left:auto;background:var(--ink);color:white}
@@ -456,3 +454,46 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page #elevation-banner{position:relative}
 #zone-page #elevation-note{margin:4px 0}
 #zone-page #elevation-note[data-repeated]{display:none}
+
+#zone-page details.zv-material-family{margin:0;padding:0;border:0;border-top:1px solid var(--line)}
+#zone-page .zv-material-family > summary{padding:7px 2px;color:var(--ink);font-size:14px;font-weight:600}
+#zone-page .zv-family-count{margin-left:8px;color:var(--soft);font-weight:400}
+
+/* 同一列的厚度與曲線對齊；勾選只改左線與名稱字重。 */
+#zone-page :is(.zv-candidate,.zv-available){position:relative;padding-right:0;background:white}
+#zone-page .zv-material[role=checkbox]{grid-template-columns:16px minmax(0,1fr) auto 48px;min-height:40px;
+  padding:6px 41px 6px 6px;gap:6px;border-left:3px solid transparent}
+#zone-page .zv-material[role=checkbox]:is([aria-checked=true],[aria-checked=mixed]){border-left-color:#15617b}
+#zone-page .zv-material[role=checkbox] strong{font-weight:400}
+#zone-page .zv-material[role=checkbox]:is([aria-checked=true],[aria-checked=mixed]) strong{font-weight:700}
+#zone-page .zv-material[role=checkbox] .zv-spark{width:48px}
+#zone-page .zv-material[role=checkbox] .zv-description{max-width:8em;font-variant-numeric:tabular-nums}
+#zone-page .zv-filter-tools{display:flex;gap:8px;margin:6px 0}
+#zone-page .zv-filter-tools input{flex:1;min-width:0}
+#zone-page .zv-only-candidates{flex:none;background:white;color:#244f5c;border:1px solid #849da5;border-radius:6px;padding:4px 9px;font:inherit;font-size:14px}
+#zone-page .zv-only-candidates[aria-pressed=true]{color:white;background:#195b70}
+#zone-page .zv-parameter,#zone-page .zv-member,#zone-page .zv-depth-axis{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+#zone-page .zv-depth-axis{align-items:center;color:#495c66;font-size:13px;margin:4px 0}
+#zone-page .zv-zone-caps{flex-direction:column;align-items:flex-start;gap:2px}
+#zone-page .zv-depth-track{position:relative;flex:1;height:3px;background:#cbd8dc}
+#zone-page .zv-depth-track i{position:absolute;min-width:2px;height:5px;top:-1px;background:#15617b}
+#zone-page .zv-form .zv-members{margin:0;padding:0 8px 3px 30px;border:0}
+#zone-page .zv-members summary{width:fit-content;color:#155972;font-size:13px}
+#zone-page .zv-member{padding:4px 0;border-top:1px solid #e2e8e9;font-size:13px}
+#zone-page .zv-member-depth{flex:none}
+#zone-page .zv-form .zv-row-options{margin:0;padding:3px 8px 5px 30px;background:white}
+#zone-page .zv-form .zv-row-options summary{color:#345863;font-size:13px}
+#zone-page .zv-available[hidden]{display:none}
+@media (hover:hover) and (pointer:fine){
+  #zone-page :is(.zv-candidate,.zv-available):not(:hover):not(:focus-within) .zv-row-options:not([open]) summary{clip-path:inset(50%);pointer-events:none}
+}
+/* 家族的核取方塊與「含幾款」各佔一格，滑鼠及鍵盤都能分別操作。 */
+#zone-page .zv-candidate:has(> .zv-members){display:grid;grid-template-columns:minmax(0,1fr) auto auto 48px 36px;align-items:center;column-gap:5px;border-bottom:1px solid #dce3e3}
+#zone-page .zv-candidate[hidden]{display:none}
+#zone-page .zv-candidate:has(> .zv-members) > .zv-material{grid-column:1;grid-row:1;grid-template-columns:16px minmax(0,1fr);padding-right:0;border-bottom:0}
+#zone-page .zv-candidate > details.zv-members{display:contents}
+#zone-page .zv-members > summary{grid-column:2;grid-row:1;white-space:nowrap}
+#zone-page .zv-members::details-content{grid-column:1/-1;padding-inline:30px 8px}
+#zone-page .zv-candidate > .zv-description{grid-column:3;grid-row:1}
+#zone-page .zv-candidate > .zv-spark{grid-column:4;grid-row:1;width:48px}
+#zone-page .zv-candidate > details.zv-row-options{grid-column:1/-1}

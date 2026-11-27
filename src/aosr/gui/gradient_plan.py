@@ -57,11 +57,13 @@ from aosr.config.material_gradient import (
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gradient.depth_fit import ZoneRange, narrowed_family, ranged_misfits
+from aosr.gui.material_surfaces import legacy_replacement
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_construction import OriginalReader
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
-    DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
+    CandidateSelection, DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, effective_candidates, no_group_words, reference_only_refusals, saved_refusals, target_fits,
     ranged_misfit_words, target_line, zone_limits, zone_words,
 )
 from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Frame, SettingsCheck, Symmetry, Unchecked, drawn_frames, drawn_partners, pair_zones, symmetry_on
@@ -203,13 +205,13 @@ def _start_preset(wall: str, zone: str, targets: tuple[str, ...] | None, family:
                       "或一種可調材料（例如 48K 玻璃棉），或把做法改成「指定貼一種」")
 
 
-def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
-             fixed_ids: frozenset[str]) -> dict[tuple[str, str], tuple[str, ...]]:
+def _allowed(design: DesignSettings | None, targets: DepthTargets, depths: Mapping[str, float]) -> dict[tuple[str, str], tuple[str, ...]]:
     found = {}
     for wall, zones in (design.zones if design is not None else {}).items():
         for zone, item in zones.items():
             if item.allowed is not None:
-                found[(wall, zone)] = _targets(wall, zone, item.allowed, settings, fixed_ids)
+                selection = CandidateSelection(allowed=item.allowed, ranges=item.ranges, cap=depths.get(surface_of(wall, zone)))
+                found[(wall, zone)] = effective_candidates(selection, targets).allowed
     return found
 
 
@@ -260,7 +262,8 @@ def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[
     return DepthTargets(settings, {entry.id: material for entry in entries if (material := fixed_surface(entry)) is not None},
                         {entry.id: entry.label for entry in entries},
                         frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall"),
-                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"), read_original)
+                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"), read_original,
+                        frozenset(entry.id for entry in entries if legacy_replacement(entry)))
 
 
 _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設", "request": "這一跑另填"}
@@ -282,7 +285,7 @@ def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], 
             continue
         item = design.zones.get(wall, {}).get(zone) if design is not None else None
         given = None if item is None else item.ranges
-        fits = target_fits(None if item is None else item.allowed, depths[surface], targets, given)
+        fits = target_fits(item.allowed if item else None, depths[surface], targets, given)
         if not fits:
             continue
         source = sources.get(surface, "request")
@@ -376,9 +379,9 @@ def draft_symmetry(document: object, design_value: object,
     （:func:`plan_search` 的 ``pair=False``）、搜尋設定與 :class:`TieInputs`，只在有位置對上的兩區時才叫；
     它說開不了（:class:`PlanRefused`）時那幾對照那個原因算沒配成。"""
     try:
-        scheme = Scheme.model_validate(document)
-    except ValidationError:
-        return {"available": False, "partners": {}, "message": "方案還有沒填好的地方，先算不了哪幾區成對"}
+        scheme = checked_scheme(document)
+    except SchemeProblemsError as exc:
+        return {"available": False, "partners": {}, "message": exc.first_fix()}
     try:
         design = None if design_value is None else DesignSettings.model_validate(design_value)
     except ValidationError:
@@ -445,15 +448,12 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
         family = settings.family_by_id(request.family) if request.family is not None else settings.family[0]
     except ValueError as error:
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
-    allowed = _allowed(design, settings, fixed_ids)
     ranges = _ranges(design)
     depths, sources = _depths(request, modes, design)
+    choices = _allowed(design, targets_for_depth, depths)
+    allowed = {pair: _targets(*pair, ids, settings, fixed_ids) for pair, ids in choices.items()}
     lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names)
     unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}
-    for pair, chosen in list(allowed.items()):
-        dropped = unusable.get(surface_of(*pair), frozenset())
-        if dropped:
-            allowed[pair] = tuple(target for target in chosen if target not in dropped)
     presets = tuple(_start_preset(*pair, allowed.get(pair), family, settings, unusable.get(surface_of(*pair), frozenset()), names)
                     if mode == "search" else None for pair, mode in zip(pairs, per_surface, strict=True))
     return SearchPlan(

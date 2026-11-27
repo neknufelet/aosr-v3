@@ -7,6 +7,7 @@
 方案資料都是考卷自己編的 109 號房（_surface_zone_cases）。"""
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from playwright.sync_api import Browser, Error, Page, Route, expect
@@ -22,6 +23,15 @@ LY, LZ = ROOM_109["Ly"], ROOM_109["Lz"]
 
 def _settled(page: Page) -> None:
     page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+
+
+def _until_held(page: Page, held: list[Route]) -> None:
+    """等清掉之後那一次圖面檢查真的被攔下來：route 的回呼要等 Playwright 下一次收訊息才跑，按完、解鎖馬上看，
+    雲端忙的時候 held 可能還是空的（11-27 本機讓限制檢查晚一點回來，80 次紅 3 次）。最多等 10 秒。"""
+    deadline = time.monotonic() + 10
+    while not held and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    assert held, "圖面檢查應該還在路上"
 
 
 def _release(held: list[Route]) -> None:
@@ -89,7 +99,7 @@ def test_an_edit_made_while_the_plan_check_is_on_its_way_takes_the_undo_away(tmp
         _settled(page)
         page.route("**/api/plan", lambda route: held.append(route))
         _cut_by(page, "#elevation-clear")
-        assert held, "圖面檢查應該還在路上"
+        _until_held(page, held)
         page.locator("#depth-room").fill("20")
         page.locator("#depth-room").blur()
         _release(held)
@@ -114,7 +124,7 @@ def test_switching_walls_while_the_plan_check_is_on_its_way_keeps_the_slot_of_th
         _settled(page)
         page.route("**/api/plan", lambda route: held.append(route))
         _cut_by(page, "#elevation-clear")
-        assert held, "圖面檢查應該還在路上"
+        _until_held(page, held)
         page.locator("#elevation-wall-xL").click()
         expect(page.locator("#elevation-wall-xL")).to_have_attribute("aria-pressed", "true")
         _release(held)

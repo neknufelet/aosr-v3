@@ -81,7 +81,7 @@ async function checkZoneLimits() {
   try {
     const document = wallDocument();
     const {response, data} = await reply(fetch("/api/zone-limits", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({scheme: document, design: zoneDesign})}));
+      body: JSON.stringify({scheme: document, design: zoneDesign, include_candidate_rows: true})}));
     result = response.ok ? data : {status: "error", message: data.error || "限制檢查失敗", red: 0, zones: {}, walls: {}, caps: {}, refusals: []};
   } catch (error) {
     result = {status: "error", message: `限制檢查沒有做成：${errorText(error)}`, red: 0, zones: {}, walls: {}, caps: {}, refusals: []};

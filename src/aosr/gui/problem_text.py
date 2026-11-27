@@ -241,6 +241,15 @@ class SchemeProblemsError(SchemeValidationError):
         super().__init__(problems)
         self.document = document
 
+    def first_fix(self) -> str:
+        """簡短提示只點第一格；訊息列合在同一行的不同欄位也各算一處。"""
+        rows = plain_problems(self.problems, self.document)
+        first = rows[0]
+        fields = cast(list[str], first["fields"])
+        field = fields[0] if fields else WHOLE_SCHEME_LABEL
+        count = sum(max(1, len(cast(list[str], row["fields"]))) for row in rows)
+        return f"先改{field}：{first['message']}" + (f"等 {count} 處" if count > 1 else "")
+
 
 def checked_scheme(document: object) -> Scheme:
     """跟檢查同一支驗方案；不過就丟帶著原文件的錯，讓回應能寫出表單上的中文名。"""
