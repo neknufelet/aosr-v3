@@ -722,7 +722,8 @@ async function applyMethod(items, method, written = () => {}) {
   const behind = item => method.mode === "search" ? (method.backing !== undefined ? method.backing : zoneSetting(item.wall, item.key).backing_entry ?? "") : "";
   const changes = items.filter(() => !preserve && (method.mode !== "fixed" || method.materialId)).map(item => ({...(method.mode === "fixed"
     ? {wall: item.wall, zone: item.key, choice: "fixed", material_id: method.materialId}
-    : behind(item) ? {wall: item.wall, zone: item.key, choice: "backing", material_id: behind(item)} : {wall: item.wall, zone: item.key, choice: "original"}),
+    : behind(item) ? {wall: item.wall, zone: item.key, choice: "backing", material_id: behind(item),
+      ...(behind(item) === zoneSetting(item.wall, item.key).backing_entry ? {keep_backing: true} : {})} : {wall: item.wall, zone: item.key, choice: "original"}),
   ...(zoneSetting(item.wall, item.key).backing_wall ? {backing_wall: zoneSetting(item.wall, item.key).backing_wall} : {})}));
   let results = [];
   if (changes.length) {
@@ -961,6 +962,26 @@ function plannedRanges(items, lists, edits) {
 // 改了範圍才走這一步：把套用後的那一份（清單、最深、範圍都照小框，只動選中的區）交伺服器的限制檢查判一次；選中的區有範圍的紅
 // （超出材料頁、收窄後放不下）就不套用，照伺服器的原句寫在小框、套用鈕停用（改了任何一格才再試）。判法只在伺服器一份。
 // 等回覆時整頁鎖住（同 applyMethod 換材料那一步）。回 true＝可以套用。
+// 套用前範圍檢查要的方案與設計設定照草稿的背後（#1330 審查第 7 條）：換回原牆的那幾區放回記的原牆、拿掉兩格；
+// 換成別一筆的放那一筆（原牆照記的，沒記過就是現在的材料）。沒動背後的不碰。
+function plannedBacking(items, method, design) {
+  const document_ = wallDocument();
+  if (method.mode !== "search" || method.backing === undefined) return document_;
+  for (const item of items) {
+    const saved = zoneSetting(item.wall, item.key), setting = design.zones[item.wall][item.key];
+    if (method.backing === (saved.backing_entry ?? "")) continue;
+    const zone = document_.scene.surface_zones_by_wall?.[item.wall]?.find(part => zoneKey(part) === item.key);
+    if (!zone) continue;
+    if (!method.backing) {
+      if (saved.backing_wall) zone.material = saved.backing_wall;
+      delete setting.backing_entry; delete setting.backing_wall;
+    } else {
+      setting.backing_entry = method.backing; setting.backing_wall = saved.backing_wall ?? zone.material;
+      zone.material = fixedSurface(libraryEntry(method.backing) ?? {}) ?? zone.material;
+    }
+  }
+  return document_;
+}
 async function rangesPass(items, method) {
   const generation = zoneDesignGeneration;
   const design = structuredClone(zoneDesign ?? freshZoneDesign());
@@ -969,12 +990,13 @@ async function rangesPass(items, method) {
     design.zones[item.wall] ??= {};
     design.zones[item.wall][item.key] = settledSetting(settingAfter(item, method), zoneSetting(item.wall, item.key).allowed);
   }
+  const scheme_ = plannedBacking(items, method, design);
   inputBusy = true;
   document.querySelector("main").inert = true; $("zone-page").inert = true;
   let data;
   try {
     ({data} = await reply(fetch("/api/zone-limits", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({scheme: wallDocument(), design})})));
+      body: JSON.stringify({scheme: scheme_, design})})));
   } catch (error) {
     if (generation === zoneDesignGeneration) zoneNote(`範圍沒檢查成，這次沒有套用：${errorText(error)}`, "notice");
     return false;
@@ -1008,8 +1030,10 @@ function draftProblem(items) {
   }
   if (Number.isNaN(draftDepth(items))) return depthRefusedWords("「最深」", `＝${blankDepthWords(items)}`);
   if (draft.mode === "search") {
-    const shallow = items.find(item => backingDepth(item) > totalDepth(item, draftDepth(items)) + 1e-9);
-    if (shallow) return `${items.length > 1 ? zoneWhereText(shallow) + "：" : ""}最深比背後的${backingName(libraryEntry(zoneBacking(shallow)))}還淺，放不下；把最深加大，或背後換回${originalFace(shallow.wall)}`;
+    const shallow = items.find(item => backingDepth(item) > 0 && Math.round((totalDepth(item, draftDepth(items)) - backingDepth(item)) * 1e9) <= 0);
+    if (shallow) return `${items.length > 1 ? zoneWhereText(shallow) + "：" : ""}最深沒有比背後的${backingName(libraryEntry(zoneBacking(shallow)) ?? {label: "那一筆"})}深，前面放不了東西；把最深加大，或背後換回${originalFace(shallow.wall)}`;
+    const fixed = items.find(item => zoneBacking(item) && panelTicks(items)?.lists?.[items.indexOf(item)]?.some(id => id !== ZONE_NONE && libraryEntry(id)?.kind !== "optimizable"));
+    if (fixed) return `${items.length > 1 ? zoneWhereText(fixed) + "：" : ""}背後換過的區只能讓程式調可調材料或不貼；固定成品會整塊換掉背後那一筆，先取消勾選`;
   }
   return draft.mode === "search" ? draft.rangeRefused : "";
 }
@@ -1120,7 +1144,7 @@ function materialShow(entry, wall) {
 }
 function caseDepth(item, edited) {
   const total = totalDepth(item, edited);
-  return Number.isFinite(total) ? Math.max(total - backingDepth(item), 0) : total;
+  return Number.isFinite(total) ? Math.max(Math.round((total - backingDepth(item)) * 1e9) / 1e9, 0) : total;  // 十進位相減，同伺服器 minus_backing
 }
 // 「最深」三層取最小（從原牆往房間量，含背後換上去的那一筆）；caseDepth 是扣掉背後之後前面能用的。
 function totalDepth(item, edited) {
@@ -1139,9 +1163,14 @@ function panelBacking(items) {
   const ids = new Set(items.map(zoneBacking));
   return ids.size === 1 ? [...ids][0] : undefined;
 }
+// 背後那一筆的總深（同伺服器 fixed_material_depth_m）：沒重選照方案那一區現在的材料量（材料庫那一筆存檔後改過也照存的），
+// 重選了照材料庫那一筆；實測表照它的底構造量。
 function backingDepth(item) {
-  const entry = zoneBacking(item) ? libraryEntry(zoneBacking(item)) : null;
-  return entry ? fixedLayers(entry).reduce((sum, layer) => sum + (typeof layer.thickness_m === "number" ? layer.thickness_m : 0), 0) : 0;
+  const id = zoneBacking(item);
+  if (!id) return 0;
+  const material = id === zoneSetting(item.wall, item.key).backing_entry ? item.zone.material : fixedSurface(libraryEntry(id) ?? {});
+  const layers = material?.kind === "assembly" ? material.layers : material?.base_assembly?.layers ?? [];
+  return layers.reduce((sum, layer) => sum + (typeof layer.thickness_m === "number" ? layer.thickness_m : 0), 0);
 }
 // 背後那一筆在標籤、剖面條裡的短名：名字第一段（「VPR 鋼板 1 mm＋…」叫 VPR）；完整名字在下拉裡。
 function backingName(entry) { return entry.label.split(/[ ＋（]/)[0] || entry.label; }
@@ -1190,7 +1219,7 @@ function previewCandidates(items, raw) {
     cap: caseDepth(item, edited)
   }));
   // 已存的清單與範圍沒有動，直接讀這一版分區檢查已經算好的覆蓋結果。
-  if (zoneLimitsFresh() && zoneLimits.status === "checked" && edited === undefined &&
+  if (zoneLimitsFresh() && zoneLimits.status === "checked" && edited === undefined && draft.backing === undefined &&
       !Object.keys(draft.ranges).length && !Object.keys(draft.ticks).length &&
       items.every((item, i) => zoneLimits.candidates?.[item.wall]?.[item.key] &&
         item.mode === "search" && item.allowed && sameList(item.allowed, raw.lists[i]))) {

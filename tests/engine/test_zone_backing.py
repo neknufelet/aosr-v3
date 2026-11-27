@@ -147,6 +147,17 @@ def test_fixed_after_a_backing_mounts_on_the_remembered_wall(backed: Backed) -> 
     assert fixed["wall"] == wall
 
 
+def test_unchanged_backing_keeps_the_saved_material_even_if_the_library_changed(backed: Backed) -> None:
+    gui, document, got, wall = backed
+    saved = deepcopy(_vpr())
+    cast(list[Doc], saved["layers"])[1]["thickness_m"] = 0.12  # 存檔後材料庫同代號改過：方案裡那一份跟材料庫的不一樣
+    _front(document)["material"] = saved
+    kept = gui.change(document, choice="backing", material_id=VPR, backing_wall=got["backing_wall"], keep_backing=True)
+    assert kept["material"] == saved and kept["backing_wall"] == wall
+    renewed = gui.change(document, choice="backing", material_id=VPR, backing_wall=got["backing_wall"])
+    assert renewed["material"] == _vpr()
+
+
 def test_a_wall_mounted_construction_cannot_be_a_backing(tmp_path: Path) -> None:
     gui = _Gui(tmp_path)
     entry = {"kind": "construction", "id": "lab_mounted", "label": "自編貼牆鋼板", "provenance": "literature", "source": "本次自編",
@@ -179,8 +190,50 @@ def test_depth_shallower_than_the_backing_is_refused_with_one_sentence(backed: B
     gui, _, got, _ = backed
     gui.design(0.08, got)
     error = cast(str, gui.call("POST", "/api/gradient/schemes/room/plan", {}, 400)["error"])
-    assert "比背後的「VPR" in error and "放不下" in error
+    assert "沒有比背後的「VPR" in error and "前面放不了東西" in error
     assert "沒有一種放得進深度上限" not in error
+
+
+def test_depth_equal_to_the_backing_is_refused_not_sent_as_a_zero_cap(backed: Backed) -> None:
+    gui, _, got, _ = backed
+    gui.design(0.1, got)
+    error = cast(str, gui.call("POST", "/api/gradient/schemes/room/plan", {}, 400)["error"])
+    assert "沒有比背後的「VPR" in error
+
+
+def test_a_front_layer_that_fits_exactly_is_kept(backed: Backed) -> None:
+    gui, _, got, _ = backed
+    gui.design(0.15, got)  # 0.15－0.1 照十進位是 0.05，剛好放得下 5 公分的 48K 玻璃棉
+    plan = SearchPlan.model_validate(gui.call("POST", "/api/gradient/schemes/room/plan", {})["plan"])
+    assert plan.max_depths["x0"] == 0.05
+    assert WOOL in plan.allowed["x0"]
+
+
+def test_this_run_depth_shallower_than_the_backing_is_refused(backed: Backed) -> None:
+    gui, _, got, _ = backed
+    gui.design(0.25, got)
+    body = {"max_depths": {"x0": {"whole_wall": 0.08}}}
+    error = cast(str, gui.call("POST", "/api/gradient/schemes/room/plan", body, 400)["error"])
+    assert "這一跑另填的最深 0.08 公尺沒有比背後那一筆 0.1 公尺深" in error
+    body = {"max_depths": {"x0": {"whole_wall": 0.22}}}
+    plan = SearchPlan.model_validate(gui.call("POST", "/api/gradient/schemes/room/plan", body)["plan"])
+    assert plan.max_depths["x0"] == 0.12
+
+
+def test_rigid_mount_with_a_backing_is_refused(backed: Backed) -> None:
+    gui, _, got, _ = backed
+    gui.design(0.25, got)
+    error = cast(str, gui.call("POST", "/api/gradient/schemes/room/plan", {"mount": "rigid"}, 400)["error"])
+    assert "裝法請選「貼在原牆上」" in error
+
+
+def test_fixed_products_are_not_allowed_in_front_of_a_backing(backed: Backed) -> None:
+    gui, document, got, _ = backed
+    item: Doc = {"mode": "search", "allowed": [WOOL, "none", "glass_wool_48k_50mm"], "max_depth_m": 0.25,
+                 "backing_entry": got["backing_entry"], "backing_wall": got["backing_wall"]}
+    gui.call("PUT", "/api/designs/room", {"scheme_id": "room", "zones": {"x0": {"whole_wall": item}}})
+    error = cast(str, gui.call("POST", "/api/gradient/schemes/room/plan", {}, 400)["error"])
+    assert "只能讓程式調可調材料或不貼" in error and "48K 玻璃棉 50 mm 貼牆" in error
 
 
 def test_no_backing_leaves_the_plan_cap_alone(tmp_path: Path) -> None:
@@ -205,6 +258,18 @@ def _side_design(left: str | None, right: str | None) -> DesignSettings:
         if entry is not None:
             cast(dict[str, dict[str, Doc]], design["zones"])[side]["s"].update(backing_entry=entry, backing_wall=wall)
     return DesignSettings.model_validate(design)
+
+
+def test_same_backing_code_with_different_saved_material_does_not_pair() -> None:
+    document = symmetry_document({"y0": SIDE, "yL": SIDE})
+    zones = cast(dict[str, list[Doc]], cast(Doc, document["scene"])["surface_zones_by_wall"])
+    for side, thickness in (("y0", 0.1), ("yL", 0.12)):
+        material = deepcopy(_vpr())
+        cast(list[Doc], material["layers"])[1]["thickness_m"] = thickness
+        next(zone for zone in zones[side] if zone.get("id") == "s")["material"] = material
+    found = pair_zones(Scheme.model_validate(document), _side_design(VPR, VPR), _agree)
+    assert not found.pairs
+    assert [item.reason for item in found.missed] == ["兩區背後不一樣"]
 
 
 @pytest.mark.parametrize(("left", "right", "paired"), [(VPR, None, False), (VPR, VPR, True), (None, None, True)])

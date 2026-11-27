@@ -72,6 +72,7 @@ function renderWallLine(wall) {
 // 判決在路上（zoneLimitsFresh 不成立）就不寫上一版的上限（#1265 單元 3 之二第二趟追加第 3 條）。
 function capWords(wall, key) {
   const cap = zoneLimitsFresh() ? zoneCap(wall, key) : null;
+  if (cap?.backing_m) return `前面最多 ${centimetres(cap.value_m)} 公分（${DEPTH_LEVEL_WORDS[cap.level]}扣掉背後 ${centimetres(cap.backing_m)} 公分）`;
   return cap ? `總厚度最多 ${centimetres(cap.value_m)} 公分（${DEPTH_LEVEL_WORDS[cap.level]}）` : "";
 }
 // 由程式最佳化的區沒有上限時那一句：只有最新那一次限制檢查回來、而且做成了，才講「沒給上限」；還在路上、沒做成照實講

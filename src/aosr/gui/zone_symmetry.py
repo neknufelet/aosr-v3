@@ -511,13 +511,18 @@ def _other_wall(frame: Frame, wall: str, zone: ZoneFrame) -> str:
     return "" if wall == zone.wall else f"{frame.names[wall]}的"
 
 
-def _backing_differs(design: DesignSettings | None, first: ZoneFrame, second: ZoneFrame) -> str | None:
+def _backing_differs(scheme: Scheme, design: DesignSettings | None, first: ZoneFrame, second: ZoneFrame) -> str | None:
     """兩區背後換的不一樣（#1330：一區換成材料庫那一筆、另一區照原牆，或換的不是同一筆）就不綁：
     引擎綁的是前面那幾層，背後不同時兩區聽起來本來就不一樣。"""
-    def backing(zone: ZoneFrame) -> str | None:
+    def backing(zone: ZoneFrame) -> tuple[str, object] | None:
         _, separator, key = zone.surface.partition("@")
-        item = design.zones.get(zone.wall, {}).get(key if separator else WHOLE_WALL_KEY) if design is not None else None
-        return None if item is None else item.backing_entry
+        key = key if separator else WHOLE_WALL_KEY
+        item = design.zones.get(zone.wall, {}).get(key) if design is not None else None
+        if item is None or item.backing_entry is None:
+            return None
+        found = next((part.material for part in (scheme.scene.surface_zones_by_wall or {}).get(zone.wall, ())
+                      if (part.id if isinstance(part, RectangleZone) else WHOLE_WALL_KEY) == key), None)
+        return item.backing_entry, found  # 同一個代號、方案裡存的那一份也要一樣（材料庫那一筆存檔後改過就不一樣）
     return "兩區背後不一樣" if backing(first) != backing(second) else None
 
 
@@ -552,7 +557,7 @@ def pair_zones(scheme: Scheme, design: DesignSettings | None, check: SettingsChe
                                  reason=SIDES_NOT_MIRRORED,
                                  detail=f"{{first}} 和 {{second}} 在兩面牆的同一個位置，但{SIDES_NOT_MIRRORED}，所以不配成一對。"))
             continue
-        refused = _backing_differs(design, zone, other) or check(zone.surface, other.surface)
+        refused = _backing_differs(scheme, design, zone, other) or check(zone.surface, other.surface)
         if refused is None:
             pairs.append(Pair(first=zone.surface, second=other.surface))
         elif isinstance(refused, Unchecked):

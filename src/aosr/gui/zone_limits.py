@@ -34,6 +34,8 @@
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import json
 import math
 import sys
@@ -187,6 +189,16 @@ def backing_depth_m(design: DesignSettings | None, wall: str, zone: str, materia
     return fixed_material_depth_m(material) or 0.0
 
 
+def minus_backing(total_m: float, backing_m: float) -> float:
+    """最深扣掉背後：照寫下來的十進位相減（0.15－0.1 是 0.05，不是 0.04999…），剛好放得下的前層才不會被浮點尾數擋掉。"""
+    return float(Decimal(repr(total_m)) - Decimal(repr(backing_m)))
+
+
+def backing_too_deep(total_m: float, backing_m: float) -> bool:
+    """背後那一筆把最深吃光（一樣深也算）：前面一層都放不了，引擎也不收零上限。"""
+    return minus_backing(total_m, backing_m) <= EDGE_MERGE_TOL
+
+
 def front_cap(design: DesignSettings | None, wall: str, zone: str, material: object) -> DepthCap | None:
     """搜尋那幾層實際能用的上限：「最深」從原牆往房間量、含背後換上去的那一筆，所以扣掉它（#1330）；
     最深比背後那一筆還淺時回 None：前面那幾層不必再判，那一區由 :func:`backing_problems` 那一條紅字擋、只講那一句。
@@ -195,23 +207,33 @@ def front_cap(design: DesignSettings | None, wall: str, zone: str, material: obj
     backing = backing_depth_m(design, wall, zone, material)
     if cap is None or backing is None or backing <= 0:
         return cap
-    if backing > cap.value_m + EDGE_MERGE_TOL:
+    if backing_too_deep(cap.value_m, backing):
         return None
-    return DepthCap(max(cap.value_m - backing, 0.0), cap.level, backing)
+    return DepthCap(minus_backing(cap.value_m, backing), cap.level, backing)
 
 
 def backing_problems(design: DesignSettings | None, wall: str, zone: str, material: object,
-                     label: Callable[[str], str]) -> list[Problem]:
-    """最深放不下背後那一筆就擋（#1330）：前面一層都還沒放，最深已經比背後那一筆淺。"""
-    cap = depth_cap(design, wall, zone)
+                     label: Callable[[str], str], families: Callable[[], frozenset[str] | None]) -> list[Problem]:
+    """背後換過的區（#1330）兩條擋：最深被背後那一筆吃光（一樣深也算，前面放不了東西）；准用清單裡有固定成品
+    （引擎選到固定成品會整塊換掉那一面，背後那一筆就不見了，只准可調材料與「不貼」）。``families`` 是可調材料的代號，讀不到回 None（不判第二條）。"""
+    item = design.zones.get(wall, {}).get(zone) if design is not None else None
     backing = backing_depth_m(design, wall, zone, material)
-    if cap is None or backing is None or backing <= cap.value_m + EDGE_MERGE_TOL:
+    if item is None or item.backing_entry is None or backing is None:
         return []
-    item = design.zones[wall][zone] if design is not None else None
-    name = label(item.backing_entry) if item is not None and item.backing_entry is not None else "背後那一筆"
-    return [Problem(code="depth_backing", level="red",
-                    text=f"最深 {cap.value_m:g} 公尺（{LEVEL_WORDS[cap.level]}的上限）比背後的「{name}」{backing:g} 公尺還淺，放不下；"
-                         "把最深加大，或背後換回原牆")]
+    name = label(item.backing_entry)
+    found: list[Problem] = []
+    cap = depth_cap(design, wall, zone)
+    if cap is not None and backing_too_deep(cap.value_m, backing):
+        found.append(Problem(code="depth_backing", level="red",
+                             text=f"最深 {cap.value_m:g} 公尺（{LEVEL_WORDS[cap.level]}的上限）沒有比背後的「{name}」{backing:g} 公尺深，"
+                                  "前面放不了東西；把最深加大，或背後換回原牆"))
+    known = families()
+    fixed = [code for code in item.allowed or () if known is not None and code != "none" and code not in known]
+    if fixed:
+        found.append(Problem(code="backing_fixed_candidate", level="red",
+                             text=f"背後換成「{name}」的區只能讓程式調可調材料或不貼；清單裡的固定成品（{'、'.join(label(code) for code in fixed)}）"
+                                  "會整塊換掉背後那一筆，先取消勾選"))
+    return found
 
 
 def added_depth(material: SurfaceMaterial) -> float | None:
@@ -608,7 +630,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             if mode == "search":
                 catalog.record_candidates(wall, key, setting, cap, include_candidate_rows)
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
-                lines.extend([*backing_problems(design, wall, key, material, catalog.label), *problems])
+                lines.extend([*backing_problems(design, wall, key, material, catalog.label, catalog.families), *problems])
                 if lines_by_group:
                     caps[wall][key]["targets"] = lines_by_group
             if range_check is not None and mode == "fixed" and material is not None:
@@ -657,6 +679,10 @@ class _ZoneCatalog:
             self.load_error = Problem(code="materials_unreadable", level="red",
                                       text=f"查不了由程式最佳化的區放不放得下清單裡的材料、也認不出指定貼一種的區是不是選了材料庫的材料：{error}")
             return None
+
+    def families(self) -> frozenset[str] | None:
+        """可調材料的代號（判背後換過的區清單裡哪些是固定成品）；材料庫讀不進來回 None。"""
+        return None if self.targets is None else frozenset(family.id for family in self.targets.settings.family)
 
     def label(self, identifier: str) -> str:
         """材料庫那一筆的名字；材料庫讀不進來就寫代號。"""

@@ -109,7 +109,7 @@ def test_backing_deeper_than_the_depth_cannot_be_applied(tmp_path: Path, browser
         page.locator("#zone-panel-backing-pick").select_option(VPR)
         page.locator("#zone-panel-depth").fill("8")
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
-        expect(page.locator("#zone-panel")).to_contain_text("最深比背後的VPR")
+        expect(page.locator("#zone-panel")).to_contain_text("最深沒有比背後的VPR深")
         assert base
 
 
@@ -124,4 +124,31 @@ def test_backing_menu_lists_the_vpr_under_resonant_and_no_porous_product(tmp_pat
         resonant = page.locator('#zone-panel-backing-pick optgroup[label="共振吸音"] option')
         assert VPR in [resonant.nth(index).get_attribute("value") for index in range(resonant.count())]
         assert page.locator('#zone-panel-backing-pick option[value="glass_wool_48k_50mm"]').count() == 0
+        assert base
+
+
+def test_measured_backing_counts_its_base_construction_like_the_server(tmp_path: Path, browser: Browser) -> None:
+    """實測表當背後（實心木門）：面板照它的底構造扣，跟伺服器同一個數。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_search_panel(page)
+        page.locator("#zone-panel-backing-pick").select_option("door_wood_solid")
+        page.locator("#zone-panel-depth").fill("25")
+        expect(page.locator("#zone-panel-front-room")).to_have_text("前面最多 24.9 cm")
+        assert base
+
+
+def test_changing_only_the_backing_rechecks_the_candidates(tmp_path: Path, browser: Browser) -> None:
+    """已存最深 18 公分的由程式最佳化區，只把背後換成 VPR：候選照剩下的 8 公分重判，不沿用已存那一份。"""
+    _prepare(tmp_path, {"schema_version": "aosr.zone_design.v1", "scheme_id": SAMPLE,
+                        "zones": {ZONE[0]: {ZONE[1]: {"mode": "search", "allowed": ["glass_wool_48k", "none"], "max_depth_m": 0.18}}}})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_search_panel(page)
+        expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
+        expect(page.locator("#zone-panel-list")).to_contain_text("含 4 款")
+        page.locator("#zone-panel-backing-pick").select_option(VPR)
+        expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
+        expect(page.locator("#zone-panel-list")).to_contain_text("含 1 款")
         assert base

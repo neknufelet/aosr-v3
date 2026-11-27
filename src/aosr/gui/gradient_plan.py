@@ -63,7 +63,7 @@ from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_construction import OriginalReader
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
-    CandidateSelection, DepthCap, DepthLevel, DepthTargets, RangeCheck, backing_depth_m, effective_candidates, front_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
+    CandidateSelection, DepthCap, DepthLevel, DepthTargets, RangeCheck, backing_depth_m, backing_too_deep, effective_candidates, front_cap, minus_backing, no_group_words, reference_only_refusals, saved_refusals, target_fits,
     ranged_misfit_words, target_line, zone_limits, zone_words,
 )
 from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Frame, SettingsCheck, Symmetry, Unchecked, drawn_frames, drawn_partners, pair_zones, symmetry_on
@@ -156,6 +156,14 @@ def zone_of(surface: str) -> tuple[str, str]:
     return wall, zone if separator else WHOLE_WALL_KEY
 
 
+def _refuse_backing_mount(design: DesignSettings | None, request: GradientRequest) -> None:
+    """背後換過的區（#1330）前層要貼在背後那一筆上：這一跑選「貼在硬底上」會把背後那一筆丟掉，開跑前就擋。"""
+    if request.mount == "on_wall" or design is None:
+        return
+    if any(item.backing_entry is not None for zones in design.zones.values() for item in zones.values()):
+        raise PlanRefused("有區背後換成材料庫的一筆，前面那幾層要貼在它上面：裝法請選「貼在原牆上」")
+
+
 def _zone_materials(scheme: Scheme) -> dict[tuple[str, str], object]:
     """方案每一區現在的材料（背後換過的區，扣深度要量它，#1330）；六面折成數字的方案沒有分區、背後換不了。"""
     zones = scheme.scene.surface_zones_by_wall or {}
@@ -182,7 +190,11 @@ def _depths(request: GradientRequest, modes: Mapping[str, Mapping[str, ZoneMode]
             if found_mode != "search":
                 raise PlanRefused(f"{wall} 分區 {zone} 不是交給搜尋的區，不能給深度上限（固定與保留原牆的區不加層）")
             surface = surface_of(wall, zone)
-            depth = max(depth - (backing_depth_m(design, wall, zone, materials.get((wall, zone))) or 0.0), 0.0)
+            backing = backing_depth_m(design, wall, zone, materials.get((wall, zone))) or 0.0
+            if backing > 0 and backing_too_deep(depth, backing):
+                raise PlanRefused(f"{wall} 分區 {zone} 這一跑另填的最深 {depth:g} 公尺沒有比背後那一筆 {backing:g} 公尺深，前面放不了東西")
+            if backing > 0:
+                depth = minus_backing(depth, backing)
             if surface not in found or depth < found[surface][0]:
                 found[surface] = (depth, "request")
     ordered = dict(sorted(found.items()))
@@ -459,6 +471,7 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
         family = settings.family_by_id(request.family) if request.family is not None else settings.family[0]
     except ValueError as error:
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
+    _refuse_backing_mount(design, request)
     ranges = _ranges(design)
     depths, sources = _depths(request, modes, design, _zone_materials(scheme))
     choices = _allowed(design, targets_for_depth, depths)

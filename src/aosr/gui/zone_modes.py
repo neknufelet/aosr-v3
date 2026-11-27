@@ -89,6 +89,8 @@ class ZoneChoice(BaseModel):
     picked_entry: str | None = None
     material_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
     backing_wall: SurfaceMaterial | None = None
+    # 背後沒重選（#1330 審查第 9 條）：方案那一區現在的材料原樣留著（材料庫那一筆存檔後改過也不換成新版），只回原牆與代號。
+    keep_backing: bool = False
 
 
 class ZoneMaterialRequest(ZoneChoice):
@@ -307,7 +309,7 @@ class ZoneMaterialHandlers:
         else:
             base, pick = self._base(scene, choice, current, box)
         if choice.choice == "backing":
-            return self._backing(scene, choice, base)
+            return self._backing(scene, choice, base, current if choice.keep_backing else None)
         entry = self._entry(scene.entries, choice.material_id) if choice.choice == "fixed" and choice.material_id else None
         change = zone_material(current, base, entry, choice.wall)
         note = change.note
@@ -321,10 +323,11 @@ class ZoneMaterialHandlers:
             result["picked_entry"] = entry.id if entry and (entry.id in scene.standalone or entry.id in scene.legacy) and not change.same_as_original else None
         return result
 
-    def _backing(self, scene: ZoneScene, choice: ZoneChoice, base: Origin) -> dict[str, object]:
-        """背後換成材料庫的一筆（#1330）：那一筆整塊放進方案那一區（程式只調它前面的層），原牆另外回給網頁記進設計設定。"""
+    def _backing(self, scene: ZoneScene, choice: ZoneChoice, base: Origin, kept: SurfaceMaterial | None) -> dict[str, object]:
+        """背後換成材料庫的一筆（#1330）：那一筆整塊放進方案那一區（程式只調它前面的層），原牆另外回給網頁記進設計設定。
+        ``kept`` 給了是背後沒重選：方案那一區現在的材料原樣留著。"""
         entry = self._entry(scene.entries, cast(str, choice.material_id))
-        chosen = fixed_surface(entry)
+        chosen = kept if kept is not None else fixed_surface(entry)
         if chosen is None or isinstance(chosen, MountedOnWall) or (isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"):
             raise ZoneMaterialError(f"「{entry.label}」要貼在牆上才成立，不能整塊當背後的牆")
         face = original_face(choice.wall)
