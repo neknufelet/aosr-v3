@@ -695,7 +695,7 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
         # （#1199：是哪幾種改在底下的材料框一種一列勾著，這一句只講幾種。）
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
         assert page.locator("#zone-panel-list [data-state=all]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == [
-            "glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+            "none", "glass_wool_48k", "glass_wool_24k", "glass_wool_96k"]
         page.screenshot(path=str(tmp_path / "first-time-reader.png"))
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/z3"] == WOOLS

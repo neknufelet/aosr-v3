@@ -138,9 +138,10 @@ def test_each_zone_picks_a_mode_survives_a_recut_and_a_reopen(tmp_path: Path, br
         expect_mode(page, "x0", right, "search")
         # 清單在小框裡一種一列（舊做法表那一格的方塊跟著表拆了）；在小框加減候選。
         candidates = listed(page, "x0", right)
-        assert len(candidates) == 4 and "glass_wool_96k" not in candidates and WALL_FIXED in candidates, candidates
+        assert candidates == ["none", "glass_wool_48k", "glass_wool_24k"]
         open_panel(page, "x0", right)
-        expect(page.locator(f"#zone-panel-row-{WALL_FIXED}")).to_contain_text("48K 玻璃棉 50 mm＋100 mm 空腔")
+        page.locator("#zone-panel-members-glass_wool_48k summary").click()
+        expect(page.locator(f"#zone-panel-members-glass_wool_48k [data-member={WALL_FIXED}]")).to_contain_text("48K 玻璃棉 50 mm＋100 mm 空腔")
         page.locator("#zone-page-close").click()
         assert fixed_value(page, "x0", "z1") == PRESET
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "modes-reopened.png"))
@@ -417,7 +418,7 @@ def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_pat
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        # 舊表三個方塊 → 小框三列（小框把「不貼」排最後；存的順序由底下存檔那幾行考）。
+        # 舊表三個方塊 → 小框三列（小框把「不貼」排最前；存的順序由底下存檔那幾行考）。
         candidates = listed(page, "x0", "whole_wall")
         assert len(candidates) == 3 and set(candidates) == set(stored), candidates
         open_panel(page, "x0", "whole_wall")

@@ -69,7 +69,7 @@ def test_menus_list_only_what_this_face_can_take(tmp_path: Path, browser: Browse
         assert {DOOR, "side_window_glass_12mm_single", "side_window_glass_table_upper"} <= set(fixed)
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
         choose_mode(page, "x0", "whole_wall", "search")
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_48k", "glass_wool_24k", "glass_wool_96k"]
         # 舊表方塊上「可調：…」那幾個字跟著表走：48K、24K 兩句同字在那一頁清單卡（test_gui_zone_overview_browser.py 的
         # test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chose_differently，乙）；96K 那一句、
         # 「不含（可調厚度與空腔）」沒有題逐字考（丙，回報第 5 節）。
@@ -77,9 +77,9 @@ def test_menus_list_only_what_this_face_can_take(tmp_path: Path, browser: Browse
         page.locator("#zone-panel-picker-search").focus()
         for choice in HIDDEN_ON_WALLS:
             expect(page.locator(f"#zone-panel-pick-{choice}")).to_have_count(0)
-        expect(page.locator("#zone-panel-pick-fabric_pet_a_gap100 .zv-description")).to_have_text("整塊貼、固定 10 cm")
+        expect(page.locator("#zone-panel-pick-fabric_pet_a_gap100 .zv-description")).to_have_text("10 cm")
         expect(page.locator("#zone-panel-pick-slotted18_pet45_vpr_steel2p25mm_foam70_sample .zv-description")).to_have_text(
-            "整塊貼、固定 13.3 cm（不含薄板）")
+            "13.3 cm（不含薄板）")
         page.locator("#zone-panel-cancel").click()
         page.locator("#zone-page-close").click()
         page.locator("#elevation-wall-floor").click()
@@ -145,7 +145,7 @@ def test_search_starts_from_a_ready_list_and_panel_edits_carry_to_the_next_face(
         choose_fixed(page, "x0", "whole_wall", "glass_wool_48k_50mm")
         choose_mode(page, "x0", "whole_wall", "search")
         three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
-        assert _chips(page, "x0", "whole_wall") == three
+        assert _chips(page, "x0", "whole_wall") == ["none", *three[:-1]]
         assert _modes(page, "x0")["whole_wall"] == {"mode": "search", "allowed": three}
         # 舊表方塊上的說明字跟著表走：24K 那一句同字在那一頁清單卡（test_gui_zone_overview_browser.py 同上，乙）；
         # 「不貼」方塊「保留原樣，程式可以決定這裡不貼」只有舊表寫（丙）。
@@ -157,12 +157,12 @@ def test_search_starts_from_a_ready_list_and_panel_edits_carry_to_the_next_face(
         # 回到「48K 或不貼」：先留下 48K，再加不貼。
         edit_candidates(page, "x0", "whole_wall", remove=("none",), add=("glass_wool_48k",), only="glass_wool_48k")
         edit_candidates(page, "x0", "whole_wall", add=("none",))
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_48k"]
         # 改成不貼再改回來：這一區已經不是那一筆了，「只讓程式決定：這一筆」那一顆不再出現；清單照上一次的組合。
         choose_mode(page, "x0", "whole_wall", "keep_original")
         choose_mode(page, "x0", "whole_wall", "search")
         expect(page.locator("#zone-preset-x0-whole_wall-this_or_none")).to_have_count(0)
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_48k"]
 
         # 下一面改成由程式最佳化：照這一頁上一次的組合（48K＋不貼）。
         page.locator("#elevation-wall-y0").click()
@@ -197,7 +197,7 @@ def test_the_ready_list_is_always_the_three_wools_even_with_more_tunable_materia
         page.locator("#elevation-wall-x0").click()
         choose_mode(page, "x0", "whole_wall", "search")
         three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
-        assert _chips(page, "x0", "whole_wall") == three  # 也就是沒有 own_rock_wool_free
+        assert _chips(page, "x0", "whole_wall") == ["none", *three[:-1]]  # 也就是沒有 own_rock_wool_free
         edit_candidates(page, "x0", "whole_wall", add=("own_rock_wool_free",))
         assert _modes(page, "x0")["whole_wall"]["allowed"] == [*three, "own_rock_wool_free"]
         assert watched.page_errors == [] and watched.console_errors == []
@@ -216,7 +216,7 @@ def test_the_bottom_message_follows_the_list_and_clears_on_another_face(tmp_path
         page.locator("#elevation-wall-x0").click()
         choose_mode(page, "x0", "whole_wall", "search")
         edit_candidates(page, "x0", "whole_wall", remove=("glass_wool_48k",), said="1 區改成「由程式最佳化」")
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_24k", "glass_wool_96k", "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_24k", "glass_wool_96k"]
         page.locator("#elevation-wall-floor").click()
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-map")).to_be_visible()
@@ -241,17 +241,17 @@ def test_the_last_combination_does_not_follow_into_another_scheme(tmp_path: Path
         edit_candidates(page, "x0", "whole_wall", only="glass_wool_48k")
         page.locator("#elevation-wall-y0").click()
         choose_mode(page, "y0", "whole_wall", "search")
-        assert _chips(page, "y0", "whole_wall") == ["glass_wool_48k", "none"]  # 同一份方案：照上一次的組合
+        assert _chips(page, "y0", "whole_wall") == ["none", "glass_wool_48k"]  # 同一份方案：照上一次的組合
         _open_scheme(page, "room109-b")
         page.locator("#elevation-wall-x0").click()
         choose_mode(page, "x0", "whole_wall", "search")
-        assert _chips(page, "x0", "whole_wall") == three
+        assert _chips(page, "x0", "whole_wall") == ["none", *three[:-1]]
         # 這一份也改成 48K＋不貼，再從範本開一份新的（#1265 單元 5b 取代載入範本）：一樣從頭。
         edit_candidates(page, "x0", "whole_wall", only="glass_wool_48k")
         new_from_template(page, "fresh-room")
         page.locator("#elevation-wall-x0").click()
         choose_mode(page, "x0", "whole_wall", "search")
-        assert _chips(page, "x0", "whole_wall") == three
+        assert _chips(page, "x0", "whole_wall") == ["none", *three[:-1]]
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -274,7 +274,7 @@ def test_an_old_zone_without_a_list_shows_and_saves_what_the_server_means(tmp_pa
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
         everything = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "demo109_rockwool60k_capped", "none"]
-        assert _chips(page, "x0", "whole_wall") == everything
+        assert _chips(page, "x0", "whole_wall") == ["none", *everything[:-1]]
         # 舊表方塊上「不是前牆用的」那一句：小框候選列沒有對應的字（回報第 8 節，待主對話定要不要補到小框），這一行跟著表走。
         assert page.evaluate("zoneDesign.zones.x0.whole_wall") == {"mode": "search"}  # 打開不改設計，存檔才寫
         _save(page, "room109")
@@ -589,7 +589,7 @@ def test_a_tunable_vpr_in_the_library_never_shows_on_the_zone_page(tmp_path: Pat
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", WOOL, "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_48k", "glass_wool_24k", "glass_wool_96k", WOOL]
         assert page.evaluate(f"[zoneLibrary.length > 0, zoneLibrary.some(entry => entry.id === '{VPR}')]") == [True, False]
         for wall in ("x0", "floor"):
             page.locator(f"#elevation-wall-{wall}").click()

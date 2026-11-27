@@ -133,7 +133,7 @@ def test_cards_show_their_choices_depth_and_only_a_group_selection_button(tmp_pa
             expect(page.locator("#zone-panel-mode-search")).to_be_checked()
             expect(page.locator("#zone-panel-depth")).to_have_value(panel_depth)
             expect(page.locator("#zone-panel-notice")).to_have_count(0)
-            assert page.locator("#zone-panel-list [data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == expected[index][1]
+            assert page.locator("#zone-panel-list [data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == sorted(expected[index][1], key=lambda choice: choice != "none")
             expect(card.locator(".zv-group-summary")).to_have_text(expected[index][2])
             expect(card.locator("button")).to_have_count(0)
             expect(card.locator(f"span#{card.get_attribute('id')}-select")).to_have_text("正在改")

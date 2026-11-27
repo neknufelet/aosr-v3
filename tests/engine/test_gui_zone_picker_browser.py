@@ -34,7 +34,7 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
         _click_zone(page, "yL/z3")
         rows = page.locator("#zone-panel-list .zv-candidate[data-choice]")
         _expect_value(page, "() => [...document.querySelectorAll('#zone-panel-list .zv-candidate[data-choice]')].map(row => row.dataset.choice)",
-                      [WOOLS[0], WOOLS[1], "none"])
+                      ["none", WOOLS[0], WOOLS[1]])
         expect(page.locator("#zone-panel-picker")).to_be_visible()
         page.locator("#zone-panel-picker-search").focus()
         search = page.locator("#zone-panel-picker-search")
@@ -47,7 +47,7 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
         assert {"fixed", "optimizable"} == set(options.evaluate_all("rows => rows.map(row => row.dataset.entryKind)"))
         for option in options.all():
             expect(option.locator("mark").first).to_have_text("玻璃")
-            expect(option.locator(".zv-description")).to_be_visible()
+            expect(option.locator("xpath=..").locator(".zv-description").first).to_be_visible()
         search.fill("NoMatch")
         expect(page.locator("#zone-panel-form")).to_contain_text("沒有符合「NoMatch」的")
         search.press("Escape")
@@ -56,7 +56,7 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
         search.fill("96k")
         search.press("Enter")
         expect(search).to_have_value("")
-        assert rows.evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
+        assert rows.evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["none", *WOOLS[:-1]]
         assert watched.page_errors == []
 
 
@@ -130,7 +130,7 @@ def test_partial_none_and_material_actions_save_only_the_affected_zones(tmp_path
         expect(notice).to_contain_text("④")
         row_options(page, "none")
         page.locator("#zone-panel-remove-none").click()
-        expect(page.locator("#zone-panel-none-row")).to_contain_text("沒有")
+        expect(page.locator("#zone-panel-pick-none")).not_to_be_checked()
         expect(page.locator("#zone-panel-remove-none")).to_have_count(0)
         expect(page.locator("#zone-panel-addto-none")).to_have_text("加上")
         row_options(page, "none")
@@ -301,7 +301,7 @@ def test_unread_library_explains_why_the_panel_cannot_list_candidates(tmp_path: 
         expect(page.locator("#zone-panel-add")).to_have_count(0)
 
 
-def test_stored_covered_product_stays_listed_and_can_be_removed_independently(tmp_path: Path, browser: Browser) -> None:
+def test_stored_covered_product_can_be_removed_after_unchecking_family(tmp_path: Path, browser: Browser) -> None:
     product = "glass_wool_48k_50mm"
     _prepare(tmp_path, _design({"yL": {"z3": {"mode": "search", "allowed": [WOOLS[0], product, "none"]}}}))
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -309,14 +309,15 @@ def test_stored_covered_product_stays_listed_and_can_be_removed_independently(tm
         _open_overview(page)
         _click_zone(page, "yL/z3")
         row = page.locator(f"#zone-panel-row-{product}")
-        expect(row).to_have_attribute("data-covered", WOOLS[0])
-        expect(row.locator(".zv-covered-why")).to_contain_text("48K 玻璃棉 已經包含它")
-        row_options(page, product)
-        page.locator(f"#zone-panel-remove-{product}").click()
         expect(row).to_have_count(0)
-        page.locator("#zone-panel-picker-search").focus()
-        expect(page.locator(f"#zone-panel-pick-{product}")).to_be_disabled()
-        expect(page.locator(f"#zone-panel-pick-{product} .zv-covered-why")).to_be_visible()
+        page.locator(f"#zone-panel-pick-{WOOLS[0]}").click()
+        expect(row.get_by_role("checkbox")).to_be_checked()
+        row.get_by_role("checkbox").click()
+        page.locator(f"#zone-panel-pick-{WOOLS[0]}").click()
+        expect(page.locator(f"#zone-panel-pick-{product}")).to_have_count(0)
+        detail = page.locator(f"#zone-panel-members-{WOOLS[0]}")
+        detail.locator("summary").click()
+        expect(detail.locator(f"[data-member={product}]")).to_be_visible()
         _apply(page)
         assert page.evaluate(_ALLOWED) == {"yL/z3": ONLY_48K}
 
@@ -347,7 +348,7 @@ def test_picking_another_card_keeps_draft_depth_and_method_and_loads_its_saved_l
         page.locator("#zone-panel-mode-search").check()
         expect(page.locator("#zone-panel-depth")).to_have_value("12.5")
         expect(page.locator("#zone-panel-notice")).to_have_text(DISCARDED)
-        assert page.locator("#zone-panel-list [data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == ONLY_48K
+        assert page.locator("#zone-panel-list [data-choice]").evaluate_all("rows => rows.map(r => r.dataset.choice)") == ["none", WOOLS[0]]
         _apply(page)
         assert page.evaluate(_ALLOWED) == {**dict.fromkeys(FRONT, ONLY_48K), "ceiling/z1": WOOLS}
 
@@ -519,18 +520,17 @@ def test_range_description_names_fixed_parts_and_the_tighter_depth_limit(tmp_pat
         _open_overview(page)
         _click_zone(page, "yL/z3")
         words = page.locator(f"#zone-panel-row-{wool} .zv-range")
-        expected = "棉厚 7.5 cm 不調；給程式調：空腔 0–12 cm"
-        expect(words).to_have_text(expected + "，兩個加起來最多 18 cm（材料本身）")
+        expected = "棉厚 7.5 cm 不調背後空腔 0–12 cm"
+        expect(words).to_have_text(expected + "兩個加起來最多 18 cm（材料本身）")
         depth = page.locator("#zone-panel-depth")
         depth.fill("20")
-        expect(words).to_have_text(expected + "，兩個加起來最多 18 cm（材料本身）")
+        expect(words).to_have_text(expected + "兩個加起來最多 18 cm（材料本身）")
         depth.fill("12")
-        expect(words).to_have_text(expected + "，兩個加起來最多 12 cm（這一區最深）")
+        expect(words).to_have_text(expected + "兩個加起來最多 12 cm（這一區最深）")
         row_options(page, wool)
         page.locator(f"#zone-panel-remove-{wool}").click()
         page.locator("#zone-panel-picker-search").focus()
-        expect(page.locator(f"#zone-panel-pick-{wool} .zv-description")).to_have_text(
-            "棉厚 7.5 cm 不調；給程式調：空腔 0–12 cm")
+        expect(page.locator(f"#zone-panel-pick-{wool} .zv-description")).to_have_text("7.5–19.5 cm")
 
 
 def test_depth_limit_is_shown_only_when_it_restricts_the_stack(tmp_path: Path, browser: Browser) -> None:
@@ -541,19 +541,19 @@ def test_depth_limit_is_shown_only_when_it_restricts_the_stack(tmp_path: Path, b
         _click_zone(page, "yL/z3")
         direct = page.locator("#zone-panel-row-glass_wool_24k .zv-range")
         cavity = page.locator("#zone-panel-row-glass_wool_48k .zv-range")
-        direct_words = "空腔：沒有（直接貼牆）；給程式調：棉厚 5–20 cm"
-        cavity_words = "給程式調：棉厚 5–20 cm、空腔 0–25 cm"
+        direct_words = "棉厚 5–20 cm背後空腔 沒有（直接貼牆）"
+        cavity_words = "棉厚 5–20 cm背後空腔 0–25 cm"
         expect(direct).to_have_text(direct_words)
         depth = page.locator("#zone-panel-depth")
         depth.fill("15")
-        expect(cavity).to_have_text(cavity_words + "，兩個加起來最多 15 cm（這一區最深）")
-        expect(direct).to_have_text(direct_words + "，總厚最多 15 cm（這一區最深）")
+        expect(cavity).to_have_text(cavity_words + "兩個加起來最多 15 cm（這一區最深）")
+        expect(direct).to_have_text(direct_words + "總厚最多 15 cm（這一區最深）")
         for limit in ("20", "25"):
             depth.fill(limit)
             expect(direct).to_have_text(direct_words)
-            expect(cavity).to_have_text(cavity_words + f"，兩個加起來最多 {limit} cm（這一區最深）")
+            expect(cavity).to_have_text(cavity_words + f"兩個加起來最多 {limit} cm（這一區最深）")
         _click_zone(page, "yL/auto2")
-        expect(cavity).to_have_text(cavity_words + "，兩個加起來最多 25 cm（這幾區最深）")
+        expect(cavity).to_have_text(cavity_words + "兩個加起來最多 25 cm（這幾區最深）")
 
 
 def test_rows_only_offer_range_and_only_buttons_when_they_can_act(tmp_path: Path, browser: Browser) -> None:
@@ -572,7 +572,7 @@ def test_rows_only_offer_range_and_only_buttons_when_they_can_act(tmp_path: Path
         expect(page.locator(f"#zone-panel-range-toggle-{still}")).to_have_count(0)
         expect(page.locator(f"#zone-panel-only-{FLOOR_ONLY}")).to_have_count(0)
         words = page.locator(f"#zone-panel-row-{still} .zv-range")
-        expect(words).to_have_text("棉厚 7.5 cm 不調；空腔 10 cm 不調")
+        expect(words).to_have_text("棉厚 7.5 cm 不調背後空腔 10 cm 不調")
 
 
 def test_cross_face_footer_counts_only_candidates_omitted_for_placement(tmp_path: Path, browser: Browser) -> None:
@@ -696,7 +696,8 @@ def test_enter_skips_the_first_disabled_match(tmp_path: Path, browser: Browser) 
         search = page.locator("#zone-panel-picker-search")
         search.fill("48K 玻璃棉")
         options = page.locator("#zone-panel-picker button[role=checkbox][aria-checked=false]:visible")
-        expect(options.first).to_have_attribute("data-covered", WOOLS[0])
+        expect(options).to_have_count(1)
+        expect(options.first).to_have_id("zone-panel-pick-keyboard_sample")
         expect(page.locator("#zone-panel-pick-keyboard_sample")).to_be_enabled()
         search.press("Enter")
         expect(search).to_have_value("")
@@ -885,10 +886,14 @@ def test_enter_on_a_partly_listed_covered_product_preserves_its_zones(tmp_path: 
         for key in zones:
             _click_zone(page, "yL/" + key)
         row = page.locator(f"#zone-panel-pick-{product}")
-        expect(row).to_have_attribute("aria-checked", "mixed")
+        expect(row).to_have_count(0)
+        detail = page.locator(f"#zone-panel-members-{WOOLS[0]}")
+        detail.locator("summary").click()
+        name = detail.locator(f"[data-member={product}] span").first.inner_text()
         search = page.get_by_role("searchbox", name="找材料")
-        search.fill(row.locator("strong").inner_text())
+        search.fill(name)
         search.press("Enter")
-        expect(row).to_have_attribute("aria-checked", "mixed")
+        expect(search).to_have_value(name)
+        expect(row).to_have_count(0)
         _apply(page)
         assert page.evaluate(_ALLOWED) == {"yL/" + key: choices for key, choices in allowed.items()}

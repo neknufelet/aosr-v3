@@ -50,7 +50,7 @@ def test_both_pickers_group_rows_and_remember_folds(tmp_path: Path, browser: Bro
             groups = page.locator(f"#zone-panel-{container} details[data-material-group]")
             expect(groups.locator(":scope > summary")).to_have_count(4)
             assert groups.evaluate_all("els => els.map(e => e.getAttribute('aria-label'))") == ["多孔吸音", "共振吸音", "門、窗、一般牆面", "我組的"]
-            expect(groups.last.locator("summary")).to_have_text("我組的0")
+            expect(groups.last.locator(":scope > summary")).to_have_text("我組的0")
             assert not groups.last.evaluate("e => e.open")
             for group in groups.all():
                 assert int(group.locator(".zv-family-count").inner_text()) == group.locator(".zv-material").count()
@@ -62,13 +62,13 @@ def test_both_pickers_group_rows_and_remember_folds(tmp_path: Path, browser: Bro
                 groups.first.locator(":scope > summary").click()
                 expect(wool).to_be_visible()
             expect(groups.nth(2).locator(f"[value={DOOR}]")).to_be_visible()
-            groups.nth(2).locator("summary").click()
+            groups.nth(2).locator(":scope > summary").click()
             expect(groups.nth(2).locator(f"[value={DOOR}]")).to_be_hidden()
             page.locator("#zone-panel-mode-keep_original").check()
             page.locator(f"#zone-panel-mode-{mode}").check()
             expect(groups.nth(2).locator(f"[value={DOOR}]")).to_be_hidden()
             if mode == "fixed":
-                groups.first.locator("summary").click()
+                groups.first.locator(":scope > summary").click()
                 visible = groups.nth(1).get_by_role("radio")
                 expect(visible.first).to_have_attribute("tabindex", "0")
                 visible.last.focus()

@@ -108,7 +108,7 @@ def _peek(page: Page, wall: str, key: str, script: str, *, fixed: bool = False) 
 def listed(page: Page, wall: str, key: str) -> list[str]:
     """由程式最佳化那一區的清單，照畫出來的順序：舊做法表那一格的方塊（`#zone-allowed-chips-<牆>-<區> .zone-chip`）
     → 小框的候選列（`.zv-candidate` 的 data-choice）。"""
-    return cast(list[str], _peek(page, wall, key, "panel => [...panel.querySelectorAll('#zone-panel-list .zv-candidate')].map(row => row.dataset.choice)"))
+    return cast(list[str], _peek(page, wall, key, "panel => [...panel.querySelectorAll('#zone-panel-list .zv-candidate[data-choice]')].map(row => row.dataset.choice)"))
 
 
 def mode_words(page: Page, wall: str, key: str) -> list[str]:
