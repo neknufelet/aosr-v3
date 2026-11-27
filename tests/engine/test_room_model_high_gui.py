@@ -10,6 +10,7 @@ import dataclasses
 import json
 import math
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,10 +26,13 @@ from aosr.config.shell_lane import SHELL_GEOMETRY_TOL_M
 from aosr.geometry.rhino_room import read_rhino_room
 from aosr.geometry.room_shell import RoomShell
 from aosr.geometry.shell_faces import ShellFaces, shell_faces
-from aosr.gui.room_model import ABSORPTION_RATIOS
+from aosr.gui.room_model import HARD_KEY
+from aosr.materials.library import builtin_entries
 from aosr.physics.shell_paths import shell_path_table
 from aosr.reporting import room_shell_high_run
 from aosr.reporting.room_shell_high_run import SPEAKER_WALL_NUDGE_M, _off_the_wall, high_frequencies, run
+from aosr.runtime import child_process_env
+from tests.engine._cpu_pins import forward_cpu_pins
 
 TEST_ROOM = Path(__file__).parent / "data" / "room_shell_test_room.3dm"
 FAKE_RUNNER = """
@@ -72,12 +76,12 @@ def test_high_run_uses_the_same_snapshot_as_the_low_run(tmp_path: Path) -> None:
             "file_name": "room.3dm", "data_base64": base64.b64encode(TEST_ROOM.read_bytes()).decode()}).json()
         names = [str(layer["name"]) for layer in model["layers"]]
         url = f"/api/room-models/{model['id']}/high-runs"
-        assert client.post(url, json={"absorption": {names[0]: "hard"}}).status_code == 400
-        assert client.post("/api/room-models/" + "0" * 64 + "/high-runs", json={"absorption": {}}).status_code == 404
-        choice = {name: ("strong" if name.startswith("Panel") else "hard") for name in names}
-        job = client.post(url, json={"absorption": choice}).json()
-        assert client.post(url, json={"absorption": choice}).json()["run_id"] == job["run_id"]  # 重按不重算
-        low = client.post(f"/api/room-models/{model['id']}/runs", json={"absorption": choice}).json()
+        assert client.post(url, json={"materials": {names[0]: HARD_KEY}}).status_code == 400
+        assert client.post("/api/room-models/" + "0" * 64 + "/high-runs", json={"materials": {}}).status_code == 404
+        choice = {name: ("glass_wool_48k_50mm" if name.startswith("Panel") else HARD_KEY) for name in names}
+        job = client.post(url, json={"materials": choice}).json()
+        assert client.post(url, json={"materials": choice}).json()["run_id"] == job["run_id"]  # 重按不重算
+        low = client.post(f"/api/room-models/{model['id']}/runs", json={"materials": choice}).json()
         assert low["run_id"] != job["run_id"]  # 低頻、高音各一個工作
         high_state = _wait(client, f"/api/room-model-high-jobs/{job['run_id']}")
         low_state = _wait(client, f"/api/room-model-jobs/{low['run_id']}")
@@ -85,19 +89,30 @@ def test_high_run_uses_the_same_snapshot_as_the_low_run(tmp_path: Path) -> None:
         high_result, low_result = high_state["result"], low_state["result"]
         assert isinstance(high_result, dict) and isinstance(low_result, dict)
         assert high_result["snapshot"] == low_result["snapshot"]
-        ratios = high_result["snapshot"]["impedance_ratio_by_layer"]
-        assert ratios == {name: (dict(ABSORPTION_RATIOS)["strong"] if name.startswith("Panel") else None)
-                          for name in names}
+        builtin = {entry.id: entry.model_dump(mode="json") for entry in builtin_entries()}
+        frozen = high_result["snapshot"]["material_by_layer"]
+        assert frozen == {name: None if choice[name] == HARD_KEY else builtin[choice[name]] for name in names}
         assert client.get("/api/room-model-high-jobs/" + "z" * 32).status_code == 404
 
 
 def test_background_high_run_has_every_chart_field(tmp_path: Path) -> None:
-    """測試房（粗分格省時間）：兩支喇叭的有效路徑逐階數目等於路徑表考卷釘住的數，被擋掉的路徑裡有天花板那條一階。"""
+    """真的子行程（冷開機、雙精度、粗分格省時間），四層用材料庫的材料、其餘硬牆：兩支喇叭的有效路徑逐階數目
+    等於路徑表考卷釘住的數，被擋掉的路徑裡有天花板那條一階。"""
     names = ["Ceiling_石膏板", "Cloud_木板", "Door_金屬門", "Floor_木地板", "Panel_吸音棉", "Wall_乳膠漆",
              "Wall_吸音區A", "Wall_吸音區_B", "Wall_吸音區_C", "Window_玻璃窗"]
-    ratios: dict[str, float | None] = {name: None for name in names} | {"Panel_吸音棉": 2.0, "Floor_木地板": 10.0}
-    result = run({"model_path": str(TEST_ROOM), "impedance_ratio_by_layer": ratios}, engine_commit="a" * 40,
-                 patch_edge_m=2.0)
+    builtin = {entry.id: entry.model_dump(mode="json") for entry in builtin_entries()}
+    picked = {"Panel_吸音棉": "glass_wool_48k_50mm", "Floor_木地板": "wood_floor_on_joists",
+              "Door_金屬門": "door_wood_solid", "Window_玻璃窗": "glass_single_3mm"}
+    materials = {name: builtin[picked[name]] if name in picked else None for name in names}
+    source, out = tmp_path / "snapshot.json", tmp_path / "result.json"
+    source.write_text(json.dumps({"model_path": str(TEST_ROOM), "material_by_layer": materials}, ensure_ascii=False),
+                      encoding="utf-8")
+    child = subprocess.run([sys.executable, "-m", "aosr.reporting.room_shell_high_run", str(source), "--out", str(out),
+                            "--engine-commit", "a" * 40, "--capabilities", str(config_path("capabilities.toml")),
+                            "--patch-edge-m", "2.0"],
+                           env=forward_cpu_pins(child_process_env(threads=1)), capture_output=True, text=True, timeout=600)
+    assert child.returncode == 0, child.stderr[-2000:]
+    result = json.loads(out.read_text(encoding="utf-8"))
     axis = [round(f, 3) for f in high_frequencies()]
     assert result["frequencies_hz"] == axis and axis[0] >= 300.0
     speakers = result["speakers"]
@@ -112,8 +127,15 @@ def test_background_high_run_has_every_chart_field(tmp_path: Path) -> None:
         for key in ("direct", "early", "late", "total"):
             values = speaker["energy_db"][key]
             assert len(values) == len(axis) and all(math.isfinite(v) for v in values)
+        late = speaker["energy_db"]["late"]
+        assert max(late) - min(late) > 1.0  # 材料庫的材料吸音隨頻率變，晚期不再是一條平線
     assert counts == [[1, 6, 18, 34], [1, 6, 17, 32]]
     assert any(p["order"] == 1 and p["via"] == ["Ceiling_石膏板"] for p in speakers[0]["blocked"])
+    _check_room_fields(result, names)
+
+
+def _check_room_fields(result: dict[str, object], names: list[str]) -> None:
+    """只看房間、不分喇叭的那幾格：衰減到降 60 dB、殘響時間、每個圖層的三角形與顏色、哪幾層是造型。"""
     decay = result["decay"]
     assert isinstance(decay, dict)
     points = decay["points"]
@@ -124,7 +146,6 @@ def test_background_high_run_has_every_chart_field(tmp_path: Path) -> None:
     assert isinstance(triangles, dict) and isinstance(layers, list)
     assert sorted(triangles) == names and [layer["name"] for layer in layers] == names
     assert result["solid_layers"] == ["Cloud_木板"]  # 測試房的吸音板是外殼凸出來的，天雲是單獨的造型
-    json.dumps(result, ensure_ascii=False)
 
 
 def _test_room() -> tuple[RoomShell, ShellFaces]:
@@ -167,5 +188,5 @@ def test_speaker_on_the_seat_is_refused_in_words(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(room_shell_high_run, "read_rhino_room", lambda *_: moved)
     names = sorted({t.layer for t in (*room.shell, *(t for s in room.solids for t in s.triangles))})
     with pytest.raises(ValueError, match="喇叭 2 跟聽位幾乎在同一點"):
-        run({"model_path": str(TEST_ROOM), "impedance_ratio_by_layer": dict.fromkeys(names)},
+        run({"model_path": str(TEST_ROOM), "material_by_layer": dict.fromkeys(names)},
             engine_commit="a" * 40, patch_edge_m=2.0)
