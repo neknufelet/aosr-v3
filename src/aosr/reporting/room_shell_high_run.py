@@ -189,13 +189,14 @@ def run(snapshot: Mapping[str, object], *, engine_commit: str,
     rho_c, c = air.air_density_kg_m3 * air.sound_speed_m_s, air.sound_speed_m_s
     faces = shell_faces(room, settings.coplanar_angle_deg, settings.coplanar_offset_m, SHELL_GEOMETRY_TOL_M)
     impedance = _impedances(ratios, faces.layers, rho_c)
-    late = shell_late_geometry(faces, patch_edge_m=patch_edge_m)
-    frequencies = high_frequencies()
     seat = next(item for item in room.seats if item.kind == MAIN_SEAT)
     positions = [_off_the_wall(speaker.position, faces) for speaker in room.speakers]
     for number, position in enumerate(positions, start=1):
         if float(np.linalg.norm(np.subtract(position, seat.position))) < MIN_SPEAKER_SEAT_M:
             raise ValueError(f"喇叭 {number} 跟聽位幾乎在同一點（不到 {MIN_SPEAKER_SEAT_M * 100:.0f} 公分），請把其中一個移開")
+    # 先擋掉算不了的，再做吃時間的分格與形狀因子。
+    late = shell_late_geometry(faces, patch_edge_m=patch_edge_m)
+    frequencies = high_frequencies()
     speakers = [{"label": f"喇叭 {number}（{speaker.kind}）", "position": list(position),
                  **_speaker(faces, late, position, seat.position, impedance, rho_c, c, frequencies)}
                 for number, (speaker, position) in enumerate(zip(room.speakers, positions, strict=True), start=1)]
