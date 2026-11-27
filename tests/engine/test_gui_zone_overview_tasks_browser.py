@@ -424,8 +424,12 @@ def test_picking_the_ceiling_or_the_floor_lists_only_what_can_go_there_and_has_n
     """天花、地板也點得到，同一個面板；材料只列那一面能貼的（伺服器每一筆給的「能用在哪幾面」），地板能貼的跟牆不一樣。
     「＝其他牆面」只在選到的都是算進規則的牆區時才標。"""
     _prepare(tmp_path)
-    usable = """walls => (zoneLibrary || []).filter(entry => entry.kind === 'fixed' && walls.every(wall => entry.placement.surfaces.includes(wall)))
-        .map(entry => entry.id)"""
+    usable = """walls => {
+        const families = walls.length === 1 && ['floor', 'ceiling'].includes(walls[0])
+            ? ['surface', 'porous', 'resonant', 'custom'] : ['porous', 'resonant', 'surface', 'custom'];
+        return families.flatMap(family => zoneLibrary.filter(entry => entry.kind === 'fixed' &&
+            entry.placement.family === family && walls.every(wall => entry.placement.surfaces.includes(wall))).map(entry => entry.id));
+    }"""
     options = "options => options.map(option => option.value).filter(Boolean)"
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page

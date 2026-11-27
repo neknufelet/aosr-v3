@@ -1,0 +1,1 @@
+{"material":{"kind":"mounted_on_wall","layers":[{"kind":"porous","thickness_m":0.04,"flow_resistivity_pa_s_m2":17000.0,"model":"komatsu","material_class":"fibrous"},{"kind":"air","thickness_m":0.06}],"wall":{"kind":"constant_impedance","impedance_pa_s_m":7654.0}},"note":"「自編層 rigid」貼在原牆上（最後一層背後接原牆）","same_as_original":false}

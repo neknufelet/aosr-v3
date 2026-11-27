@@ -83,6 +83,7 @@ class DepthTargets:
     standalone_constructions: frozenset[str] = frozenset()
     wall_dependent: frozenset[str] = frozenset()
     read_original: OriginalReader | None = None
+    legacy_replacements: frozenset[str] = frozenset()
 
     def label(self, identifier: str) -> str:
         return self.labels.get(identifier, identifier)
@@ -583,7 +584,10 @@ class _ZoneCatalog:
         targets = self.required() if recorded else self.targets
         if targets is None and recorded is None:
             return None
-        pick = construction_pick(material, self.standalone, recorded, lambda: self.original,
+        standalone = self.standalone
+        if targets and recorded in targets.legacy_replacements and recorded is not None:
+            standalone = {**standalone, recorded: targets.fixed[recorded]}
+        pick = construction_pick(material, standalone, recorded, lambda: self.original,
                                  room, wall, key, _zone_bounds(room, wall, entry))
         if pick is None:
             return None

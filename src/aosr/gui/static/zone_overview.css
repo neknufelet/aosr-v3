@@ -148,8 +148,6 @@ body.zone-page-open{background:#f2f4f1}
 /* 「最深」打的字讀不出來、小框重畫後格子放不回去時格子旁那一句（#1265 單元 3 之二第二趟追加設計洞）：同「不是這一面用的」那一句的字級與顏色。 */
 #zone-page .zv-depth-lost{display:block;font-size:13px;color:#a33;line-height:1.4}
 /* 「顯示全部材料」開關與「不是這一面用的」那一句（#1176 舊做法表那一個搬到小框，#1265；舊表後來拆了）。 */
-#zone-page .zv-show-all{display:flex;gap:6px;align-items:flex-start;margin-top:6px;font-size:13px;color:var(--soft);line-height:1.4}
-#zone-page .zv-show-all input{margin-top:2px}
 #zone-page .zv-away{margin:6px 0 0;font-size:13px;color:#a33;line-height:1.4}
 #zone-page .zv-same{display:inline-block;margin-left:8px;padding:0 7px;border:1.2px solid var(--ink);border-radius:9px;font-size:12.5px;line-height:18px;
   vertical-align:2px;background:#fff;color:var(--ink);white-space:nowrap}
@@ -456,3 +454,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page #elevation-banner{position:relative}
 #zone-page #elevation-note{margin:4px 0}
 #zone-page #elevation-note[data-repeated]{display:none}
+
+#zone-page details.zv-material-family{margin:0;padding:0;border:0;border-top:1px solid var(--line)}
+#zone-page .zv-material-family > summary{padding:7px 2px;color:var(--ink);font-size:14px;font-weight:600}
+#zone-page .zv-family-count{margin-left:8px;color:var(--soft);font-weight:400}

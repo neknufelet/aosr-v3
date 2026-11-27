@@ -57,6 +57,7 @@ from aosr.config.material_gradient import (
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gradient.depth_fit import ZoneRange, narrowed_family, ranged_misfits
+from aosr.gui.material_surfaces import legacy_replacement
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_construction import OriginalReader
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
@@ -260,7 +261,8 @@ def library_depth_targets(settings: MaterialGradientSettings, entries: Sequence[
     return DepthTargets(settings, {entry.id: material for entry in entries if (material := fixed_surface(entry)) is not None},
                         {entry.id: entry.label for entry in entries},
                         frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing != "zone_wall"),
-                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"), read_original)
+                        frozenset(entry.id for entry in entries if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"), read_original,
+                        frozenset(entry.id for entry in entries if legacy_replacement(entry)))
 
 
 _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設", "request": "這一跑另填"}

@@ -15,7 +15,7 @@ let cutGeneration = 0;
 let overviewReturnY = 0;        // 打開這一頁之前輸入頁捲到哪裡（回來時捲回去）
 let followed = [];              // 由左右對稱代選的區
 let selected = [];              // 選了哪幾區（「牆/區代號」，照點的先後）
-let panelShowAll = false;       // 小框「指定貼一種」下拉的「顯示全部材料」（#1176 舊做法表那一個搬來，#1265；舊表單元 3 之二第二趟拆了）：只記在這一頁
+const familyOpen = new Map();   // 本頁按面別、做法記住使用者展開的材料組。
 let draft = null;               // 面板上現在點的：{mode, materialId, ticks, depthText, depthBad}；還沒點是 null（後三格見 untouched）
 let draftTouched = false;       // 面板上的選項是使用者自己點的（再加選別區時不重算）
 let ruleDraft = false;
@@ -1068,7 +1068,7 @@ function materialShow(entry, wall) {
   // 整個名字寫一次（會折行）：下拉收起來的那一格只有一行，名字長的會被截掉。
   const name = el("div", "zv-fullname", vprWords(entry.label)); name.id = "zone-panel-name"; show.append(name);
   if (fixedLayers(entry).length) {
-    const backing = entry.kind === "construction" && entry.backing !== "zone_wall" ? (entry.backing === "air" ? "空氣" : "硬牆") : null;
+    const backing = replacesZone(entry) ? (fixedSurface(entry).backing === "air" ? "空氣" : "硬牆") : null;
     const head = el("h4", null, "構造 "); head.append(el("span", null, [fixedDepthWords(entry), backing ? `背後是${backing}` : `貼在${originalFace(wall)}上`].filter(Boolean).join("，")));
     show.append(head, ...structureStrip(entry, backing ?? originalFace(wall)));
   }
@@ -1243,7 +1243,12 @@ function undoCandidate() {
   draft.rangeRefused = "";
   renderZoneOverview();
 }
+function replacesZone(entry) {
+  return entry.kind === "construction" ? entry.backing !== "zone_wall" :
+    ["surface_itself", "door_window", "ceiling_build"].includes(entry.placement.group);
+}
 function fixedDescription(entry) {
+  if (replacesZone(entry)) return "整塊換掉這一區";
   const depth = fixedDepthWords(entry);
   return depth ? `整塊貼、固定 ${depth.replace("總厚約 ", "")}` : "整塊貼、固定厚度未提供";
 }
@@ -1371,6 +1376,41 @@ const visibleCurves = new IntersectionObserver(entries => {
   void drawVisibleSparks();
 });
 
+function visibleRadios(container) {
+  return [...container.querySelectorAll('[role="radio"]:not([hidden])')].filter(row => !row.closest("details:not([open])"));
+}
+function radioTabStop(container) {
+  const visible = visibleRadios(container);
+  const stop = visible.find(row => row.getAttribute("aria-checked") === "true") ?? visible[0];
+  for (const row of container.querySelectorAll('[role="radio"]')) row.tabIndex = row === stop ? 0 : -1;
+}
+
+function materialFamilies(container, walls, rows) {
+  const face = walls.every(wall => wall === "floor") ? "floor" : walls.every(wall => wall === "ceiling") ? "ceiling" :
+    walls.every(wall => wall !== "floor" && wall !== "ceiling") ? "wall" : "mixed";
+  const labels = {porous: "多孔吸音", resonant: "共振吸音", custom: "我組的",
+    surface: {floor: "地板", ceiling: "天花構造", wall: "門、窗、一般牆面", mixed: "門窗與一般面"}[face]};
+  const order = face === "floor" || face === "ceiling"
+    ? ["surface", "porous", "resonant", "custom"] : ["porous", "resonant", "surface", "custom"];
+  for (const family of order) {
+    const members = rows.filter(([entry]) => entry.placement.family === family);
+    const group = el("details", "zv-material-family"), label = labels[family];
+    group.dataset.materialGroup = family;
+    group.setAttribute("aria-label", label);
+    const summary = el("summary", null, label);
+    summary.append(el("span", "zv-family-count", String(members.length)));
+    const key = [container.id, face, family].join("/");
+    group.open = familyOpen.get(key) ?? (members.length > 0 && (face !== "floor" || family === "surface"));
+    group.dataset.expanded = String(group.open);
+    summary.onclick = () => {
+      familyOpen.set(key, !group.open);
+      group.dataset.expanded = String(!group.open);
+    };
+    group.append(summary, ...members.map(([, row]) => row));
+    container.append(group);
+  }
+}
+
 function materialFilter(container) {
   const input = el("input", "zv-find");
   input.type = "search"; input.placeholder = "找材料"; input.setAttribute("aria-label", "找材料");
@@ -1393,16 +1433,14 @@ function materialFilter(container) {
         else label.textContent = name;
       }
     }
-    if (container.getAttribute("role") === "radiogroup") {
-      const visible = [...container.querySelectorAll('[role="radio"]:not([hidden])')];
-      const stop = visible.find(row => row.getAttribute("aria-checked") === "true") ?? visible[0];
-      for (const row of visible) row.tabIndex = row === stop ? 0 : -1;
+    for (const group of container.querySelectorAll("[data-material-group]")) {
+      const matched = group.querySelector(":scope > .zv-material:not([hidden]), :scope > .zv-candidate:not([hidden])");
+      group.hidden = Boolean(query && !matched);
+      group.open = query ? Boolean(matched) : group.dataset.expanded === "true";
     }
+    if (container.getAttribute("role") === "radiogroup") radioTabStop(container);
     empty.hidden = !query || matches > 0;
     empty.textContent = empty.hidden ? "" : `沒有符合「${input.value.trim()}」的材料`;
-    for (const group of container.querySelectorAll("[data-material-group]")) {
-      group.hidden = !group.querySelector(".zv-material:not([hidden])");
-    }
   };
   input.oninput = update;
   input.onkeydown = event => {
@@ -1411,7 +1449,7 @@ function materialFilter(container) {
     if (event.key === "Enter" && input.value.trim()) {
       event.preventDefault();
       const match = [...container.querySelectorAll(".zv-material:enabled:not([data-covered])")]
-        .find(row => row.getClientRects().length && !row.hasAttribute("data-remove-only") && row.getAttribute("aria-checked") !== "true");
+        .find(row => !row.closest("[hidden], details:not([open])") && !row.hasAttribute("data-remove-only") && row.getAttribute("aria-checked") !== "true");
       if (match) {
         input.value = ""; update();
         match.click();
@@ -1544,8 +1582,12 @@ function searchForm(items, walls, sync) {
   const list = el("div"); list.id = "zone-panel-list";
   const ids = candidateIds(ticks);
   form.append(deepestRow(items, walls, sync));
-  for (const id of ids) list.append(candidateRow(id, items, ticks, covered.get(id), sync));
-  if (ticks.count(ZONE_NONE)) list.append(candidateRow(ZONE_NONE, items, ticks, null, sync));
+  const rows = [];
+  const unavailable = [];
+  for (const id of ids) {
+    const entry = libraryEntry(id), row = candidateRow(id, items, ticks, covered.get(id), sync);
+    if (entry) rows.push([entry, row]); else unavailable.push(row);
+  }
   if (!libraryEntries("optimizable").some(entry => pickerFits(entry, walls, ticks))) {
     form.append(el("p", "zv-form-note", "這裡沒有可調的材料：程式只能從「不貼」開始，可以再勾固定成品讓它比"));
   }
@@ -1555,8 +1597,6 @@ function searchForm(items, walls, sync) {
     form.append(notice);
   }
   const others = el("div"); others.id = "zone-panel-picker";
-  if (!ticks.count(ZONE_NONE)) others.append(candidateRow(ZONE_NONE, items, ticks, null, sync));
-  const groups = new Map();
   for (const entry of [...libraryEntries("optimizable"), ...assignableEntries().filter(fixedCandidate)]) {
     if (ticks.count(entry.id) || !pickerFits(entry, walls, ticks)) continue;
     const reason = candidateRestriction(entry, covered.get(entry.id), false);
@@ -1576,17 +1616,13 @@ function searchForm(items, walls, sync) {
       if (referenceOnly(entry.id)) row.dataset.reference = "off";
       row.append(el("small", "zv-covered-why", explanation));
     }
-    const name = catalogKind(entry) === "fixed" ? "成品" : "參數構造";
-    if (!groups.has(name)) {
-      const group = el("div");
-      group.setAttribute("role", "group"); group.setAttribute("aria-label", name);
-      group.dataset.materialGroup = name; groups.set(name, group); others.append(group);
-    }
-    groups.get(name).append(row);
+    rows.push([entry, row]);
   }
+  materialFamilies(others, walls, rows);
   const pool = el("div");
-  pool.append(el("p", "zv-list-hint", `已勾 ${ids.length} 種${ticks.count(ZONE_NONE) ? "＋也可以不貼" : ""}`), list,
-    el("p", "zv-list-hint", "其他"), others);
+  list.append(others, ...unavailable);
+  pool.append(el("p", "zv-list-hint", `已勾 ${ids.length} 種${ticks.count(ZONE_NONE) ? "＋也可以不貼" : ""}`), list);
+  (ticks.count(ZONE_NONE) ? list : pool).append(candidateRow(ZONE_NONE, items, ticks, null, sync));
   const counts = el("small", null, ticks.ids.some(id => ticks.state(id) === "some")
     ? `選中的 ${items.length} 區清單不一樣：沒動的勾，各區照目前的。每一區各自最佳化。`
     : `程式從下面勾的 ${pickableChoices(ticks.ids).length} 種裡選，每一區各自最佳化。`);
@@ -1787,30 +1823,21 @@ function panelCard() {
       material.onkeydown = event => {
         const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
         if (!step || event.isComposing) return;
-        const rows = [...material.querySelectorAll('[role="radio"]')].filter(row => row.getClientRects().length);
+        const rows = visibleRadios(material);
         const index = rows.indexOf(event.target);
         if (index < 0) return;
         event.preventDefault();
         const next = rows[(index + step + rows.length) % rows.length];
         next.focus(); next.click();
       };
+      material.addEventListener("toggle", () => radioTabStop(material), true);
       const option = entry => materialRow({entry, name: entry ? vprWords(entry.label) + (entry.id === ruleMaterial && !sameHere ? "（＝其他牆面）" : "") : "照現在貼的，不換",
         description: entry && fixedDescription(entry), role: "radio", state: String(draft.materialId === (entry?.id ?? "")),
         id: `zone-panel-material-${entry?.id ?? ""}`, activate: () => choose("fixed", entry?.id ?? "")});
       if (allPasted) material.append(option(null));
-      for (const entry of assignableEntries()) {
-        if (walls.every(wall => usableHere(entry, wall)) || (!panelShowAll && entry.id === draft.materialId)) material.append(option(entry));
-      }
-      if (panelShowAll) for (const [group, entries] of hiddenGroups(walls, assignableEntries())) {
-        const block = el("div"); block.dataset.materialGroup = group;
-        block.setAttribute("aria-label", hiddenGroupLabel(group)); block.setAttribute("role", "group");
-        block.append(el("small", null, hiddenGroupLabel(group)), ...entries.map(option)); material.append(block);
-      }
-      const all = el("label", "zv-show-all"), box = el("input");
-      box.type = "checkbox"; box.id = "zone-panel-show-all"; box.checked = panelShowAll;
-      box.onchange = () => { panelShowAll = box.checked; renderZoneOverview(); };
-      all.append(box, SHOW_ALL_WORDS);
-      content.append(deepestRow(items, walls, sync), materialFilter(material), all, ...awayLines(items), material);
+      const rows = assignableEntries().filter(entry => walls.every(wall => usableHere(entry, wall)) || entry.id === draft.materialId);
+      materialFamilies(material, walls, rows.map(entry => [entry, option(entry)]));
+      content.append(deepestRow(items, walls, sync), materialFilter(material), ...awayLines(items), material);
       const entry = libraryEntry(draft.materialId);
       if (entry) {
         const details = fold("zone-panel-preview", "材料詳情");
@@ -2224,6 +2251,7 @@ function saidWords() { return [keptSaid, pageSaid === keptSaid ? "" : pageSaid].
 function closeOverview() {
   if (cutting) restoreElevation();
   overviewOpen = false;
+  familyOpen.clear();
   renderZoneOverview();
   // 這一頁開著時輸入頁是藏起來的：那時重畫的平面圖，字量不到寬度、避不開彼此。回來看得到了，照同一份再畫一次。
   drawShownPlan();

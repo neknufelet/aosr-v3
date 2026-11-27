@@ -275,7 +275,7 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         page.locator("#zone-panel-only-glass_wool_48k").click()
         row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
-        assert page.locator("#zone-panel-list > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["none"]
+        assert page.locator("#zone-panel-list .zv-candidate[data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["none"]
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
         row_options(page, "none")
@@ -351,12 +351,12 @@ def test_fixed_products_stay_folded_and_the_line_says_how_many_there_are_and_how
         expect(page.locator("#zone-panel-picker")).to_be_visible()
         expect(page.locator(f"#zone-panel-row-{vpr}")).to_have_count(0)
         page.locator("#zone-panel-picker-search").focus()
-        assert page.locator("#zone-panel-picker [data-entry-kind='fixed']").count() == count
+        assert page.locator("#zone-panel-picker [data-entry-kind='fixed'][aria-checked=false]").count() == count
         page.locator(f"#zone-panel-pick-{vpr}").click()
         expect(page.locator("#zone-panel-picker")).to_be_visible()
         expect(page.locator(f"#zone-panel-row-{vpr}")).to_be_visible()
         page.locator("#zone-panel-picker-search").focus()
-        assert page.locator("#zone-panel-picker [data-entry-kind='fixed']").count() == count - 1
+        assert page.locator("#zone-panel-picker [data-entry-kind='fixed'][aria-checked=false]").count() == count - 1
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 5 種裡選，每一區各自最佳化。")
         assert watched.page_errors == [] and watched.console_errors == []
 

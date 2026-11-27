@@ -235,7 +235,8 @@ def test_fixed_form_uses_short_label_and_depth_placeholder(tmp_path: Path, brows
         page = watched.page
         _open_zone(page)
         page.locator("#zone-panel-mode-fixed").check()
-        expect(page.locator(".zv-show-all")).to_have_text("顯示全部材料")
+        expect(page.locator("#zone-panel-material details > summary")).to_have_count(4)
+        expect(page.locator(".zv-show-all")).to_have_count(0)
         expect(page.locator("#zone-panel-depth")).to_have_attribute("placeholder", "空白＝不限")
         expect(page.locator("#zone-panel-deepest")).not_to_contain_text("空白＝不限")
 

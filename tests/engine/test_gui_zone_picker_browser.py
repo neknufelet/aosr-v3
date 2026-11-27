@@ -32,8 +32,8 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z3")
-        rows = page.locator("#zone-panel-list > [data-choice]")
-        _expect_value(page, "() => [...document.querySelectorAll('#zone-panel-list > [data-choice]')].map(row => row.dataset.choice)",
+        rows = page.locator("#zone-panel-list .zv-candidate[data-choice]")
+        _expect_value(page, "() => [...document.querySelectorAll('#zone-panel-list .zv-candidate[data-choice]')].map(row => row.dataset.choice)",
                       [WOOLS[0], WOOLS[1], "none"])
         expect(page.locator("#zone-panel-picker")).to_be_visible()
         page.locator("#zone-panel-picker-search").focus()
@@ -43,12 +43,11 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
             e.backing !== 'zone_wall' && !e.placement.surfaces.includes('yL')).length""")
         expect(page.locator(".zv-picker-foot")).to_contain_text(f"只能貼在別面的 {elsewhere} 筆不列")
         search.fill("玻璃")
-        for group in ("參數構造", "成品"):
-            options = page.get_by_role("group", name=group, exact=True).get_by_role("checkbox")
-            assert options.count() > 0
-            for option in options.all():
-                expect(option.locator("mark").first).to_have_text("玻璃")
-                expect(option.locator(".zv-description")).to_be_visible()
+        options = page.get_by_role("group", name="多孔吸音", exact=True).get_by_role("checkbox")
+        assert {"fixed", "optimizable"} == set(options.evaluate_all("rows => rows.map(row => row.dataset.entryKind)"))
+        for option in options.all():
+            expect(option.locator("mark").first).to_have_text("玻璃")
+            expect(option.locator(".zv-description")).to_be_visible()
         search.fill("NoMatch")
         expect(page.locator("#zone-panel-form")).to_contain_text("沒有符合「NoMatch」的")
         search.press("Escape")
@@ -83,7 +82,7 @@ def test_only_and_undo_restore_each_zones_draft_and_ranges(tmp_path: Path, brows
         page.locator("#zone-panel-range-toggle-glass_wool_48k").click()
         high = page.locator("#zone-panel-range-glass_wool_48k-porous-high")
         high.select_option("0.1")
-        rows = page.locator("#zone-panel-list > [data-choice]")
+        rows = page.locator("#zone-panel-list .zv-candidate[data-choice]")
         before = _visible_candidate_texts(page, rows)
         row_options(page, "glass_wool_24k")
         page.locator("#zone-panel-only-glass_wool_24k").click()
@@ -696,7 +695,7 @@ def test_enter_skips_the_first_disabled_match(tmp_path: Path, browser: Browser) 
         page.locator("#zone-panel-picker-search").focus()
         search = page.locator("#zone-panel-picker-search")
         search.fill("48K 玻璃棉")
-        options = page.locator("#zone-panel-picker button:visible")
+        options = page.locator("#zone-panel-picker button[role=checkbox][aria-checked=false]:visible")
         expect(options.first).to_have_attribute("data-covered", WOOLS[0])
         expect(page.locator("#zone-panel-pick-keyboard_sample")).to_be_enabled()
         search.press("Enter")

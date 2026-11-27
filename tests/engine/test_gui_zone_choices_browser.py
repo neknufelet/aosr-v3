@@ -1,7 +1,4 @@
-"""真瀏覽器考每一區的材料清單（#1265 單元 3 之二第二趟起舊做法表拆了：改在「這間房貼什麼」的小框選、輸入頁第 2 段右欄讀；#1176，老闆 11-15「109示範又不知道是娥麼這也能當成一個材料」「都不知道在講甚麼」）：
-選單與小框只列這一面能貼的（門、窗、地板、整片吊頂、另一間示範房的不出現），指定貼一種的下拉可以打開「顯示全部材料」分組列出；
-這一區現在放的那一筆就算不是這一面用的也照樣顯示；用語是白話（做法三種、原牆不寫阻抗數字、可調寫得出調什麼）。
-材料庫用自己編的合成 12 筆（``_sample_material_library``），房間用 109 號房的長寬高。"""
+"""用自編材料庫驗證各面的候選、指定材料，以及套用後的分區用語。"""
 from __future__ import annotations
 
 import json
@@ -27,7 +24,7 @@ from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 from tests.engine.test_gui_zone_modes_browser import _modes, _save
 
-HIDDEN_ON_WALLS = ("hall_door_hollow_core", "side_window_glass_12mm_single", "ceiling_gypsum9mm_gap300",
+HIDDEN_ON_WALLS = ("ceiling_gypsum9mm_gap300",
                    "perforated_gypsum_8_18r_backed_gw30_ceiling", "carpet_on_concrete", "joist_floor_plank_fixed",
                    "demo109_rockwool60k_capped", "demo109_measured_pet35_synthetic_b7")
 DOOR = "hall_door_hollow_core"
@@ -57,7 +54,7 @@ CONTRAST = """node => {
 }"""
 
 
-def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(tmp_path: Path, browser: Browser) -> None:
+def test_menus_list_only_what_this_face_can_take(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -69,9 +66,8 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         fixed = material_values(page, "x0", "whole_wall")
         assert "glass_wool_48k_50mm" in fixed and "pet60_vpr_steel1p2mm_foam90_sample" in fixed
         assert not set(HIDDEN_ON_WALLS) & set(fixed)
+        assert {DOOR, "side_window_glass_12mm_single", "side_window_glass_table_upper"} <= set(fixed)
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
-        # 舊表「顯示全部材料」那一段：小框那一題蓋得到（test_gui_zone_panel_show_all_browser.py 的
-        # test_the_panel_lists_only_what_this_face_can_take_and_show_all_reveals_the_rest，乙）。
         choose_mode(page, "x0", "whole_wall", "search")
         assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
         # 舊表方塊上「可調：…」那幾個字跟著表走：48K、24K 兩句同字在那一頁清單卡（test_gui_zone_overview_browser.py 的
@@ -87,20 +83,19 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         page.locator("#zone-panel-cancel").click()
         page.locator("#zone-page-close").click()
         page.locator("#elevation-wall-floor").click()
-        assert material_values(page, "floor", "whole_wall") == ["carpet_on_concrete"]
+        assert material_values(page, "floor", "whole_wall") == ["carpet_on_concrete", FLOOR_WOOD]
         choose_mode(page, "floor", "whole_wall", "search")
         assert _chips(page, "floor", "whole_wall") == ["none"]
         open_panel(page, "floor", "whole_wall")
         expect(page.locator("#zone-panel-form")).to_contain_text("這裡沒有可調的材料：程式只能從「不貼」開始")
         page.locator("#zone-panel-picker-search").focus()
-        expect(page.locator("#zone-panel-picker button")).to_have_count(1)
+        expect(page.locator("#zone-panel-picker [role=checkbox][aria-checked=false]")).to_have_count(2)
         expect(page.locator("#zone-panel-pick-carpet_on_concrete")).to_be_enabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: Path, browser: Browser) -> None:
-    """選單只列這一面能貼的，但這一區現在放的就是門（打開「顯示全部材料」選的）：關掉之後選單照樣是它、寫出它不是這一面用的；
-    保留原牆的區寫白話、數字收在細節；直接取代整面的（地板本身就是木地板那一筆）照樣顯示、不標紅。"""
+def test_input_page_recognizes_the_assigned_door_and_existing_floor(tmp_path: Path, browser: Browser) -> None:
+    """門和木地板採各自的面，右欄能認出已指定的門和原方案內的木地板。"""
     document = room109_document()
     floor = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == FLOOR_WOOD)
     cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["floor"][0]["material"] = (
@@ -111,14 +106,16 @@ def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: P
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        # 舊表「顯示全部材料」分組、選了門之後下拉照樣是它與「不是前牆用的…背後是空氣」：小框同名題蓋得到（乙）。
-        choose_fixed(page, "x0", "whole_wall", DOOR, show_all=True)
+        # 回到輸入頁再重開，門仍是這一區已選的材料。
+        choose_fixed(page, "x0", "whole_wall", DOOR)
         assert fixed_value(page, "x0", "whole_wall") == DOOR
 
         choose_mode(page, "x0", "whole_wall", "keep_original")
         # 舊表「不貼」那一格（#zone-keep-）→ 右欄那一區那一句的開頭（同一支 keepWords）。
-        expect(page.locator("#wall-zone-what-x0-whole_wall")).to_have_text(re.compile(r"^原牆原樣，不貼東西。"))
-        expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
+        door_name = next(entry["label"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)
+        expect(page.locator("#wall-zone-what-x0-whole_wall")).to_have_text(f"原牆「{door_name}」原樣，不貼東西。改這一區 ▸")
+        expect(page.locator("#zone-numbers-x0-whole_wall")).to_have_text("原牆：多層構造")
+        assert page.evaluate("scheme.scene.surface_zones_by_wall.x0[0].material.backing") == "air"
 
         # 地板本身就是木地板那一筆（直接取代整面的固定阻抗，有的房間地板就是這樣）：選單照樣是它，但它就是地板本身，不標紅說不是地板用的。
         page.locator("#elevation-wall-floor").click()
@@ -451,7 +448,7 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         # （舊表下拉第一項「現在：沒貼東西（…）」→ 右欄那一區那一句，改字：拿掉「現在：」）。
         expect(page.locator("#wall-zone-what-ceiling-whole_wall")).to_contain_text(
             "沒貼東西（原本的天花「天花 纖維水泥板 8 mm＋岩棉毯 30 mm 平鋪在板背＋18 cm 空腔（剛背）」原樣）")
-        choose_fixed(page, "ceiling", "whole_wall", ceiling, show_all=True, said_part="選的跟原本一樣，當成不貼")
+        choose_fixed(page, "ceiling", "whole_wall", ceiling, said_part="選的跟原本一樣，當成不貼")
         expect_mode(page, "ceiling", "whole_wall", "keep_original")
         # 那一列自己也寫為什麼（舊表那一列的新家：第 2 段右欄那一區，id 照舊）。
         expect(page.locator("#zone-same-ceiling-whole_wall")).to_contain_text("跟原本一樣，當成不貼")
@@ -482,7 +479,7 @@ def test_the_same_as_original_remark_goes_once_the_original_ceiling_changes(tmp_
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-ceiling").click()
-        choose_fixed(page, "ceiling", "whole_wall", ceiling, show_all=True, said_part="選的跟原本一樣，當成不貼")
+        choose_fixed(page, "ceiling", "whole_wall", ceiling, said_part="選的跟原本一樣，當成不貼")
         same = page.locator("#zone-same-ceiling-whole_wall")
         expect(same).to_contain_text("跟原本一樣，當成不貼")
         page.locator("#edit-wall-original").click()
@@ -510,7 +507,7 @@ def test_the_same_as_original_remark_goes_while_a_layer_of_the_original_ceiling_
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-ceiling").click()
-        choose_fixed(page, "ceiling", "whole_wall", ceiling, show_all=True, said_part="選的跟原本一樣，當成不貼")
+        choose_fixed(page, "ceiling", "whole_wall", ceiling, said_part="選的跟原本一樣，當成不貼")
         same = page.locator("#zone-same-ceiling-whole_wall")
         expect(same).to_contain_text("跟原本一樣，當成不貼")
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
@@ -594,7 +591,8 @@ def test_a_tunable_vpr_in_the_library_never_shows_on_the_zone_page(tmp_path: Pat
         page.locator("#elevation-wall-x0").click()
         assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", WOOL, "none"]
         assert page.evaluate(f"[zoneLibrary.length > 0, zoneLibrary.some(entry => entry.id === '{VPR}')]") == [True, False]
-        assert page.evaluate(f"['x0', 'floor'].flatMap(wall => hiddenGroups(wall, zoneLibrary).flatMap(([, items]) => items))"
-                             f".some(entry => entry.id === '{VPR}')") is False
+        for wall in ("x0", "floor"):
+            page.locator(f"#elevation-wall-{wall}").click()
+            assert VPR not in material_values(page, wall, "whole_wall")
         assert "鋼板 VPR（自編）" not in page.locator("body").inner_text()
         assert watched.page_errors == [] and watched.console_errors == []

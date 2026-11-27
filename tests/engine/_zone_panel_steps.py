@@ -75,14 +75,12 @@ def choose_mode(page: Page, wall: str, key: str, mode: str, *, one_side: bool = 
     apply_and_return(page, said=said, said_part=said_part)
 
 
-def choose_fixed(page: Page, wall: str, key: str, material: str, *, show_all: bool = False, one_side: bool = False,
+def choose_fixed(page: Page, wall: str, key: str, material: str, *, one_side: bool = False,
                  said: str | None = None, said_part: str | None = None) -> None:
-    """小框把那一區改成指定貼一種、選那一筆（show_all：先勾「顯示全部材料」才列得出不列的那幾組），套用、回輸入頁。
+    """小框把那一區改成指定貼一種、選那一筆，套用、回輸入頁。
     取代舊做法表的「指定貼哪一種」下拉 `#zone-fixed-<牆>-<區>`。"""
     open_alone(page, wall, key, one_side=one_side)
     page.locator("#zone-panel-mode-fixed").check()
-    if show_all:
-        page.locator("#zone-panel-show-all").check()
     pick_fixed_row(page, material)
     apply_and_return(page, said=said, said_part=said_part)
 

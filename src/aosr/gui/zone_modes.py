@@ -4,7 +4,7 @@
 
 - 「保留原牆」與「交給搜尋」：放原牆（搜尋區在方案裡先放原牆，見 1-6a ``gradient_plan``：固定與保留原牆都凍成
   ``scheme-material``）。
-- 「固定這一組材料」選了材料庫的一筆：多層構造貼在原牆上（``MountedOnWall``，最後一層背後接原牆，1-5 的改善基準
+- 「固定這一組材料」選了材料庫的一筆：門窗與整片天花構造整塊取代分區；一般多層構造貼在原牆上（``MountedOnWall``，最後一層背後接原牆，1-5 的改善基準
   拆得回原牆）；固定阻抗與實測阻抗表本身就是整面的表面阻抗，直接換掉那一區，畫面點明「直接取代、不是貼上」。
   選的多層構造跟這一區原牆一模一樣（例如天花原牆本身就是那一套吊頂）：不貼上去疊兩層，放原牆、回
   ``same_as_original``，網頁把做法改成「不貼，保留原樣」（#1175、#1176）。
@@ -39,6 +39,7 @@ from starlette.routing import Route
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.gui.material_editor import plain_error, user_library_path
+from aosr.gui.material_surfaces import legacy_replacement
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.wall_words import draft_wall_words
 from aosr.gui.zone_construction import OriginalProblem, construction_pick, mismatch_words, read_original
@@ -179,10 +180,10 @@ def zone_material(current: SurfaceMaterial, base: Origin, entry: LibraryEntry | 
     if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall":
         layers = entry.layers
         same = base.source != "unknown" and isinstance(base.material, Assembly) and base.material.layers == layers
-    elif isinstance(chosen, Assembly) and not isinstance(entry, ConstructionEntry):
+    elif isinstance(chosen, Assembly) and not isinstance(entry, ConstructionEntry) and not legacy_replacement(entry):
         layers = chosen.layers
         same = base.source != "unknown" and base.material == chosen
-    elif isinstance(entry, ConstructionEntry) and chosen is not None:
+    elif isinstance(chosen, Assembly):
         if chosen == base.material and base.source != "unknown":
             return ZoneChange(base.material, f"選的「{entry.label}」跟這一區{face}一模一樣，當成不貼（保留原樣）", True)
         note = f"記成選上去的「{entry.label}」，整塊構造直接取代這一區的{face_itself(wall)}。"
@@ -218,6 +219,7 @@ class ZoneScene:
     entries: tuple[LibraryEntry, ...]
     replacements: tuple[SurfaceMaterial, ...]
     standalone: Mapping[str, object]
+    legacy: Mapping[str, object]
     original_walls: OriginalWalls | None
     names: Mapping[str, str]
 
@@ -270,6 +272,7 @@ class ZoneMaterialHandlers:
         replacements = tuple(material for item in entries if (material := fixed_surface(item)) is not None
                              if not isinstance(material, Assembly))
         standalone = {item.id: fixed_surface(item) for item in entries if isinstance(item, ConstructionEntry) and item.backing != "zone_wall"}
+        legacy = {item.id: fixed_surface(item) for item in entries if legacy_replacement(item)}
         prior = None
         if original_scheme_id is not None:
             def resolve(original: Scheme) -> OriginalWalls:
@@ -282,7 +285,7 @@ class ZoneMaterialHandlers:
             if isinstance(resolved, OriginalProblem):
                 raise ZoneMaterialError(resolved.error or resolved.reason, resolved.status)
             prior = resolved
-        return ZoneScene(scheme, walls, entries, replacements, standalone, prior, draft_wall_words(document))
+        return ZoneScene(scheme, walls, entries, replacements, standalone, legacy, prior, draft_wall_words(document))
 
     def _one(self, scene: ZoneScene, choice: ZoneChoice) -> dict[str, object]:
         """一區選了之後放什麼（單筆與一批同一套）：原牆照 ``origin`` 的先後取，再照 ``zone_material`` 組。"""
@@ -291,7 +294,10 @@ class ZoneMaterialHandlers:
         item, box = _zone_index(scene.walls, scene.scheme.scene.room_m, choice.wall, choice.zone, scene.names)
         current = item.material
         entry = self._entry(scene.entries, choice.material_id) if choice.choice == "fixed" and choice.material_id else None
-        pick = construction_pick(current, scene.standalone, choice.picked_entry,
+        standalone = dict(scene.standalone)
+        if choice.picked_entry in scene.legacy and choice.picked_entry is not None:
+            standalone[choice.picked_entry] = scene.legacy[choice.picked_entry]
+        pick = construction_pick(current, standalone, choice.picked_entry,
                                  lambda: scene.original_walls, scene.scheme.scene.room_m, choice.wall, choice.zone, box)
         if pick is not None and pick.identifier is not None:
             comparison = pick.comparison
@@ -310,7 +316,7 @@ class ZoneMaterialHandlers:
                   "same_as_original": change.same_as_original}
         # 新頁面每次帶這一區記的代號（可為 null）。舊呼叫端只用舊材料庫時保留原回覆的每個位元組。
         if "picked_entry" in choice.model_fields_set or any(isinstance(item, ConstructionEntry) for item in scene.entries):
-            result["picked_entry"] = entry.id if entry and entry.id in scene.standalone and not change.same_as_original else None
+            result["picked_entry"] = entry.id if entry and (entry.id in scene.standalone or entry.id in scene.legacy) and not change.same_as_original else None
         return result
 
     def change(self, body: ZoneMaterialRequest) -> dict[str, object]:

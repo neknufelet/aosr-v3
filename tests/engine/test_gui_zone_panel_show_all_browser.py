@@ -1,11 +1,4 @@
-"""「顯示全部材料」搬到「這間房貼什麼」小框（#1265 單元 3 之二第 B 條；#1176 舊做法表那一個照留到拆表那一趟）。
-
-小框「指定貼一種」下拉平常只列選中的每一面都能貼的；旁邊的開關打開才分組列出不列的（門、窗、整片天花構造、另一間示範房的），
-分組與組標題跟舊做法表同一支。選了不是這一面用的那一筆：關掉開關下拉照樣是它，套用後小框寫「X 不是○牆用的：理由」。
-選到跟原牆一模一樣的那一筆：做法變成不貼，回話照舊做法表那一句講（第 E 條）。
-
-三題各照 test_gui_zone_choices_browser.py 考「顯示全部」的那一題（同名去掉舊表那一半），斷言的字照原樣。
-方案與材料庫都是考卷自己編的（109 號房、_sample_material_library）。"""
+"""分區右欄的材料分組、相符面、選料後的草稿與套用。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,7 +17,6 @@ from tests.engine.test_gui_zone_choices_browser import DOOR, FLOOR_WOOD, HIDDEN_
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 from tests.engine.test_gui_zone_modes_browser import _modes
 
-SHOW_ALL = "顯示全部材料"
 CEILING = "ceiling_fibrecement8mm_wool30_on_board_gap180"
 Zones = dict[str, dict[str, list[dict[str, object]]]]
 
@@ -43,9 +35,7 @@ def _apply(page: Page) -> None:
     page.wait_for_function("!document.querySelector('main').inert && !inputBusy && !document.getElementById('zone-page').inert")
 
 
-def test_the_panel_lists_only_what_this_face_can_take_and_show_all_reveals_the_rest(tmp_path: Path, browser: Browser) -> None:
-    """前牆整面：指定貼一種的下拉列牆上能貼的固定成品（含合成的 VPR），門、窗、天花構造、地毯、示範房一筆都沒有；
-    打開「顯示全部材料」才列出來，關掉又收起；開著時加候選的挑選框照樣不列它們。地板只列地毯那一筆。"""
+def test_both_pickers_group_rows_and_remember_folds(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -55,32 +45,49 @@ def test_the_panel_lists_only_what_this_face_can_take_and_show_all_reveals_the_r
         fixed = _values(page, "#zone-panel-material [role=radio]")
         assert "glass_wool_48k_50mm" in fixed and "pet60_vpr_steel1p2mm_foam90_sample" in fixed
         assert not set(HIDDEN_ON_WALLS) & set(fixed)
-        expect(page.locator("#zone-page label.zv-show-all")).to_have_text(SHOW_ALL)
-        page.locator("#zone-panel-show-all").check()
-        assert set(HIDDEN_ON_WALLS) - {"demo109_rockwool60k_capped"} <= set(_values(page, "#zone-panel-material [role=radio]"))
-        page.locator("#zone-panel-show-all").uncheck()
-        assert not set(HIDDEN_ON_WALLS) & set(_values(page, "#zone-panel-material [role=radio]"))
-        # 開關開著換成由程式最佳化：加候選的挑選框不跟著列不列的那幾筆。
-        page.locator("#zone-panel-show-all").check()
-        page.locator("#zone-panel-mode-search").check()
-        page.locator("#zone-panel-picker-search").focus()
-        for choice in HIDDEN_ON_WALLS:
-            expect(page.locator(f"#zone-panel-pick-{choice}")).to_have_count(0)
+        for mode, container in (("fixed", "material"), ("search", "picker")):
+            page.locator(f"#zone-panel-mode-{mode}").check()
+            groups = page.locator(f"#zone-panel-{container} details[data-material-group]")
+            expect(groups.locator(":scope > summary")).to_have_count(4)
+            assert groups.evaluate_all("els => els.map(e => e.getAttribute('aria-label'))") == ["多孔吸音", "共振吸音", "門、窗、一般牆面", "我組的"]
+            expect(groups.last.locator("summary")).to_have_text("我組的0")
+            assert not groups.last.evaluate("e => e.open")
+            for group in groups.all():
+                assert int(group.locator(".zv-family-count").inner_text()) == group.locator(".zv-material").count()
+            if mode == "search":
+                wool = groups.first.locator("#zone-panel-pick-glass_wool_48k")
+                expect(wool).to_be_checked()
+                groups.first.locator(":scope > summary").click()
+                expect(wool).to_be_hidden()
+                groups.first.locator(":scope > summary").click()
+                expect(wool).to_be_visible()
+            expect(groups.nth(2).locator(f"[value={DOOR}]")).to_be_visible()
+            groups.nth(2).locator("summary").click()
+            expect(groups.nth(2).locator(f"[value={DOOR}]")).to_be_hidden()
+            page.locator("#zone-panel-mode-keep_original").check()
+            page.locator(f"#zone-panel-mode-{mode}").check()
+            expect(groups.nth(2).locator(f"[value={DOOR}]")).to_be_hidden()
+            if mode == "fixed":
+                groups.first.locator("summary").click()
+                visible = groups.nth(1).get_by_role("radio")
+                expect(visible.first).to_have_attribute("tabindex", "0")
+                visible.last.focus()
+                page.keyboard.press("ArrowRight")
+                expect(visible.first).to_be_checked()
+                expect(visible.first).to_be_focused()
+        expect(page.locator("#zone-panel-show-all")).to_have_count(0)
         page.locator("#zone-panel-cancel").click()
         page.locator("#zone-page-close").click()
         _fixed_panel(page, "floor")
-        page.locator("#zone-panel-show-all").uncheck()
-        assert _values(page, "#zone-panel-material [role=radio]") == ["carpet_on_concrete"]
-        # 小框一次選好幾面時（zone_overview.js 下拉那一段傳的是選中的每一面）：有任何一面不能貼就算不列的。
-        hidden = "walls => hiddenGroups(walls, assignableEntries()).flatMap(([, entries]) => entries.map(entry => entry.id))"
-        assert "glass_wool_48k_50mm" not in page.evaluate(hidden, ["x0"])
-        assert {"glass_wool_48k_50mm", "carpet_on_concrete"} <= set(page.evaluate(hidden, ["x0", "floor"]))
+        groups = page.locator("#zone-panel-material details")
+        assert groups.evaluate_all("els => els.map(e => e.getAttribute('aria-label'))") == ["地板", "多孔吸音", "共振吸音", "我組的"]
+        assert _values(page, "#zone-panel-material [role=radio]") == ["carpet_on_concrete", FLOOR_WOOD]
+        expect(groups.first.locator(f"[value={FLOOR_WOOD}]")).to_be_visible()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: Path, browser: Browser) -> None:
-    """打開「顯示全部材料」選門：門列在「不列的：門、窗」那一組；關掉之後下拉照樣是門；套用後小框寫門不是前牆用的與理由。
-    直接取代整面的（地板本身就是木地板那一筆）是地板本身，不寫不是地板用的。"""
+def test_picked_door_reopens_with_its_own_backing(tmp_path: Path, browser: Browser) -> None:
+    """牆上直接選門，顯示自己的背後；套用、重開後仍保有分區指定的門。"""
     document = room109_document()
     floor = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == FLOOR_WOOD)
     cast(Zones, document["scene"])["surface_zones_by_wall"]["floor"][0]["material"] = cast(dict[str, object], floor)
@@ -90,16 +97,17 @@ def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: P
         page = watched.page
         _open_scheme(page, "room109")
         _fixed_panel(page, "x0")
-        page.locator("#zone-panel-show-all").check()
-        expect(page.locator(f"#zone-panel-material [role=group][aria-label='不列的：門、窗'] [role=radio][value={DOOR}]")).to_have_count(1)
+        expect(page.get_by_role("group", name="門、窗、一般牆面").locator(f"[value={DOOR}]")).to_be_visible()
         pick_fixed_row(page, DOOR)
-        page.locator("#zone-panel-show-all").uncheck()
         expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", DOOR)
+        page.locator("#zone-panel-preview > summary").click()
+        expect(page.locator("#zone-panel-show h4").first).to_contain_text("背後是空氣")
         _apply(page)
-        assert page.evaluate("scheme.scene.surface_zones_by_wall.x0[0].material.kind") == "mounted_on_wall"
+        assert page.evaluate("structuredClone(scheme.scene.surface_zones_by_wall.x0[0].material)") == next(
+            entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)
         page.locator("#zone-map [data-wall='x0'][data-zone='whole_wall'] .zv-fill").click()
-        expect(page.locator("#zone-panel-away-x0-whole_wall")).to_contain_text("不是前牆用的")
-        expect(page.locator("#zone-panel-away-x0-whole_wall")).to_contain_text("背後是空氣")
+        expect(page.locator("#zone-panel-away-x0-whole_wall")).to_have_count(0)
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", DOOR)
         page.locator("#zone-panel-cancel").click()
         page.locator("#zone-page-close").click()
         _fixed_panel(page, "floor")
@@ -108,7 +116,7 @@ def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: P
 
 
 def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: Path, browser: Browser) -> None:
-    """#1175：天花整面本來就是那一筆吊頂，小框打開「顯示全部材料」選同一筆、套用：做法變成「不貼，保留原樣」、
+    """#1175：天花整面本來就是那一筆吊頂，小框直接選同一筆、套用：做法變成「不貼，保留原樣」、
     回話說「選的跟原本一樣，當成不貼」，那一區放的還是原本那一份（第 E 條：回話跟存下來的對得上）。"""
     built = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == CEILING)
     document = room109_document()
@@ -119,9 +127,8 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         page = watched.page
         _open_scheme(page, "room109")
         _fixed_panel(page, "ceiling")
-        # 整片天花構造平常不列成貼上去的處理。
-        assert CEILING not in _values(page, "#zone-panel-material [role=radio]")
-        page.locator("#zone-panel-show-all").check()
+        # 天花可直接選整片吊頂。
+        assert CEILING in _values(page, "#zone-panel-material [role=radio]")
         pick_fixed_row(page, CEILING)
         _apply(page)
         expect(page.locator("#zone-page-note")).to_contain_text("選的跟原本一樣，當成不貼")
@@ -132,7 +139,7 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
 
 
 def test_an_unreadable_depth_stays_refused_and_says_so_after_show_all_redraws_the_panel(tmp_path: Path, browser: Browser) -> None:
-    """#1265 單元 3 之二第二趟追加設計洞：小框「最深」打了讀不出來的字（「--1」，數字格讀成空字串、另標不成數字），再勾「顯示全部材料」
+    """#1265 單元 3 之二第二趟追加設計洞：小框「最深」打了讀不出來的字（「--1」，數字格讀成空字串、另標不成數字），再選另一筆材料
     （整個小框重畫、換一個新格子）：新格子放不回那幾個字，但那一次照樣不收、套用照擋，格子旁照講是怎麼回事，不讓空白的格子
     看起來像沒填卻報錯；重打一個數字，那一句收掉、套用按得下去。"""
     _write(tmp_path, room109_document())
@@ -147,7 +154,7 @@ def test_an_unreadable_depth_stays_refused_and_says_so_after_show_all_redraws_th
         expect(problem).to_contain_text("「最深」要填大於 0 的數字（公分，最少 0.1）")
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
         expect(page.locator("#zone-panel-depth-lost")).to_have_count(0)  # 還是同一格、看得到打的字：不另講
-        page.locator("#zone-panel-show-all").check()
+        pick_fixed_row(page, "fabric_pet_a_gap100")
         expect(page.locator("#zone-panel-depth")).to_have_value("")
         lost = page.locator("#zone-panel-depth-lost")
         expect(lost).to_have_text("剛才打的還不成數字，小框重畫後格子顯示不出來：這一次不收；重打一次，或按退格鍵、刪除鍵清成空白（空白＝不限）")
@@ -175,7 +182,7 @@ def test_an_unreadable_depth_lost_in_a_redraw_can_be_cleared_back_to_blank_with_
         pick_fixed_row(page, "glass_wool_48k_50mm")
         depth = page.locator("#zone-panel-depth")
         depth.press_sequentially("--1")
-        page.locator("#zone-panel-show-all").check()
+        pick_fixed_row(page, "fabric_pet_a_gap100")
         lost = page.locator("#zone-panel-depth-lost")
         expect(lost).to_be_visible()  # 那一句的字（講出口）上一題逐字考
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
