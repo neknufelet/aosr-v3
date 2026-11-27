@@ -1032,7 +1032,7 @@ function draftProblem(items) {
   if (draft.mode === "search") {
     const shallow = items.find(item => backingDepth(item) > 0 && Math.round((totalDepth(item, draftDepth(items)) - backingDepth(item)) * 1e9) <= 0);
     if (shallow) return `${items.length > 1 ? zoneWhereText(shallow) + "：" : ""}最深沒有比背後的${backingName(libraryEntry(zoneBacking(shallow)) ?? {label: "那一筆"})}深，前面放不了東西；把最深加大，或背後換回${originalFace(shallow.wall)}`;
-    const fixed = items.find(item => zoneBacking(item) && panelTicks(items)?.lists?.[items.indexOf(item)]?.some(id => id !== ZONE_NONE && libraryEntry(id)?.kind !== "optimizable"));
+    const fixed = items.find((item, index) => zoneBacking(item) && fixedInFront(items, index).length);
     if (fixed) return `${items.length > 1 ? zoneWhereText(fixed) + "：" : ""}背後換過的區只能讓程式調可調材料或不貼；固定成品會整塊換掉背後那一筆，先取消勾選`;
   }
   return draft.mode === "search" ? draft.rangeRefused : "";
@@ -1162,6 +1162,14 @@ function zoneBacking(item) { return draft?.mode === "search" && draft.backing !=
 function panelBacking(items) {
   const ids = new Set(items.map(zoneBacking));
   return ids.size === 1 ? [...ids][0] : undefined;
+}
+// 背後換過的區程式實際會挑的固定成品（同伺服器 fixed_in_front）：畫好的候選列是伺服器判過的實際候選就照它；
+// 還沒畫好照勾的清單，拿掉被同一份清單裡勾的可調材料包含的那幾款。
+function fixedInFront(items, index) {
+  const painted = $("zone-panel-form")?.dataset.candidates === "checked" ? $("zone-panel-form").candidateRows?.[index]?.allowed : null;
+  const list = painted ?? panelTicks(items)?.lists?.[index] ?? [];
+  const covered = new Set(list.flatMap(id => libraryEntry(id)?.kind === "optimizable" ? libraryEntry(id).preset_members ?? [] : []));
+  return list.filter(id => id !== ZONE_NONE && libraryEntry(id)?.kind !== "optimizable" && !covered.has(id));
 }
 // 背後那一筆的總深（同伺服器 fixed_material_depth_m）：沒重選照方案那一區現在的材料量（材料庫那一筆存檔後改過也照存的），
 // 重選了照材料庫那一筆；實測表照它的底構造量。

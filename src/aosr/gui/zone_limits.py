@@ -213,9 +213,10 @@ def front_cap(design: DesignSettings | None, wall: str, zone: str, material: obj
 
 
 def backing_problems(design: DesignSettings | None, wall: str, zone: str, material: object,
-                     label: Callable[[str], str], families: Callable[[], frozenset[str] | None]) -> list[Problem]:
-    """背後換過的區（#1330）兩條擋：最深被背後那一筆吃光（一樣深也算，前面放不了東西）；准用清單裡有固定成品
-    （引擎選到固定成品會整塊換掉那一面，背後那一筆就不見了，只准可調材料與「不貼」）。``families`` 是可調材料的代號，讀不到回 None（不判第二條）。"""
+                     label: Callable[[str], str], fixed_in_front: Callable[[], list[str]]) -> list[Problem]:
+    """背後換過的區（#1330）兩條擋：最深被背後那一筆吃光（一樣深也算，前面放不了東西）；程式實際會挑的候選裡有固定成品
+    （引擎選到固定成品會整塊換掉那一面，背後那一筆就不見了，只准可調材料與「不貼」）。``fixed_in_front`` 回實際候選
+    （``effective_candidates``：被勾的可調材料包含的、放不下的已拿掉）裡的固定成品，材料庫讀不到回空的（不判第二條）。"""
     item = design.zones.get(wall, {}).get(zone) if design is not None else None
     backing = backing_depth_m(design, wall, zone, material)
     if item is None or item.backing_entry is None or backing is None:
@@ -227,8 +228,7 @@ def backing_problems(design: DesignSettings | None, wall: str, zone: str, materi
         found.append(Problem(code="depth_backing", level="red",
                              text=f"最深 {cap.value_m:g} 公尺（{LEVEL_WORDS[cap.level]}的上限）沒有比背後的「{name}」{backing:g} 公尺深，"
                                   "前面放不了東西；把最深加大，或背後換回原牆"))
-    known = families()
-    fixed = [code for code in item.allowed or () if known is not None and code != "none" and code not in known]
+    fixed = fixed_in_front()
     if fixed:
         found.append(Problem(code="backing_fixed_candidate", level="red",
                              text=f"背後換成「{name}」的區只能讓程式調可調材料或不貼；清單裡的固定成品（{'、'.join(label(code) for code in fixed)}）"
@@ -630,7 +630,8 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             if mode == "search":
                 catalog.record_candidates(wall, key, setting, cap, include_candidate_rows)
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
-                lines.extend([*backing_problems(design, wall, key, material, catalog.label, catalog.families), *problems])
+                lines.extend([*backing_problems(design, wall, key, material, catalog.label, lambda: catalog.fixed_in_front(setting, cap)),
+                              *problems])
                 if lines_by_group:
                     caps[wall][key]["targets"] = lines_by_group
             if range_check is not None and mode == "fixed" and material is not None:
@@ -680,9 +681,14 @@ class _ZoneCatalog:
                                       text=f"查不了由程式最佳化的區放不放得下清單裡的材料、也認不出指定貼一種的區是不是選了材料庫的材料：{error}")
             return None
 
-    def families(self) -> frozenset[str] | None:
-        """可調材料的代號（判背後換過的區清單裡哪些是固定成品）；材料庫讀不進來回 None。"""
-        return None if self.targets is None else frozenset(family.id for family in self.targets.settings.family)
+    def fixed_in_front(self, setting: ZoneDesign | None, cap: DepthCap | None) -> list[str]:
+        """這一區程式實際會挑的候選裡的固定成品（開跑計畫同一支 ``effective_candidates``）；沒寫清單是全部可調材料與不貼，沒有固定成品。"""
+        targets = self.targets
+        if setting is None or setting.allowed is None or targets is None:
+            return []
+        selection = CandidateSelection(allowed=setting.allowed, ranges=setting.ranges, cap=cap.value_m if cap else None)
+        families = {family.id for family in targets.settings.family}
+        return [code for code in effective_candidates(selection, targets).allowed if code != "none" and code not in families]
 
     def label(self, identifier: str) -> str:
         """材料庫那一筆的名字；材料庫讀不進來就寫代號。"""

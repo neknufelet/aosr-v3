@@ -12,7 +12,11 @@ from typing import cast
 from playwright.sync_api import Browser, Page, expect
 
 from aosr.materials.library import builtin_entries, fixed_surface
+import json
+
+from tests.engine._construction_cases import construction
 from tests.engine._construction_preset_answers import FITTED_VPR_IDS
+from tests.engine.test_gui_zone_range_browser import _cell
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_overview_browser import SAMPLE
@@ -152,3 +156,70 @@ def test_changing_only_the_backing_rechecks_the_candidates(tmp_path: Path, brows
         expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
         expect(page.locator("#zone-panel-list")).to_contain_text("含 1 款")
         assert base
+
+
+def _vpr_applied(page: Page, depth: str = "25") -> None:
+    _open_search_panel(page)
+    page.locator("#zone-panel-backing-pick").select_option(VPR)
+    page.locator("#zone-panel-depth").fill(depth)
+    expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
+    _apply(page)
+
+
+def test_depth_only_apply_keeps_the_saved_backing_material(tmp_path: Path, browser: Browser) -> None:
+    """背後沒重選、只改最深：送出的那一區帶 keep_backing（伺服器照方案裡那一份留著，不從材料庫換新版）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _vpr_applied(page)
+        _click_zone(page, "/".join(ZONE))
+        page.locator("#zone-panel-depth").fill("30")
+        with page.expect_request(lambda r: r.url.endswith("/api/zone-material/batch")) as sent:
+            _apply(page)
+        change, = json.loads(cast(str, sent.value.post_data))["changes"]
+        assert change["choice"] == "backing" and change["material_id"] == VPR and change["keep_backing"] is True
+        assert change["backing_wall"] == _original_wall()
+        assert base
+
+
+def test_switching_back_and_narrowing_in_one_apply_checks_ranges_against_the_original_wall(tmp_path: Path, browser: Browser) -> None:
+    """已存背後 VPR、最深 25（前面 15）。同一次把背後換回原牆、48K 棉厚收成 20 cm：套用前範圍檢查照換回後的 25 公分判，放得下就套用。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _vpr_applied(page)
+        _click_zone(page, "/".join(ZONE))
+        page.locator("#zone-panel-backing-pick").select_option("")
+        page.locator(_cell(page, "glass_wool_48k", "porous", "low")).select_option("0.2")
+        page.locator(_cell(page, "glass_wool_48k", "porous", "high")).select_option("0.2")
+        _apply(page)
+        _leave_and_save(page)
+        settings, materials = _stored(tmp_path)
+        saved = cast(dict[str, dict[str, object]], settings[ZONE[0]])[ZONE[1]]
+        assert "backing_entry" not in saved
+        assert cast(dict[str, dict[str, object]], saved["ranges"])["glass_wool_48k"]["porous_m"] == [0.2, 0.2]
+        assert materials[ZONE[0]][ZONE[1]] == _original_wall()
+        assert base
+
+
+def test_own_rigid_construction_as_backing_reads_as_a_normal_search_zone(tmp_path: Path, browser: Browser) -> None:
+    """自己組的剛背構造當背後：選得到（我組的）、套用後那一區照由程式最佳化畫，不說看不出；截圖給人看。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        own = construction(id="lab_rigid", label="自編剛背共振板")
+        assert page.request.put(f"{base}/api/materials/lab_rigid", data=own).ok
+        _open_search_panel(page)
+        expect(page.locator('#zone-panel-backing-pick optgroup[label="我組的"] option[value="lab_rigid"]')).to_have_count(1)
+        page.locator("#zone-panel-backing-pick").select_option("lab_rigid")
+        page.locator("#zone-panel-depth").fill("25")
+        expect(page.locator("#zone-panel-front-room")).to_have_text("前面最多 18.7 cm")
+        expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
+        _apply(page)
+        zone = page.locator(f"#zone-map [data-wall='{ZONE[0]}'][data-zone='{ZONE[1]}']")
+        expect(zone).not_to_contain_text("看不出")
+        expect(page.locator("#zone-page")).not_to_contain_text("看不出")
+        _shot(page, "backing-own-applied.png")
+        _click_zone(page, "/".join(ZONE))
+        expect(page.locator("#zone-panel-backing-pick")).to_have_value("lab_rigid")
+        _shot(page, "backing-own-panel.png")

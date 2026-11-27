@@ -30,6 +30,7 @@ from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.gui.zone_symmetry import pair_zones
 from aosr.materials.library import builtin_entries, fixed_surface
 from aosr.reporting.scheme import Scheme
+from tests.engine._construction_cases import construction
 from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
@@ -158,6 +159,41 @@ def test_unchanged_backing_keeps_the_saved_material_even_if_the_library_changed(
     assert renewed["material"] == _vpr()
 
 
+def test_own_rigid_construction_works_as_a_backing_end_to_end(tmp_path: Path) -> None:
+    """自己組的剛背構造（材料庫「我組的」，走 construction_pick 那條路）當背後：放進方案、扣最深、限制檢查不說看不出、換回原牆。"""
+    gui = _Gui(tmp_path)
+    own = construction(id="lab_rigid", label="自編剛背共振板")
+    gui.call("PUT", "/api/materials/lab_rigid", own)
+    document = _room()
+    wall = cast(Doc, deepcopy(_front(document)["material"]))
+    gui.call("PUT", "/api/schemes/room", document)
+    got = gui.change(document, choice="backing", material_id="lab_rigid")
+    assert got["material"] == {"kind": "assembly", "layers": own["layers"], "backing": "rigid"}
+    _front(document)["material"] = got["material"]
+    gui.call("PUT", "/api/schemes/room", document)
+    gui.design(0.25, got)
+    plan = SearchPlan.model_validate(gui.call("POST", "/api/gradient/schemes/room/plan", {})["plan"])
+    assert plan.max_depths["x0"] == 0.187  # 0.25－布（沒有厚度欄）－0.063 空氣層
+    limits = gui.call("POST", "/api/zone-limits", {"scheme": document, "design": gui.call("GET", "/api/designs/room")["design"]})
+    lines = cast(dict[str, dict[str, list[Doc]]], limits.get("zones", {})).get("x0", {}).get("whole_wall", [])
+    assert not [line for line in lines if line["level"] == "red" or "看不出" in cast(str, line["text"])], lines
+    back = gui.change(document, choice="original", backing_wall=got["backing_wall"])
+    assert back["material"] == wall
+
+
+def test_original_scheme_wins_over_the_remembered_wall(backed: Backed) -> None:
+    gui, document, got, _ = backed
+    other = _room()
+    other["scheme_id"] = "before"
+    _front(other)["material"] = {"kind": "constant_impedance", "impedance_pa_s_m": 2600.0}
+    gui.call("PUT", "/api/schemes/before", other)
+    body = {"scheme": document, "original_scheme_id": "before",
+            "changes": [{"wall": "x0", "zone": "whole_wall", "choice": "original", "backing_wall": got["backing_wall"]}]}
+    back = cast(list[Doc], gui.call("POST", "/api/zone-material/batch", body)["changes"])[0]
+    assert back["material"] == {"kind": "constant_impedance", "impedance_pa_s_m": 2600.0}
+    assert back["origin"] == "original_scheme"
+
+
 def test_a_wall_mounted_construction_cannot_be_a_backing(tmp_path: Path) -> None:
     gui = _Gui(tmp_path)
     entry = {"kind": "construction", "id": "lab_mounted", "label": "自編貼牆鋼板", "provenance": "literature", "source": "本次自編",
@@ -227,13 +263,23 @@ def test_rigid_mount_with_a_backing_is_refused(backed: Backed) -> None:
     assert "裝法請選「貼在原牆上」" in error
 
 
-def test_fixed_products_are_not_allowed_in_front_of_a_backing(backed: Backed) -> None:
-    gui, document, got, _ = backed
-    item: Doc = {"mode": "search", "allowed": [WOOL, "none", "glass_wool_48k_50mm"], "max_depth_m": 0.25,
-                 "backing_entry": got["backing_entry"], "backing_wall": got["backing_wall"]}
+def _listed(gui: _Gui, got: Doc, allowed: list[str]) -> None:
+    item: Doc = {"mode": "search", "allowed": allowed, "max_depth_m": 0.25, "backing_entry": got["backing_entry"], "backing_wall": got["backing_wall"]}
     gui.call("PUT", "/api/designs/room", {"scheme_id": "room", "zones": {"x0": {"whole_wall": item}}})
+
+
+def test_fixed_products_the_engine_could_pick_are_refused_in_front_of_a_backing(backed: Backed) -> None:
+    gui, _, got, _ = backed
+    _listed(gui, got, ["none", "glass_wool_48k_50mm"])
     error = cast(str, gui.call("POST", "/api/gradient/schemes/room/plan", {}, 400)["error"])
     assert "只能讓程式調可調材料或不貼" in error and "48K 玻璃棉 50 mm 貼牆" in error
+
+
+def test_a_fixed_product_covered_by_a_ticked_family_is_not_refused(backed: Backed) -> None:
+    gui, _, got, _ = backed
+    _listed(gui, got, [WOOL, "none", "glass_wool_48k_50mm"])  # 48K 玻璃棉那一族已包含這一款，程式不會另外挑它
+    plan = SearchPlan.model_validate(gui.call("POST", "/api/gradient/schemes/room/plan", {})["plan"])
+    assert set(plan.allowed["x0"]) == {WOOL, "none"}
 
 
 def test_no_backing_leaves_the_plan_cap_alone(tmp_path: Path) -> None:
