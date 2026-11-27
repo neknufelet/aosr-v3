@@ -15,15 +15,16 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.config.representative_speakers import load_representative_speakers
 from aosr.config.construction_presets import load_construction_presets
 from aosr.gui.construction_input import material_field_values, material_open_area_texts, web_scheme_problems
-from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS
 from aosr.gui.room_facts import metres, room_facts
 from aosr.gui.wall_words import draft_layout, draft_wall_words
 from aosr.gui.zone_edit import zone_cut_defaults
+from aosr.gui.zone_symmetry import symmetry_axis
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
-from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing
+from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing, speaker_pair_ids
 from aosr.search.furniture_prefilter import PLACEMENT_NAMES, scheme_placement_hits
 from aosr.search.layout import cloud_center_xy
 
@@ -68,7 +69,7 @@ class InputEdit(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     scheme: dict[str, object]
-    action: Literal["furniture", "remove_furniture", "shortcut", "setup", "speaker_kind", "representative", "mount", "wall_preset"]
+    action: Literal["furniture", "remove_furniture", "shortcut", "centre_axis", "setup", "speaker_kind", "representative", "mount", "wall_preset"]
     value: str | bool
     wall: str | None = None
 
@@ -248,6 +249,31 @@ def _shortcut(document: dict[str, object], name: str) -> None:
         point["position_m"] = [position[0], position[1], position[2] + delta]
 
 
+def _centre_axis(document: dict[str, object]) -> None:
+    """沿房間橫向平移左右聲道與整組聆聽點，保留各點間距與獨立座位的位置。"""
+    try:
+        scheme = checked_scheme(document)
+    except SchemeProblemsError as exc:
+        raise InputShapeError(exc.first_fix()) from exc
+    axis = symmetry_axis(scheme)
+    if isinstance(axis, str):
+        raise InputShapeError(axis)
+    if axis.centred:
+        return
+    coordinate, index, width = (("y", 1, scheme.scene.room_m.Ly) if axis.along == "x"
+                                else ("x", 0, scheme.scene.room_m.Lx))
+    shift = width / 2 - axis.across_m
+    speakers = cast(dict[str, dict[str, float]], document["speakers"])
+    for name in speaker_pair_ids(scheme):
+        speakers[name][coordinate] = scheme.speakers[name].as_tuple()[index] + shift
+    receivers = cast(dict[str, list[dict[str, object]]], document["receiver_set"])
+    for entry, point in zip(receivers["points"], scheme.receiver_set.points, strict=True):
+        if point.role in ("primary", "surrounding"):
+            position = list(point.position_m)
+            position[index] += shift
+            entry["position_m"] = position
+
+
 def _speaker_edit(document: dict[str, object], action: str, value: str | bool) -> None:
     if action == "setup":
         if not value:
@@ -288,6 +314,12 @@ def edit_input(request: InputEdit, capabilities: CapabilityTable,
         check_input_shape(document, capabilities, directivity)
         return document
     check_input_shape(document, capabilities, directivity)
+    if request.action == "centre_axis":
+        _centre_axis(document)
+        problems = web_scheme_problems(document, capabilities=capabilities, directivity=directivity)
+        if problems:
+            raise InputShapeError(f"無法一起置中：{plain_problems(problems, document)[0]['text']}")
+        return document
     had_table = _has_table(document)
     action, value = request.action, request.value
     if action == "furniture":

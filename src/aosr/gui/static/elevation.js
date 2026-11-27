@@ -703,8 +703,13 @@ function inputAxisWords(result) {
   return `鏡子：喇叭中線，離左牆 ${distances.left} 公尺` + (axis.centred ? "" : "；不在正中，左右牆不跟著畫");
 }
 // 開關底下那一句（renderElevation 畫；限制檢查失敗之後又問一次時 zone_limits.js 只重寫這一句，見 window.refreshAxisWords）。
-function axisSentence(on, result) {
-  return on ? inputAxisWords(result) : "";
+function refreshAxisControl() {
+  const on = window.zoneSymmetry.isOn(), result = symmetryResult();
+  const sideOnly = elevationWall && result?.axis && !result.axis.centred && result.projections[elevationWall][0] !== elevationWall;
+  const title = $("elevation-panel").closest("#zone-page") ? "左右對稱" : "兩邊一起畫";
+  $("elevation-symmetry-title").textContent = sideOnly ? `${title}（只切${wallNames[elevationWall]}）` : title;
+  $("elevation-axis-words").textContent = on ? inputAxisWords(result) : "";
+  $("elevation-centre-axis").hidden = !sideOnly;
 }
 function selectedEditor(wall, view, width, height) {
   const area = $("elevation-selected"); area.replaceChildren();
@@ -998,7 +1003,7 @@ function renderElevation() {
   if (dropDrag) dropDrag();  // 拖到一半被重畫：那一張圖要換掉了，這次拖曳作廢（見 trackDrag）
   const area = $("elevation");
   if (!area || !scheme || !inputDefaults) return;
-  const on = window.zoneSymmetry.isOn(), result = symmetryResult();
+  const on = window.zoneSymmetry.isOn();
   for (const state of [true, false]) {
     const button = $(state ? "elevation-symmetry-on" : "elevation-symmetry-off");
     button.setAttribute("aria-pressed", String(on === state));
@@ -1007,7 +1012,7 @@ function renderElevation() {
       window.zoneSymmetry.set(state);
     };
   }
-  $("elevation-axis-words").textContent = axisSentence(on, result);
+  refreshAxisControl();
   if (mirrorWarning && (mirrorWarning.owner !== scheme || mirrorWarning.generation !== zoneDesignGeneration || !on)) {
     mirrorWarning = null; banner();
     note("", "");
@@ -1115,8 +1120,20 @@ window.elevationDrawing = () => elevationDrawing;  // 限制判決（zone_limits
 window.refreshWallSection = () => renderWallSection(elevationWall);
 // 只重寫鏡子那一句（#1265 單元 3 之二收尾第二趟 B4 之一）：失敗之後重試、請求還在路上，那一句要回到「正在確認」。
 // 不重畫整個立面圖：正在打字的格子、拖到一半的框不能換掉（zone_limits.js 判決回來時為這兩件事才延後重畫）。
-window.refreshAxisWords = () => { $("elevation-axis-words").textContent = axisSentence(window.zoneSymmetry.isOn(), symmetryResult()); };
+window.refreshAxisWords = refreshAxisControl;
 window.addEventListener("DOMContentLoaded", () => {
+  $("elevation-centre-axis").onclick = () => {
+    if (inputBusy || !symmetryResult()?.axis) return;
+    action(() => holdInput(async () => {
+      if (!await editInput("centre_axis", true, null, true)) {
+        banner($("messages").textContent, "notice");
+        return;
+      }
+      const next = "已置中。要補上既有的框，請在原牆選取那一塊，按「補畫另一邊」。";
+      banner(next, "ok");
+      zoneNote(next, "ok");
+    }));
+  };
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => {
     showSelectionBanner = false;
     if (mirrorWarning || !$("elevation-banner").hidden) { mirrorWarning = null; banner(); note("", ""); }

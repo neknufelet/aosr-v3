@@ -11,6 +11,7 @@ from aosr.gui.app import STATIC, GuiSettings, create_app
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_input_answers import CABINETS, FURNITURE
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine._zone_symmetry_room import symmetry_document
 from tests.engine.test_gui_app import _app
 
 
@@ -349,3 +350,20 @@ def test_scheme_level_furniture_error_gives_no_placement_warning(tmp_path: Path)
         checked = client.post("/api/validate", json=document).json()
     assert preview["placement_warnings"] == []
     assert any("定不出前牆" in str(item["text"]) for item in checked["problems"])
+
+
+def test_centre_axis_moves_only_the_listening_group_in_a_turned_room(tmp_path: Path) -> None:
+    """旋轉後要移長度方向的座標。數字字串可讀，另外列的座位留在原地。"""
+    document = symmetry_document(across_shift_m=0.15, turned=True)
+    speakers = cast(dict[str, dict[str, object]], document["speakers"])
+    speakers["left"]["x"] = "1.35"
+    points = cast(dict[str, list[dict[str, object]]], document["receiver_set"])["points"]
+    points.append({"receiver_id": "guest", "role": "other_seat", "importance": 0.1, "position_m": [1.0, 1.3, 1.2]})
+    cast(list[object], points[0]["position_m"])[0] = "2.15"
+    with _app(tmp_path) as client:
+        centred = edit(client, document, "centre_axis", True)
+    positions = cast(dict[str, list[dict[str, object]]], centred["receiver_set"])["points"]
+    assert positions[-1] == points[-1]
+    assert cast(list[float], positions[0]["position_m"])[0] == pytest.approx(2.0)
+    assert cast(dict[str, dict[str, float]], centred["speakers"])["left"]["x"] == pytest.approx(1.2)
+    assert centred["scene"] == document["scene"]
