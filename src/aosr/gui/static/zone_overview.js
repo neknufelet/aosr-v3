@@ -787,7 +787,8 @@ async function applyMethod(items, method, written = () => {}) {
   written();
   changing += 1; showChanging();
   try { await afterZoneChange(); } finally { changing -= 1; showChanging(); }
-  return method.mode !== "keep_original" || !unrestored.length;
+  // 原牆不明是正常狀態（沒選原方案就會有）：照現在材料不動、上面那句點名，照樣算套用成功，「套用並拿去搜尋」一次就送（#1334）。
+  return true;
 }
 // 一區照 method 改過之後的那一份（寫進去之前還要過 setZoneSetting 的收法）；套用與套用前的範圍檢查都用這一支。
 // change.same_as_original：指定貼的那一筆跟這一區原本的面一模一樣（伺服器放回原樣），做法跟著記成不貼。

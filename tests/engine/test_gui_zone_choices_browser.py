@@ -674,7 +674,7 @@ def test_expanding_door_depth_edit_preserves_methods_until_a_material_is_chosen(
                 assert settings["xL"]["whole_wall"] == {"mode": "keep_original"}
 
 
-def test_apply_and_search_stops_on_one_unrestored_zone(tmp_path: Path, browser: Browser) -> None:
+def test_apply_and_search_goes_on_when_one_zone_keeps_its_unknown_wall(tmp_path: Path, browser: Browser) -> None:
     document = room109_document()
     walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
     door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)["material"]
@@ -696,15 +696,14 @@ def test_apply_and_search_stops_on_one_unrestored_zone(tmp_path: Path, browser: 
         page.locator("#zone-panel-mode-keep_original").check()
         go = page.locator("#zone-page-search")
         expect(go).to_have_text("套用並拿去搜尋")
-        sent = []
-        page.on("request", lambda req: sent.append(req.url) if req.method == "PUT" or "/gradient?" in req.url else None)
-        go.click()
-        page.wait_for_function("!document.body.inert")
-        expect(page.locator("#zone-page-note")).to_contain_text("看不出原牆")
-        expect(page.locator("#zone-map")).to_be_visible()
-        assert page.evaluate("zoneList('x0')[0].material") == door
-        assert page.evaluate("zoneList('xL')[0].material") == original
-        assert sent == []
+        # 原牆不明是正常狀態（#1334 預期行為第 1 條）：按一次就套用並送去搜尋，不用按第二次。
+        with page.expect_response(lambda r: r.url.endswith("/api/designs/room109") and r.request.method == "PUT") as design:
+            go.click()
+        assert design.value.ok
+        page.wait_for_url("**/gradient?scheme=room109")
+        saved = json.loads((tmp_path / "schemes" / "room109.json").read_text(encoding="utf-8"))["scene"]["surface_zones_by_wall"]
+        assert saved["x0"][0]["material"] == door
+        assert saved["xL"][0]["material"] == original
 
 
 def test_depth_only_keeps_mounted_door_and_replacement_window(tmp_path: Path, browser: Browser) -> None:
