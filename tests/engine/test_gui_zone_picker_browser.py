@@ -867,6 +867,9 @@ def test_clicking_a_visible_map_zone_keeps_the_scroll_position(tmp_path: Path, b
         _open_overview(page)
         open_groups(page)
         pane = page.locator(".zv-mapwrap")
+        # 先等地圖撐出可捲的高度再捲：地圖還沒畫好時捲不動，scrollTop 會留在 0。
+        pane.element_handle().wait_for_element_state("stable")
+        page.wait_for_function("node => node.scrollHeight - node.clientHeight > 60", arg=pane.element_handle())
         pane.evaluate("node => node.scrollTo(0, 60)")
         before = pane.evaluate("node => node.scrollTop")
         assert before > 0

@@ -102,8 +102,8 @@ def test_it_reads_the_layers_and_never_the_name() -> None:
     assert cast(Doc, reference_only.listing_block((named, quiet, table)))["ids"] == ["own_quiet_panel", "own_table_panel"]
 
 
-def test_only_fixed_entries_are_judged_and_both_fitted_presets_are_flagged() -> None:
-    """可最佳化材料與可調 VPR 不歸這一支（程式最佳化本來就不收可調 VPR，#1200）；兩筆擬合預設都命中。"""
+def test_only_fixed_entries_are_judged_and_the_fitted_1mm_preset_is_flagged() -> None:
+    """可最佳化材料與可調 VPR 不歸這一支（程式最佳化本來就不收可調 VPR，#1200）；本次收錄的 1 毫米擬合預設命中。"""
     from tests.engine.test_material_library_vpr import VPR, _vpr
 
     tunable = _ENTRY.validate_python(_vpr())

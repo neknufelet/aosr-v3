@@ -33,6 +33,8 @@ function assemblyMaterial(material) {
 function showPresetState(name, material = assemblyMaterial(wallMaterial(name))) {
   const preset = matchingPreset(material);
   $(`preset-state-${name}`).textContent = preset ? `使用預設：${preset.label}` : "自訂構造（參數與預設不完全相同）";
+  const warning = preset && inputDefaults.preset_reference_words[preset.id];
+  if (warning) $(`preset-state-${name}`).append(`（${warning}）`);
   $(`preset-${name}`).value = preset?.id ?? "";
   $(`preset-notes-${name}`).textContent = preset ? preset.notes.join("；") : "預設出處只適用於與清單逐值相同的材料；目前以展開的參數計算。";
   const source = $(`preset-source-${name}`); source.replaceChildren();
