@@ -252,7 +252,7 @@ def test_overview_select_and_drop_pair(tmp_path: Path, browser: Browser) -> None
         first = page.locator("#zone-map [data-wall=yL][data-zone=z1] .zv-fill")
         first.click()
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "yL/z1 yL/z2")
-        expect(page.locator("#zone-panel h2")).to_contain_text("左右一對")
+        expect(page.locator("#zone-panel h2")).to_contain_text("跟著選")
         page.locator("#zone-panel-zones summary").click()
         page.screenshot(path=tmp_path / "overview-selection.png")
         page.locator("#zone-panel-drop-yL-z2").click()

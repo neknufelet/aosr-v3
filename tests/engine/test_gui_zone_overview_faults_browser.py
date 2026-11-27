@@ -372,7 +372,7 @@ def test_nothing_on_the_page_reacts_while_a_batch_is_on_its_way(tmp_path: Path, 
 
 def test_the_page_is_locked_while_send_to_search_is_saving_and_what_is_stored_is_what_was_there_at_the_press(tmp_path: Path, browser: Browser) -> None:
     """按了「拿去搜尋」、存方案那一步還沒回來（#1187 的存檔鎖）：這一頁跟輸入頁一起鎖住——圖上點別區、按套用都沒作用、
-    沒有送出換材料。放行之後存下去的是按下那一刻那一份（面板上點了、還沒套用的那一區沒被寫進去），照常跳到搜尋頁。"""
+    沒有送出換材料。放行之後存下去的是按下那一刻那一份（切換後選回原樣的那一區沒有寫入），照常跳到搜尋頁。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -381,9 +381,11 @@ def test_the_page_is_locked_while_send_to_search_is_saving_and_what_is_stored_is
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-search").check()
         _apply(page)
-        # 面板上再點好一區與做法、先不套用：等一下存檔途中去按它的套用。
+        # 另一區切換做法後又選回原樣：等一下存檔途中去按它的套用。
         _click_zone(page, "y0/auto2")
         page.locator("#zone-panel-mode-search").check()
+        page.locator("#zone-panel-mode-keep_original").check()
+        expect(page.locator("#zone-page-search")).to_have_text("拿去搜尋")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
         other = page.locator("#zone-map [data-wall='xL'][data-zone='auto1'] .zv-fill").bounding_box()
         button = page.locator("#zone-panel-apply").bounding_box()
@@ -397,13 +399,13 @@ def test_the_page_is_locked_while_send_to_search_is_saving_and_what_is_stored_is
         for box in (other, button):
             page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         page.wait_for_timeout(200)
-        assert page.evaluate(_SELECTED) == [] and len(sent) == 1
+        assert page.evaluate(_SELECTED) == ["y0/auto2"] and sent == []
         assert page.evaluate("document.getElementById('zone-page').inert") is True
         held.release()
         page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
-        assert len(sent) == 1 and watched.page_errors == []
+        assert sent == [] and watched.page_errors == []
     stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
-    assert stored == {"yL": {"z3": SEARCH}, "y0": {"auto2": SEARCH}}
+    assert stored == {"yL": {"z3": SEARCH}}
 
 
 def test_a_send_to_search_blocked_by_a_change_still_on_its_way_says_so_on_the_page(tmp_path: Path, browser: Browser) -> None:

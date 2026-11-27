@@ -26,6 +26,8 @@ from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_ide
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME as SYMMETRY, symmetry_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_gradient_browser import _serve as serve_gradient
+from tests.engine.test_gui_gradient_jobs import FakeLauncher
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 from tests.engine.test_gui_zone_material_pick_browser import _TEXT_STYLES
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, WOOLS
@@ -313,7 +315,7 @@ def test_the_stage_three_preview_shows_the_range_the_zone_uses(tmp_path: Path, b
     一種一行「48K 玻璃棉…：棉 5～10 cm、空腔 0～15 cm」「24K 玻璃棉…：棉 10～20 cm」（不調空腔的不寫空腔）；
     沒寫範圍的區沒有這一行（截一張：第三階段預覽）。"""
     _prepare(tmp_path, _design())
-    with _serve(tmp_path) as base, _open(browser, base) as watched:
+    with serve_gradient(tmp_path, FakeLauncher()) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z3")

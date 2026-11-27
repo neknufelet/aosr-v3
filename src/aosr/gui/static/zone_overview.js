@@ -10,6 +10,7 @@ const WALL_ORDER = ["front", "back", "left", "right"];
 const VPR_WORDS = "鋼板共振吸音";
 let overviewOpen = false;
 let overviewReturnY = 0;        // 打開這一頁之前輸入頁捲到哪裡（回來時捲回去）
+let followed = [];              // 由左右對稱代選的區
 let selected = [];              // 選了哪幾區（「牆/區代號」，照點的先後）
 let panelShowAll = false;       // 小框「指定貼一種」下拉的「顯示全部材料」（#1176 舊做法表那一個搬來，#1265；舊表單元 3 之二第二趟拆了）：只記在這一頁
 let draft = null;               // 面板上現在點的：{mode, materialId, ticks, depthText, depthBad}；還沒點是 null（後三格見 untouched）
@@ -496,7 +497,8 @@ function startingDraft() {
   if (mode === "unknown") return null;
   return {...untouched(), mode, materialId: mode === "fixed" && sameMethod ? libraryLabel(items[0].zone.material, items[0].wall, items[0].key)?.id ?? "" : ""};
 }
-function select(ids) {
+function select(ids, partners = []) {
+  followed = partners;
   selected = ids; draftTouched = false; ruleDraft = false;
   openDetails.delete("zone-panel-zones"); openDetails.delete("zone-panel-ref-why");
   draft = startingDraft();
@@ -521,16 +523,17 @@ async function pick(next, toggled = null) {
     if (other && view.byId.has(other) && !next.includes(other) && !added.includes(other)) added.push(other);
   }
   next = [...next, ...added];
-  if (next.length === selected.length && next.every(id => selected.includes(id))) return;
+  const followers = toggled ? followed.filter(id => next.includes(id)).concat(added) : added;
+  if (next.length === selected.length && next.every(id => selected.includes(id)) && sameList(followed, followers)) return;
   if (draftTouched && next.length) {
-    selected = next;
+    selected = next; followed = followers;
     const message = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區";
     const discarded = draft.notice === message || Object.keys(draft.ticks).length || Object.keys(draft.ranges).length;
     draft = {...untouched(), mode: draft.mode, materialId: draft.materialId, depthText: draft.depthText, depthBad: draft.depthBad};
     if (discarded) draft.notice = message;
     renderZoneOverview(); return;
   }
-  select(next);
+  select(next, followers);
 }
 function toggleSelected(id) { pick([], id); }
 // 一面牆的「整面」（#1199）：那一面全部的區扣掉門、窗（跟推「其他牆面」時扣的一樣），照號碼排。
@@ -1067,7 +1070,8 @@ function deepestRow(items, walls, sync) {
   const from = walls.length === 1 ? originalFace(walls[0]) : "原本的面";
   input.title = `從${from}往房間算，空白＝${blankDepthWords(items)}`;
   row.append(name, input, el("span", "zv-unit", "cm"));
-  row.append(el("small", null, `空白＝${blankDepthWords(items)}`));
+  input.placeholder = `空白＝${blankDepthWords(items)}`;
+  input.style.width = `${input.placeholder.length + 2.5}em`;
   if (lost) row.append(lost);
   return row;
 }
@@ -1233,15 +1237,30 @@ function renderSpark(chart, state) {
     [`${1 + 70 * Math.log(hz / 20) / Math.log(400)},${25 - 24 * Math.min(1, Math.max(0, state.absorption[i]))}`]);
   chart.replaceChildren(svg("polyline", {points: points.join(" "), fill: "none", stroke: "currentColor", "stroke-width": 1.6}));
 }
+// 縮圖依序取，讓套用與存檔有連線可用；滑出畫面或被重畫的縮圖不再排隊。
+const pendingSparks = new Set();
+let drawingSpark = false;
+async function drawVisibleSparks() {
+  if (drawingSpark) return;
+  drawingSpark = true;
+  try {
+    for (const chart of pendingSparks) {
+      pendingSparks.delete(chart);
+      if (!chart.isConnected) continue;
+      visibleCurves.unobserve(chart);
+      const entry = libraryEntry(chart.dataset.curve);
+      if (!entry) continue;
+      if (curves.has(entry.id)) renderSpark(chart, curves.get(entry.id));
+      else await loadCurve(entry);
+    }
+  } finally { drawingSpark = false; }
+}
 const visibleCurves = new IntersectionObserver(entries => {
   for (const {target, isIntersecting} of entries) {
-    if (!isIntersecting || !target.isConnected) continue;
-    visibleCurves.unobserve(target);
-    const entry = libraryEntry(target.dataset.curve);
-    if (!entry) continue;
-    if (curves.has(entry.id)) renderSpark(target, curves.get(entry.id));
-    else loadCurve(entry);
+    if (isIntersecting && target.isConnected) pendingSparks.add(target);
+    else pendingSparks.delete(target);
   }
+  void drawVisibleSparks();
 });
 
 function materialFilter(container) {
@@ -1429,21 +1448,18 @@ function searchForm(items, walls, sync) {
     const row = materialRow({entry, name: candidateName(entry.id), role: "checkbox", state: "false",
       id: `zone-panel-pick-${entry.id}`, description: entry.kind === "optimizable" ? rangeDescription(entry, pageRange(entry)) : fixedDescription(entry),
       activate: () => {
-        if (!reason) { candidateAction(items, ticks, entry.id, "add"); $(row.id)?.focus({preventScroll: true}); return; }
-        draft.explained = draft.explained === entry.id ? null : entry.id; renderZoneOverview();
+        candidateAction(items, ticks, entry.id, "add"); $(row.id)?.focus({preventScroll: true});
       }});
     if (reason) {
+      row.disabled = true;
+      let explanation = reason;
       if (covered.has(entry.id)) {
-        row.setAttribute("role", "button"); row.removeAttribute("aria-checked");
-        row.setAttribute("aria-expanded", String(draft.explained === entry.id));
-        if (draft.explained === entry.id) row.append(el("small", "zv-covered-why", reason));
-        row.setAttribute("aria-label", `${candidateName(entry.id)}，查看不能重複加入的原因`);
-      } else {
-        row.disabled = true;
-        row.append(el("small", "zv-covered-why", reason));
+        row.dataset.covered = covered.get(entry.id).id;
+        row.setAttribute("aria-disabled", "true");
+        explanation = `已含在可調的 ${shortLabel(covered.get(entry.id))} 裡`;
       }
-      if (covered.has(entry.id)) row.dataset.covered = covered.get(entry.id).id;
       if (referenceOnly(entry.id)) row.dataset.reference = "off";
+      row.append(el("small", "zv-covered-why", explanation));
     }
     others.append(row);
   }
@@ -1481,38 +1497,67 @@ function openMaterialBuilder() {
   const dialog = el("dialog"); dialog.id = "zone-builder"; dialog.setAttribute("aria-label", "組一個新的材料");
   const bar = el("div", "zv-drawer-head");
   const status = el("span", null, label); status.setAttribute("role", "status");
-  const close = button("zv-btn", "關閉", "zone-builder-close", () => dialog.close());
-  bar.append(status, close);
   const frame = el("iframe"); frame.title = "材料設計器"; frame.src = "/materials/designer?" + query;
-  dialog.append(bar, frame);
-  document.body.append(dialog);
-  let loading = false;
-  const receive = async event => {
-    if (event.origin !== location.origin || event.source !== frame.contentWindow ||
-        event.data?.type !== "aosr-material-saved" || typeof event.data.id !== "string" || loading) return;
+  let savedId = null, loading = false;
+  const stillHere = () => generation === zoneDesignGeneration && selected.join(",") === ids && draft?.mode === mode;
+  const refresh = async () => {
+    if (loading || !stillHere()) return;
     loading = true;
     try {
       const state = await fetchZoneLibrary();
-      if (!dialog.open) return;
-      if (generation !== zoneDesignGeneration || selected.join(",") !== ids || draft?.mode !== mode) {
-        dialog.close(); return;
-      }
+      if (!stillHere()) { if (dialog.open) dialog.close(); return; }
       if (state.problem) throw new Error(state.problem);
       applyZoneLibrary(state);
-      const id = event.data.id, entry = libraryEntry(id);
+      const entry = libraryEntry(savedId);
       if (!entry) throw new Error("材料庫沒有這一筆");
       if (mode === "search") {
-        if (!items.every(item => fitsHere(id, item.wall)) || referenceOnly(id)) throw new Error("這筆材料不能加入所選區的候選");
+        if (!items.every(item => fitsHere(savedId, item.wall)) || referenceOnly(savedId)) throw new Error("這筆材料不能加入所選區的候選");
         draft.query = "";
-        candidateAction(items, panelTicks(items), id, "add");
+        candidateAction(items, panelTicks(items), savedId, "add");
       } else {
-        if (!assignableEntries().includes(entry)) throw new Error("這筆材料只能由程式挑");
-        draft.materialId = id; draft.query = ""; draftTouched = true; renderZoneOverview();
+        if (!assignableEntries().includes(entry)) throw new Error("這筆材料只能由程式最佳化");
+        draft.materialId = savedId; draft.query = ""; draftTouched = true;
       }
-      dialog.close();
+      delete draft.libraryRetry;
+      renderZoneOverview();
+      if (dialog.open) dialog.close();
     } catch (error) {
-      status.textContent = `已存入材料庫，尚未加入：${errorText(error)}`;
+      const message = `已存入材料庫，尚未加入：${errorText(error)}`;
+      if (dialog.open) status.textContent = message;
+      else if (stillHere()) { draft.libraryRetry = {message, refresh}; renderZoneOverview(); }
     } finally { loading = false; }
+  };
+  const closeDrawer = () => {
+    if (loading || frame.contentWindow?.designerSaving?.()) return;
+    if (savedId) { dialog.close(); void refresh(); return; }
+    if (!frame.contentWindow?.hasUnsavedLayers?.()) { dialog.close(); return; }
+    bar.hidden = true; confirm.hidden = false; frame.inert = true; resume.focus();
+  };
+  frame.addEventListener("load", () => {
+    frame.contentDocument?.addEventListener("keydown", event => {
+      if (event.key === "Escape") { event.preventDefault(); closeDrawer(); }
+    });
+  });
+  const close = button("zv-btn", "關閉", "zone-builder-close", closeDrawer);
+  const confirm = el("div", "zv-drawer-head"); confirm.hidden = true;
+  const resume = button("zv-btn", "繼續組", "zone-builder-resume", () => {
+    confirm.hidden = true; bar.hidden = false; frame.inert = false; close.focus();
+  });
+  confirm.append(el("strong", null, "放棄這個新構造？"), resume,
+    button("zv-btn", "放棄", "zone-builder-discard", () => dialog.close()));
+  bar.append(status, close);
+  dialog.append(bar, confirm, frame);
+  document.body.append(dialog);
+  dialog.addEventListener("cancel", event => {
+    event.preventDefault();
+    if (!confirm.hidden) resume.click(); else closeDrawer();
+  });
+  const receive = event => {
+    if (event.origin !== location.origin || event.source !== frame.contentWindow ||
+        event.data?.type !== "aosr-material-saved" || typeof event.data.id !== "string" || savedId) return;
+    savedId = event.data.id;
+    frame.inert = true;
+    void refresh();
   };
   window.addEventListener("message", receive);
   dialog.addEventListener("close", () => {
@@ -1544,11 +1589,13 @@ function panelCard() {
   card.dataset.mode = draft?.mode ?? "";
   const header = el("div", "zv-panel-head");
   const top = el("div", "zv-ehead"), title = el("h2");
-  title.append(zonesBrief(items));
+  const automatic = items.filter(item => followed.includes(item.id));
+  title.append(zonesBrief(items.filter(item => !followed.includes(item.id))));
   if (isWhole) title.append(" 整面");
-  const partner = zoneLimits?.symmetry?.partners?.[items[0].id.replace("/", "@")];
-  if (symmetryIsOn() && items.length === 2 && partner === items[1].id.replace("/", "@")) {
-    title.append(el("small", null, "左右一對"));
+  if (automatic.length) {
+    const partners = el("small");
+    partners.append("＋", zonesBrief(automatic), " 跟著選");
+    title.append(partners);
   }
   top.append(title, button("zv-link", "不選", "zone-panel-clear", () => select([])));
   const modesBar = el("div", "zv-modes");
@@ -1574,7 +1621,7 @@ function panelCard() {
   const ruled = new Set(ruleZones(view.faces, view.roles).map(item => item.id));
   const sameAs = rule && items.every(item => ruled.has(item.id)) ? rule.mode : null;
   const allPasted = items.every(item => item.pasted);
-  const choose = (mode, materialId = "") => { draft = {...untouched(), ...draft, query: draft?.mode === mode ? draft.query : "", mode, materialId, rangeRefused: ""}; draftTouched = true; renderZoneOverview(); };
+  const choose = (mode, materialId = "") => { draft = {...untouched(), ...draft, libraryRetry: draft?.mode === mode ? draft.libraryRetry : null, query: draft?.mode === mode ? draft.query : "", mode, materialId, rangeRefused: ""}; draftTouched = true; renderZoneOverview(); };
   // 套用鈕與它上面那一句「為什麼不能套用」：在小框裡打字（最深那一格）時就地更新這兩樣，不重畫整頁（重畫會換掉正在打的那一格）。
   const apply = button("zv-btn zv-main-btn", `套用到 ${items.length} 區`, "zone-panel-apply", () => action(applyDraft));
   const problem = el("p", "zv-problem zv-panel-problem"); problem.id = "zone-panel-problem"; problem.setAttribute("role", "alert");
@@ -1588,7 +1635,7 @@ function panelCard() {
     apply.disabled = !draft || (draft.mode === "fixed" && !draft.materialId && !allPasted) || Boolean(why);
     if (card.isConnected) $("zone-result")?.replaceWith(resultBar(apply.disabled));
   };
-  for (const [mode, label] of [["keep_original", "保留原樣"], ["fixed", "指定貼"], ["search", "程式挑"]]) {
+  for (const [mode, label] of [["keep_original", "保留原樣"], ["fixed", "指定貼"], ["search", ZONE_MODE_WORDS.search]]) {
     const row = el("label", "zv-segment"); row.id = `zone-panel-option-${mode}`;
     const radio = el("input"); radio.type = "radio"; radio.name = "zone-panel-mode"; radio.id = `zone-panel-mode-${mode}`; radio.checked = draft?.mode === mode;
     // 點「指定貼一種」而規則本身就是指定貼：先放規則那一筆（選它＝跟其他牆面一樣），要別的再換。
@@ -1601,18 +1648,21 @@ function panelCard() {
     const ruleList = sameAs === "search" ? rule.zones[0].allowed : null;
     const listsAsRule = !ruleList || !draft || (panelTicks(items)?.lists.every(list => sameList(list, ruleList)) ?? true);
     const sameHere = sameAs === mode && listsAsRule && (mode !== "fixed" || draft?.mode !== "fixed" || (ruleMaterial !== null && draft.materialId === ruleMaterial) || keepsRule);
-    if (sameHere) { const same = el("span", "zv-same", "＝其他牆面"); same.id = "zone-panel-same"; same.dataset.mode = mode; words.append(same); }
-    row.append(radio, el("i", `zv-sw ${shownOf(mode)}`), words);
+    if (sameHere && mode !== "keep_original") { const same = el("span", "zv-same", "＝其他牆面"); same.id = "zone-panel-same"; same.dataset.mode = mode; words.append(same); }
+    row.append(radio, words);
     modesBar.append(row);
-    for (const mark of nowMark(items, mode)) content.append(mark);
+    for (const mark of nowMark(items, mode)) {
+      if (mode === "keep_original") top.insertBefore(mark, top.lastElementChild);
+      else content.append(mark);
+    }
     if (draft?.mode !== mode) continue;
     if (mode === "fixed") {
       const material = el("div"); material.id = "zone-panel-material"; material.setAttribute("role", "radiogroup");
       material.setAttribute("aria-label", "指定貼哪一種");
-      const option = entry => materialRow({entry, name: entry ? vprWords(entry.label) + (entry.id === ruleMaterial && !sameHere ? "（＝其他牆面）" : "") : allPasted ? "照現在貼的，不換" : "選要貼哪一種",
+      const option = entry => materialRow({entry, name: entry ? vprWords(entry.label) + (entry.id === ruleMaterial && !sameHere ? "（＝其他牆面）" : "") : "照現在貼的，不換",
         description: entry && fixedDescription(entry), role: "radio", state: String(draft.materialId === (entry?.id ?? "")),
         id: `zone-panel-material-${entry?.id ?? ""}`, activate: () => choose("fixed", entry?.id ?? "")});
-      material.append(option(null));
+      if (allPasted) material.append(option(null));
       for (const entry of assignableEntries()) {
         if (walls.every(wall => usableHere(entry, wall)) || (!panelShowAll && entry.id === draft.materialId)) material.append(option(entry));
       }
@@ -1638,6 +1688,11 @@ function panelCard() {
   sync();
   if (["search", "fixed"].includes(draft?.mode)) {
     card.append(button("zv-build", "＋ 組一個新的", "zone-panel-build", openMaterialBuilder));
+  }
+  if (draft?.libraryRetry) {
+    const {message, refresh} = draft.libraryRetry;
+    const notice = el("div", "zv-notice", message); notice.setAttribute("role", "status");
+    notice.append(button("zv-link", "重試", "zone-library-retry", refresh)); content.prepend(notice);
   }
   content.append(problem);
   foot.append(apply, button("zv-btn", "取消", "zone-panel-cancel", () => select([])));
@@ -1822,6 +1877,7 @@ function detailTable() {
 let symmetryEditGeneration = null;
 function setSymmetry(on) {
   if (on === symmetryIsOn()) return;
+  followed = [];
   const design = designForEdit();
   if (on) delete design.left_right_symmetry; else design.left_right_symmetry = "off";
   unsaved = true; symmetryEditGeneration = zoneDesignGeneration; symmetryDetail = false;
@@ -1856,7 +1912,7 @@ function symmetryBox() {
   const body = el("div", "zv-sym-body");
   if (pairing.state === "pending") body.append(el("div", "zv-sym-quiet", "配對計算中…"));
   else if (pairing.state === "unavailable") body.append(el("div", null, pairing.message));
-  else if (pairing.state === "none") body.append(el("small", null, "沒有程式挑的區可配對"));
+  else if (pairing.state === "none") body.append(el("small", null, "沒有由程式最佳化的區可配對"));
   else if (pairing.state === "off") body.append(el("small", null, "每一區各自調"));
   else if (pairing.state === "no-axis") body.append(el("div", null, `${pairing.message}，所以現在每一區各自調。`));
   else if (pairing.state === "paired") {
@@ -1989,11 +2045,17 @@ function resultBar(cannotApply) {
   // 「拿去搜尋」照輸入頁頁底那一顆（zone_modes.js 的 renderSearchAction）的擋法：沒有區由程式最佳化、有紅框（清單只放了固定成品）、有超過限制的區，都按不下去。
   const pending = hasPendingDraft();
   const go = button("zv-go", pending ? "套用並拿去搜尋" : "拿去搜尋", "zone-page-search", () => action(async () => {
-    if (pending) {
-      const generation = zoneDesignGeneration;
-      if (!await applyDraft() || generation !== zoneDesignGeneration || !overviewOpen || selected.length) return;
-    }
-    await sendToSearch();
+    if (!pending) { await sendToSearch(); return; }
+    const generation = zoneDesignGeneration;
+    // 外層鎖涵蓋套用、重查、存檔與跳頁，各步驟仍自行管理內層的輸入鎖。
+    document.body.inert = true;
+    try {
+      if (!await applyDraft()) return;
+      if (generation !== zoneDesignGeneration || !overviewOpen) {
+        searchNote("頁面已切換，這次沒有拿去搜尋", "notice"); return;
+      }
+      await sendToSearch();
+    } finally { document.body.inert = false; }
   }));
   // 按不下去時旁邊一句講為什麼（細節在上面那一行紅字）。
   const remaining = all.some(item => pending && selected.includes(item.id) ? draft.mode === "search" : item.shown === "search");
@@ -2073,7 +2135,7 @@ function renderZoneOverview() {
   const prior = page.querySelector("#zone-panel");
   const scrollZone = prior?.dataset.zones, scrollMode = prior?.dataset.mode;
   const panelScroll = prior?.querySelector(".zv-panel-body")?.scrollTop ?? 0;
-  visibleCurves.disconnect();
+  visibleCurves.disconnect(); pendingSparks.clear();
   page.replaceChildren(...parts);
   page.querySelectorAll(".zv-spark[data-curve]").forEach(chart => visibleCurves.observe(chart));
   const mapPane = page.querySelector(".zv-mapwrap");

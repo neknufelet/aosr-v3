@@ -369,7 +369,7 @@ def test_the_deepest_for_the_picked_zones_is_written_in_metres_and_only_when_it_
         _click_zone(page, "yL/auto1")
         _pick_search(page)
         expect(page.locator("#zone-panel-depth")).to_have_value("")
-        expect(page.locator("#zone-panel-deepest")).to_contain_text("空白＝不限")
+        expect(page.locator("#zone-panel-depth")).to_have_attribute("placeholder", "空白＝不限")
         expect(page.locator("#zone-panel-deepest label")).to_have_text("最深（含空腔）")
         page.locator("#zone-panel-depth").fill("20")
         _apply(page)

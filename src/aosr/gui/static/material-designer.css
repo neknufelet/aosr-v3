@@ -62,7 +62,7 @@ input[type=radio],input[type=checkbox]{accent-color:#15617b}
 #figure .cutaway{height:13rem}.save-bar{justify-content:flex-start}.tune{font-size:.72rem}.params{grid-template-columns:minmax(0,1fr)}}
 .performance th{white-space:nowrap;width:1%}
 #zone-depth:empty,.embedded-zones header nav,.embedded-zones .citation,.embedded-zones #copy-designer,
-.embedded-zones h2 small,.embedded-zones .back-options small,.embedded-zones #figure-key+.hint{display:none}
+.embedded-zones h2 small,.embedded-zones .back-options label:not(.unavailable) small,.embedded-zones #figure-key+.hint{display:none}
 .embedded-zones main{margin:0;padding:0;max-width:none}
 .embedded-zones header,.embedded-zones section{border:0;box-shadow:none;margin:0;padding:8px 12px}
 .embedded-zones #name{width:100%}

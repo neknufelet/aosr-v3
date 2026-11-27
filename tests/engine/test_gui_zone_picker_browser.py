@@ -307,8 +307,8 @@ def test_stored_covered_product_stays_listed_and_can_be_removed_independently(tm
         page.locator(f"#zone-panel-remove-{product}").click()
         expect(row).to_have_count(0)
         page.locator("#zone-panel-picker-search").focus()
-        page.locator(f"#zone-panel-pick-{product}").click()
-        expect(page.locator(f"#zone-panel-pick-{product}")).to_have_attribute("aria-expanded", "true")
+        expect(page.locator(f"#zone-panel-pick-{product}")).to_be_disabled()
+        expect(page.locator(f"#zone-panel-pick-{product} .zv-covered-why")).to_be_visible()
         _apply(page)
         assert page.evaluate(_ALLOWED) == {"yL/z3": ONLY_48K}
 

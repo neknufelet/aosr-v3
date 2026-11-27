@@ -566,9 +566,14 @@ NO_ORANGE_ENTRIES = (*ENTRIES, _ENTRY.validate_python(_fixed(NO_ORANGE, "自編�
     "kind": "assembly", "backing": "rigid", "layers": [STEEL_2_5MM, {**MELAMINE_BONDED, "model": "miki"}]})))
 
 
-def _band_at(page: Page, hz: float) -> None:
+def _band_at(page: Page, hz: float, *, material_id: str | None = None) -> None:
     """把曲線介面回覆裡的界線換掉（伺服器起在另一個行程，改不到它的設定檔）：界線是從設定檔讀的，會變。"""
     def changed(route: Route) -> None:
+        if material_id is not None:
+            request_body = route.request.post_data_json
+            if not isinstance(request_body, dict) or request_body.get("id") != material_id:
+                route.continue_()
+                return
         response = route.fetch()
         body = response.json()
         if "reference_only" in body:

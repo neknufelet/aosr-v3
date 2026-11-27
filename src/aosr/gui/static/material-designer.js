@@ -332,7 +332,7 @@ if (zoneEmbed) {
   if (forCandidates) {
     const label = document.querySelector('.backs input[value="zone_wall"]').closest("label");
     label.classList.add("unavailable");
-    label.querySelector("small").textContent = "程式挑還不收";
+    label.querySelector("small").textContent = "由程式最佳化還不收";
   }
   byId("save").textContent = forCandidates ? "存入材料庫並加入候選" : "存入材料庫並選它";
   const curveConditions = el("details", {class: "curve-conditions"}, el("summary", {text: "曲線條件"}));
@@ -527,7 +527,7 @@ async function saveConstruction() {
       const problem = missingLayerField() || tuningProblem(document);
       if (problem) throw new Error(problem);
     }
-    if (forCandidates && document.backing === "zone_wall") throw new Error("程式挑整塊構造時，背後須選硬牆或空氣");
+    if (forCandidates && document.backing === "zone_wall") throw new Error("由程式最佳化整塊構造時，背後須選硬牆或空氣");
     if (zoneEmbed && !forCandidates && document.kind === "optimizable") throw new Error("指定貼須固定厚度，請關閉「給程式調」");
     const switching = !isNew && document.kind !== openedEntry.kind;
     let copy;
@@ -592,6 +592,9 @@ function snapshot() {
   return JSON.stringify(draftDocument(), (_, value) => value && typeof value === "object" && !Array.isArray(value)
     ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
 }
+
+function hasUnsavedLayers() { return Boolean(draft?.layers.length && !readOnly && snapshot() !== savedSnapshot); }
+function designerSaving() { return byId("workspace").inert; }
 
 window.addEventListener("beforeunload", event => {
   if (draft && !readOnly && snapshot() !== savedSnapshot) {

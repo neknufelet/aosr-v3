@@ -661,7 +661,7 @@ def test_a_save_failure_reply_goes_also_when_the_save_writes_no_design_file(tmp_
         _drag(page, LY, LZ, (0.02, 0.02), (0.8, 1.0))
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
         page.locator("#zone-goto-x0-z1").click()
-        page.locator("#zone-panel").get_by_role("radio", name="程式挑").check()
+        page.locator("#zone-panel").get_by_role("radio", name="由程式最佳化").check()
         page.locator("#zone-panel-apply").click()
         page.locator("#zone-page-close").click()
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")

@@ -229,8 +229,8 @@ def test_task_two_other_walls_bare_and_only_one_zone_handed_to_the_computer(tmp_
         page.locator("#zone-special-edit-1").click()
         assert page.evaluate(_SELECTED) == ["y0/auto1"]
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
-        expect(page.locator("#zone-panel-option-keep_original #zone-panel-same")).to_have_text("＝其他牆面")
-        expect(page.locator("#zone-panel-same")).to_have_count(1)
+        expect(page.locator("#zone-panel-option-keep_original")).to_have_text("保留原樣")
+        expect(page.locator("#zone-panel-same")).to_have_count(0)
         page.locator("#zone-panel-mode-keep_original").check()
         _apply(page)
         _click_zone(page, "xL/auto4")

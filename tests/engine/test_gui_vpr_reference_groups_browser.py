@@ -496,7 +496,7 @@ def test_the_panel_curve_keeps_the_band_inside_the_chart_and_folds_the_reason_ag
         _prepare(tmp_path)
         with real_server(tmp_path) as base, _open(browser, base) as watched:
             page = watched.page
-            _band_at(page, hz)
+            _band_at(page, hz, material_id=HIT)
             _open_page(page)
             _click_zone(page, "x0/a")
             pick_fixed_row(page, HIT)

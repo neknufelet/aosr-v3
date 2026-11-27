@@ -24,7 +24,7 @@ from tests.engine.test_gui_zone_choices_browser import DOOR, FLOOR_WOOD, HIDDEN_
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 from tests.engine.test_gui_zone_modes_browser import _modes
 
-SHOW_ALL = "顯示全部材料（門、窗、整片天花構造、另一間示範房的這些平常不列；要選它們才打開）"
+SHOW_ALL = "顯示全部材料"
 CEILING = "ceiling_fibrecement8mm_wool30_on_board_gap180"
 Zones = dict[str, dict[str, list[dict[str, object]]]]
 
@@ -70,7 +70,7 @@ def test_the_panel_lists_only_what_this_face_can_take_and_show_all_reveals_the_r
         page.locator("#zone-page-close").click()
         _fixed_panel(page, "floor")
         page.locator("#zone-panel-show-all").uncheck()
-        assert _values(page, "#zone-panel-material [role=radio]") == ["", "carpet_on_concrete"]
+        assert _values(page, "#zone-panel-material [role=radio]") == ["carpet_on_concrete"]
         # 小框一次選好幾面時（zone_overview.js 下拉那一段傳的是選中的每一面）：有任何一面不能貼就算不列的。
         hidden = "walls => hiddenGroups(walls, assignableEntries()).flatMap(([, entries]) => entries.map(entry => entry.id))"
         assert "glass_wool_48k_50mm" not in page.evaluate(hidden, ["x0"])

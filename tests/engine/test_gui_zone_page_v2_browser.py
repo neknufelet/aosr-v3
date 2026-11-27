@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -107,7 +107,9 @@ def test_drawer_saves_into_selected_zones(tmp_path: Path, browser: Browser, mode
         original = frame.locator('[name="backing"][value="zone_wall"]')
         if mode == "search":
             expect(original).to_be_disabled()
-            expect(original.locator("xpath=ancestor::label")).to_contain_text("程式挑還不收")
+            reason = original.locator("xpath=ancestor::label").locator("small")
+            expect(reason).to_have_text("由程式最佳化還不收")
+            expect(reason).to_be_in_viewport()
         else:
             expect(original).to_be_enabled()
         expect(frame.locator("#zone-depth")).to_have_text("貼在 前牆 ①② 只用到 15 cm 以內")
@@ -172,3 +174,116 @@ def test_candidate_options_follow_pointer_and_keyboard(tmp_path: Path, browser: 
         expect(toggle).to_have_css("clip-path", "none")
         page.keyboard.press("Enter")
         expect(row.locator(".zv-remove")).to_be_visible()
+
+
+def test_unpasted_zone_requires_a_real_fixed_material(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/auto1")
+        page.locator("#zone-panel-mode-fixed").check()
+        rows = page.locator("#zone-panel-material")
+        expect(rows.get_by_text("選要貼哪一種")).to_have_count(0)
+        expect(rows.locator("[aria-checked=true]")).to_have_count(0)
+        expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        rows.get_by_role("radio").first.click()
+        expect(rows.locator("[aria-checked=true]")).to_have_count(1)
+        expect(page.locator("#zone-panel-apply")).to_be_enabled()
+
+
+def test_segment_shows_only_its_label_and_remains_keyboard_operable(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/auto1")
+        option = page.locator("#zone-panel-option-keep_original")
+        expect(option).to_have_text("保留原樣")
+        expect(option.locator(".zv-sw")).to_have_count(0)
+        radio = option.get_by_role("radio")
+        expect(radio).to_have_css("width", "1px")
+        radio.focus()
+        expect(radio).to_be_focused()
+        radio.press("ArrowRight")
+        expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
+
+
+def test_fixed_form_uses_short_label_and_depth_placeholder(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_zone(page)
+        page.locator("#zone-panel-mode-fixed").check()
+        expect(page.locator(".zv-show-all")).to_have_text("顯示全部材料")
+        expect(page.locator("#zone-panel-depth")).to_have_attribute("placeholder", "空白＝不限")
+        expect(page.locator("#zone-panel-deepest")).not_to_contain_text("空白＝不限")
+
+
+def test_original_method_is_beside_the_zone_heading(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/auto1")
+        page.locator("#zone-panel-mode-fixed").check()
+        expect(page.locator(".zv-ehead #zone-panel-now-keep_original")).to_be_visible()
+        expect(page.locator(".zv-panel-body .zv-now")).to_have_count(0)
+
+
+@pytest.mark.parametrize("close_with_key", [False, True])
+def test_drawer_asks_before_discarding_layers(tmp_path: Path, browser: Browser, close_with_key: bool) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_zone(page)
+        page.locator("#zone-panel-mode-fixed").check()
+        page.locator("#zone-panel-build").click()
+        frame = page.frame_locator("#zone-builder iframe")
+        frame.locator('#palette [data-kind="porous"]').click()
+        for choice in ("繼續組", "放棄"):
+            if close_with_key:
+                page.keyboard.press("Escape")
+            else:
+                page.locator("#zone-builder-close").click()
+            expect(page.get_by_text("放棄這個新構造？", exact=True)).to_be_visible()
+            page.get_by_role("button", name=choice, exact=True).click()
+            if choice == "繼續組":
+                expect(frame.locator("article[data-kind=porous]")).to_be_visible()
+        expect(page.locator("#zone-builder")).to_have_count(0)
+
+
+@pytest.mark.parametrize(("mode", "failures"), [("fixed", 1), ("search", 2)])
+def test_saved_material_recovers_after_library_failure(tmp_path: Path, browser: Browser, mode: str, failures: int) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_zone(page)
+        page.locator(f"#zone-panel-mode-{mode}").check()
+        page.locator("#zone-panel-build").click()
+        frame = page.frame_locator("#zone-builder iframe")
+        frame.locator("#name").fill("自編補讀構造")
+        frame.locator('#palette [data-kind="porous"]').click()
+        reads = []
+
+        def fail_library(route: Route) -> None:
+            if route.request.method == "GET" and route.request.frame == page.main_frame:
+                reads.append(route.request.url)
+                if len(reads) <= failures:
+                    route.fulfill(status=503, json={"error": "考卷扣住材料庫"})
+                    return
+            route.continue_()
+
+        page.route("**/api/materials", fail_library)
+        frame.locator("#save").click()
+        expect(page.locator("#zone-builder [role=status]")).to_contain_text("已存入材料庫")
+        page.locator("#zone-builder-close").click()
+        expect(page.locator("#zone-builder")).to_have_count(0)
+        if failures == 2:
+            notice = page.locator("#zone-panel").get_by_role("status").filter(has_text="已存入材料庫")
+            expect(notice).to_be_visible()
+            expect(notice).to_contain_text("考卷扣住材料庫")
+            page.locator("#zone-panel").get_by_role("button", name="重試").click()
+        row = page.locator("#zone-panel .zv-material").filter(has_text="自編補讀構造")
+        expect(row).to_have_attribute("aria-checked", "true")
+        assert len(reads) == failures + 1
