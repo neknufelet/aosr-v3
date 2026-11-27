@@ -9,8 +9,15 @@
 由 gmsh 切四面體。輸入的大三角形（一面牆常常只有兩個）會被切成目標大小的小三角形，
 每個小三角形繼承原面的圖層。
 
-**還沒做的：** 造型貼著外殼（凸出牆面的板子與牆共面）時，空氣不再是「殼扣掉洞」，
-這一版不收，gmsh 會切失敗、錯誤原樣往上拋。點音源剛好在造型裡由求解那一層擋。
+**還沒做的：** 造型貼著外殼（凸出牆面的板子與牆共面）、造型彼此重疊或套在一起時，空氣不再是
+「殼扣掉洞」，這一版不收：gmsh 可能切失敗（錯誤原樣往上拋），也可能安靜切出一張不對的網格
+（例如零個四面體），所以切完一律核對空氣體積等於「外殼體積扣掉每個造型的體積」，對不上就擋。
+「應有體積」用焊點後的代表點算（gmsh 拿到的就是這組點），所以兩邊理論上只差浮點誤差；容差是
+「四面體數 × 焊點距離的立方」，每個四面體最多容一個焊點大小的小方塊，不另立門檻數字。這道核對只抓
+整塊切錯（巢狀造型、零個四面體、造型被當成空氣），不保證抓得到單一一個很扁的四面體。
+切之前整間房搬到外殼外框中心附近（切完搬回），遠座標不吃有效位數；
+容差另加一項隨座標大小走的浮點捨入，只在極端尺寸時才比焊點那一項大。
+點音源剛好在造型裡由求解那一層擋。
 
 呼叫端傳入焊點距離、最高頻率、每波長格數與聲速；網格大小固定為
 ``聲速 / 最高頻率 / 每波長格數``，跟長方體那一支同一個定義。gmsh 錯誤不攔、不退回。
@@ -57,10 +64,15 @@ class ShellMesh:
         return float(np.linalg.norm(cross, axis=1).sum() / 2.0)
 
 
-def _add_closed_surface(triangles: Sequence[LayerTriangle], weld_m: float) -> list[int]:
+def _local_points(triangles: Sequence[LayerTriangle], origin: NDArray[np.float64]) -> NDArray[np.float64]:
+    """全部角點攤平、搬到以 ``origin`` 為原點的局部座標。"""
+    return np.array([c for t in triangles for c in (t.a, t.b, t.c)], dtype=np.float64).reshape((-1, 3)) - origin
+
+
+def _add_closed_surface(triangles: Sequence[LayerTriangle], weld_m: float, origin: NDArray[np.float64]) -> list[int]:
     """一個封閉網格變成共用點線的平面；回傳逐三角形對齊的面編號，退化（焊成同點）的三角形不收。"""
     ids = welded_vertex_ids(triangles, weld_m)
-    points = np.array([c for t in triangles for c in (t.a, t.b, t.c)], dtype=np.float64)
+    points = _local_points(triangles, origin)
     point_tags = {int(i): gmsh.model.geo.addPoint(float(points[i, 0]), float(points[i, 1]), float(points[i, 2]))
                   for i in np.unique(ids)}
     line_tags: dict[tuple[int, int], int] = {}
@@ -78,6 +90,17 @@ def _add_closed_surface(triangles: Sequence[LayerTriangle], weld_m: float) -> li
             loop.append(line_tags[key] if a < b else -line_tags[key])
         surfaces.append(gmsh.model.geo.addPlaneSurface([gmsh.model.geo.addCurveLoop(loop)]))
     return surfaces
+
+
+def _welded_volume(triangles: Sequence[LayerTriangle], weld_m: float,
+                   origin: NDArray[np.float64]) -> tuple[float, float]:
+    """焊點後（gmsh 實際拿到的點、同一組局部座標）的帶號體積與面積；法線朝外為正。"""
+    if not triangles:
+        return 0.0, 0.0
+    corners = _local_points(triangles, origin)[welded_vertex_ids(triangles, weld_m)]
+    cross = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    volume = float(np.einsum("ij,ij->i", corners[:, 0], np.cross(corners[:, 1], corners[:, 2])).sum() / 6.0)
+    return volume, float(np.linalg.norm(cross, axis=1).sum() / 2.0)
 
 
 def _sorted_nodes() -> tuple[NDArray[np.float64], NDArray[np.int64]]:
@@ -114,6 +137,10 @@ def generate_room_shell_mesh(
     """單緒、固定亂數種子切一張房間殼的空氣網格；呼叫前應先過 :func:`check_room_shell`。"""
     size = sound_speed_m_s / max_frequency_hz / elements_per_wavelength
     pieces: list[Sequence[LayerTriangle]] = [room.shell, *(solid.triangles for solid in room.solids)]
+    # 整間房先搬到外殼外框的中心附近再切，切完搬回去：遠離原點的座標（例如測量座標）不讓
+    # gmsh 與體積核對吃掉有效位數。同號、相差不到兩倍的浮點數相減是精確的，所以搬過去不失真。
+    shell_points = _local_points(room.shell, np.zeros(3))
+    origin = (shell_points.min(axis=0) + shell_points.max(axis=0)) / 2.0 if len(shell_points) else np.zeros(3)
     gmsh.initialize(readConfigFiles=False)
     try:
         for name, value in (("General.Terminal", 0.0), ("General.NumThreads", 1.0),
@@ -127,7 +154,7 @@ def generate_room_shell_mesh(
         surface_layer: dict[int, int] = {}
         loops = []
         for triangles in pieces:
-            surfaces = _add_closed_surface(triangles, weld_m)
+            surfaces = _add_closed_surface(triangles, weld_m, origin)
             for surface, triangle in zip(surfaces, triangles, strict=True):
                 if surface < 0:
                     continue
@@ -144,6 +171,17 @@ def generate_room_shell_mesh(
                   for surface, layer in sorted(surface_layer.items())]
     finally:
         gmsh.finalize()
+    measured = [_welded_volume(piece, weld_m, origin) for piece in pieces]
+    expected = -measured[0][0] - sum(volume for volume, _ in measured[1:])
+    actual = float(np.abs(np.linalg.det(nodes[tetrahedra][:, 1:] - nodes[tetrahedra][:, :1])).sum() / 6.0)
+    # 浮點那一項：每個邊界面積元素的體積貢獻帶「最大局部座標 × 機器精度」的捨入，乘上四面體數
+    # 給求和次數留餘地；搬到局部座標後它遠小於焊點那一項，只在極端尺寸時接手。
+    extent = float(np.abs(nodes).max()) if len(nodes) else 0.0
+    rounding = len(tetrahedra) * float(np.finfo(np.float64).eps) * extent * sum(area for _, area in measured)
+    if not len(tetrahedra) or abs(actual - expected) > len(tetrahedra) * weld_m**3 + rounding:
+        raise ValueError(f"切出來的空氣體積 {actual:.3f} m³ 對不上外殼扣掉造型的 {expected:.3f} m³；"
+                         "造型彼此重疊、套在一起或貼著外殼，這一版的低頻網格還不支援")
     boundary = np.concatenate([block for block, _ in blocks])
     layers = np.concatenate([np.full(len(block), layer, dtype=np.int64) for block, layer in blocks])
-    return ShellMesh(nodes, _positive(nodes, tetrahedra), boundary, layers, tuple(layer_names))
+    oriented = _positive(nodes, tetrahedra)
+    return ShellMesh(nodes + origin, oriented, boundary, layers, tuple(layer_names))
