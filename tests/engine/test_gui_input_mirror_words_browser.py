@@ -24,7 +24,7 @@ from tests.engine._surface_zone_cases import room109_document
 from tests.engine._zone_symmetry_room import HEIGHT, LENGTH, NAME, searching, symmetry_document
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
 from tests.engine.test_gui_input_clear_undo_browser import _release
-from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
+from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write, _zones
 from tests.engine.test_gui_zone_mirror_draw_browser import _drawn, _matches_mirror
 from tests.engine.test_gui_zone_overview_tasks_browser import _library
 from tests.engine.test_gui_zone_symmetry_browser import _settled
@@ -184,18 +184,20 @@ def test_offset_window_and_opposite_wall_in_both_views(tmp_path: Path, browser: 
         page = watched.page
         _open_scheme(page, NAME)
         page.locator("#elevation-wall-y0").click()
+        page.set_viewport_size({"width": 1440, "height": 900})
         page.locator("#elevation-symmetry-off").click()
         page.locator("#elevation-symmetry-on").click()
         expect(page.locator("#elevation-symmetry-title")).to_have_text("兩邊一起畫（只切左牆）")
         expect(page.locator("#elevation-axis-words")).to_contain_text("離左牆 1.90 公尺")
 
         def preview() -> None:
-            expect(page.locator("#elevation-banner")).to_contain_text("左右牆不跟著畫")
+            expect(page.locator("#elevation-banner")).to_have_text("放開後，只切左牆")
 
         _drag(page, LENGTH, HEIGHT, (2.05, 0.85), (2.45, 0.85), during=preview)
         _settled(page)
         expect(page.locator("#elevation-wall-count-y0")).to_have_text("窗＋3 區")
         expect(page.locator("#elevation-wall-count-yL")).to_have_text("整面")
+        _check_offset_result(page, shots)
         page.locator("#elevation-panel").screenshot(path=shots / "after-input.png")
         page.locator("#zone-page-open").click()
         left, right = (page.locator(f"#zone-map .zv-zone[data-wall={face}]") for face in ("y0", "yL"))
@@ -225,6 +227,16 @@ def test_offset_window_and_opposite_wall_in_both_views(tmp_path: Path, browser: 
         _assert_quiet(watched)
 
 
+def _check_offset_result(page: Page, shots: Path) -> None:
+    expect(page.locator("#elevation-banner")).to_have_text("左牆切成 4 區，右牆仍是整面")
+    expect(page.locator("#elevation-note")).to_be_empty()
+    expect(page.locator("#elevation-selected")).not_to_contain_text("主位和兩支喇叭的中點")
+    expect(page.locator("#elevation-panel")).not_to_contain_text("都加上")
+    expect(page.get_by_role("button", name="將喇叭與座位一起置中")).to_be_visible()
+    page.locator("#elevation-axis-words").evaluate("e => window.scrollBy(0, e.getBoundingClientRect().top - 180)")
+    page.screenshot(path=shots / "input-offset.png")
+
+
 def _complete_window_frame(page: Page) -> None:
     page.locator("#zone-page-close").click()
     page.locator("#elevation-wall-y0").click()
@@ -236,3 +248,57 @@ def _complete_window_frame(page: Page) -> None:
     mirror, = _drawn(page, "yL").values()
     source = _drawn(page, "y0")["window"]
     assert (mirror["u_m"], mirror["v_m"]) == (source["u_m"], source["v_m"])
+
+
+@pytest.mark.parametrize("delete", [False, True], ids=["move", "delete"])
+def test_invalid_draft_reports_side_edit(tmp_path: Path, browser: Browser, delete: bool) -> None:
+    frame = ("paired", (1.25, 2.65), (0.4, 1.6))
+    _write(tmp_path, symmetry_document({"y0": [frame], "yL": [frame]}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, NAME)
+        page.locator("#elevation-wall-y0").click()
+        page.locator("#elevation [data-zone-id=paired] > rect").click()
+        expect(page.locator(".elevation-pair-status")).to_contain_text("左右對稱")
+        opposite = _zones(page, "yL")
+        field = reveal(page, "#speaker-left-x")
+        with page.expect_response("**/api/plan") as invalid:
+            field.fill("")
+            field.press("Tab")
+        assert invalid.value.status == 422
+        if delete:
+            page.locator("#elevation-delete").click()
+        else:
+            bottom = page.locator("#elevation-bottom")
+            bottom.fill("0.65")
+            bottom.press("Tab")
+        _settled(page)
+        if delete:
+            assert _zones(page, "y0")[0]["area"] == "whole_wall"
+        else:
+            assert _drawn(page, "y0")["paired"]["v_m"] == pytest.approx([0.65, 1.85])
+        assert _zones(page, "yL") == opposite
+        expect(page.locator("#elevation-banner")).to_have_text("只改了左牆，右牆沒跟著改：先改左聲道喇叭 x 座標：空著沒填")
+
+
+def test_changing_placement_expires_centring_in_both_views(tmp_path: Path, browser: Browser) -> None:
+    _write_offset_window_room(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.set_viewport_size({"width": 1440, "height": 900})
+        _open_scheme(page, NAME)
+        page.locator("#elevation-wall-y0").click()
+        page.get_by_role("button", name="將喇叭與座位一起置中").click()
+        expect(page.locator("#elevation-banner")).to_contain_text("已置中")
+        for name, value in [("speaker-left-y", "1.25"), ("speaker-right-y", "2.45"), ("receiver-main-y", "1.85")]:
+            field = reveal(page, "#" + name)
+            field.fill(value)
+            field.press("Tab")
+        expect(page.locator("#elevation-axis-words")).to_have_text("鏡子：喇叭中線，離左牆 1.85 公尺；不在正中，左右牆不跟著畫")
+        expect(page.locator("body")).not_to_contain_text("已置中", use_inner_text=True)
+        page.locator("#zone-page-open").click()
+        expect(page.locator("#zone-symmetry").get_by_text("鏡子不在正中，左牆 4 區、右牆 1 區，各自切區。", exact=True)).to_be_visible()
+        expect(page.locator("#zone-page-note")).to_be_empty()
+        expect(page.locator("body")).not_to_contain_text("已置中", use_inner_text=True)
+        page.locator("#zone-symmetry").scroll_into_view_if_needed()
+        page.screenshot(path=Path(os.environ.get("AOSR_SHOTS") or tmp_path) / "placement-changed.png")

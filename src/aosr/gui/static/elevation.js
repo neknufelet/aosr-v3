@@ -9,6 +9,8 @@ let elevationThin = [];
 let mirrorWarning = null;
 let movingText = "";
 let showSelectionBanner = false;
+const lastMirror = new WeakMap();  // 草稿失效時，照同一份方案上一次的幾何配對說明單面編輯。
+const centredMessage = "已置中。要補上既有的框，請在原牆選取那一塊，按「補畫另一邊」。";
 let bannerOwner = null;  // 說明條是哪一份方案上講的；換方案或對稱關掉就清（#1274）
 let elevationDrawing = false;  // 正在拖框：限制判決回來先不重畫（#1111），放開滑鼠才畫
 // 站在房間裡看那一面：畫面往右、往上各是方案的哪一軸（反了就鏡像），四邊標的是隔壁哪一面。
@@ -140,6 +142,7 @@ function repairButton(wall, before, repair) {
 }
 function resultBanner(warning) {
   const {wall, before, repair, summary, message, kind} = warning;
+  if (warning.singleWall) note("", "");
   banner(summary || message, kind, repair ? repairButton(wall, before, repair) : null);
 }
 // 尺寸確定時一趟重算六面。回覆只換座標，材料和以區代號記的做法繼續用原件。
@@ -244,6 +247,7 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
   let data, changedWalls, message = "", kind = "ok", fields = "", repairBefore = null;
   const payload = {scheme: draft, wall, boxes};
   if (mirror) payload.mirror = {...mirror, protected_walls: Object.keys(measuredDrafts)};
+  if (mirror?.before && !mirror.complete) payload.mirror.previous_pair = previousPair(wall, mirror.before.id);
   try {
     let response;
     ({response, data} = await reply(fetch("/api/zone-cut", {method: "POST", headers: {"Content-Type": "application/json"},
@@ -280,11 +284,11 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
       repairBefore = drawnBoxes(wall).find(b => b.id === mirror.after?.id);
       fields = repairWords(wall, repairBefore, repair);
     }
-    if (data.invalid_scheme) {
-      kind = "notice";
+    if (data.invalid_scheme || data.single_wall) {
+      kind = data.source_edit ? "ok" : "notice";
       message = data.message;
     } else if (data.message) {
-      kind = data.source_edit ? "ok" : "notice";
+      kind = "notice";
       message = data.message.replaceAll("{first}", mirror.after ? named(data.first) : first);
       if (data.other) {
         const [face, key] = data.other.split("@");
@@ -303,7 +307,7 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
     if (mirror && message) {
       const summary = fields ? `${data.cause}。${fields}` : data.reason;
       mirrorWarning = {owner: scheme, generation: zoneDesignGeneration, wall, before: repairBefore, repair, summary,
-        message, kind, blocked: data.blocked};
+        message, kind, singleWall: data.single_wall, blocked: data.blocked};
     }
     if (!Object.keys(changes).length) { renderElevation(); return; }
     changedWalls = changes;
@@ -371,6 +375,14 @@ function trackDrag(svg, event, move, complete, cancelled = () => {}) {
 function symmetryResult() {
   return window.zoneSymmetry.isOn() && zoneLimitsFresh() ? zoneLimits.symmetry : null;
 }
+function previousPair(wall, id) {
+  const last = lastMirror.get(scheme);
+  if (!last) return;
+  const other = last.partners?.[`${wall}@${id}`]?.split("@")[0];
+  if (!other) return "unpaired";
+  if (other === wall) return "same_wall";
+  return wall === last.axis.left ? "left" : "right";
+}
 function mirrorBox(wall, box) {
   const result = symmetryResult();
   if (!result?.axis) return null;
@@ -395,7 +407,7 @@ function svgBox(view, g, box) {
 }
 // 搬框時提示列已經寫著「搬到：…（放開才切）」：預覽的判決接在後面，不蓋掉它。
 function previewNote(text, kind, summary = text) {
-  note(movingText ? `${movingText}；${text}` : text, kind);
+  note([movingText, text].filter(Boolean).join("；"), kind);
   banner(summary, kind);
 }
 function drawMirrorPreview(svg, wall, g, mirror, reason) {
@@ -444,7 +456,9 @@ function mirrorPreview(svg, wall, g, before = null) {
           // 伺服器有幾句原因是接在「{first}」後面寫的（「的對面還有實測阻抗草稿」）；預覽沒有那一段，補成「這一塊」。
           if (reason?.startsWith("的")) reason = `這一塊${reason}`;
           drawMirrorPreview(svg, wall, g, data.source_refused ? null : mirror, reason ?? "");
-          if (reason) {
+          if (data.single_wall) {
+            position.note = ["", "notice", `放開後，${reason}`];
+          } else if (reason) {
             const repair = data.repairs?.[0];
             const shown = repair ? `${data.cause}。${repairWords(wall, box, repair)}` : reason;
             const full = data.source_refused ? `放開後不會切：${shown}` : mirror ? `放開後另一邊不會跟著畫：${shown}` : `放開後，${shown}`;
@@ -673,17 +687,17 @@ function editSelected(wall, view, width, height, field, input) {
   if (boxTooSmall(box)) { note(`框太小：寬與高都要至少 ${cutSpec().min_side_m * 100} 公分`, "notice"); return; }
   action(() => cutWall(wall, [...others, box], null, {before: current, after: box}));
 }
-function axisDistances(axis) {
+function distanceFromLeft(axis) {
   const width = wallSize(axis.front)?.[0];
   if (!width) return null;
   const distance = axis.left.endsWith("0") ? axis.across_m : width - axis.across_m;
-  return {left: distance.toFixed(2), centre: (width / 2).toFixed(2)};
+  return distance.toFixed(2);
 }
 // 這一區跟哪一區左右對稱（畫框時的幾何鏡像，限制判決順便回的 partners）：選取框底下那一句；沒有回空字串。第 2 段右欄
 // 清單講「跟誰一對」改用「這間房貼什麼」那一頁同一份配對（wall_section.js，#1265 單元 3 審查真錯 5）。
 function pairWords(wall, key) {
   const partner = symmetryResult()?.partners?.[`${wall}@${key}`]?.split("@");
-  return partner ? `和${zoneCalled(...partner)}左右對稱` : "";
+  return partner ? `位置和${zoneCalled(...partner)}左右對稱` : "";
 }
 // 開關底下那一句與立面圖上那條線的字（#1265 單元 3 之二第 A 條，示意圖 input-page-v3 第 2 段）：講成鏡子；
 // 在不在房間正中照伺服器的判斷（axis.centred），不另算。只改輸入頁，「這間房貼什麼」那一頁的「左右對稱」字樣照舊。
@@ -698,13 +712,14 @@ function inputAxisWords(result) {
   if (!axis) return result.reason || result.message || "正在確認鏡子在哪…";
   // 鏡子在哪已經知道，可是房間尺寸格現在讀不出來（例如高度清空、還沒離開那一格）：算不出離左牆多遠。這時沒有在問，
   // 不寫「正在確認」，講尺寸沒填好（#1265 單元 3 之二收尾第二趟 B4 之二；用語同上面那一行「先把房間的長、寬、高都填好正數」）。
-  const distances = axisDistances(axis);
-  if (!distances) return "先把房間的長、寬、高都填好正數，才算得出鏡子在哪";
-  return `鏡子：喇叭中線，離左牆 ${distances.left} 公尺` + (axis.centred ? "" : "；不在正中，左右牆不跟著畫");
+  const distance = distanceFromLeft(axis);
+  if (!distance) return "先把房間的長、寬、高都填好正數，才算得出鏡子在哪";
+  return `鏡子：喇叭中線，離左牆 ${distance} 公尺` + (axis.centred ? "" : "；不在正中，左右牆不跟著畫");
 }
 // 開關底下那一句（renderElevation 畫；限制檢查失敗之後又問一次時 zone_limits.js 只重寫這一句，見 window.refreshAxisWords）。
 function refreshAxisControl() {
   const on = window.zoneSymmetry.isOn(), result = symmetryResult();
+  if (result?.axis) lastMirror.set(scheme, result);
   const sideOnly = elevationWall && result?.axis && !result.axis.centred && result.projections[elevationWall][0] !== elevationWall;
   const title = $("elevation-panel").closest("#zone-page") ? "左右對稱" : "兩邊一起畫";
   $("elevation-symmetry-title").textContent = sideOnly ? `${title}（只切${wallNames[elevationWall]}）` : title;
@@ -736,9 +751,10 @@ function selectedEditor(wall, view, width, height) {
   remove.onclick = () => action(() => cutWall(wall, drawnBoxes(wall).filter(box => box.id !== current.id), () => { elevationSelected = null; }, {before: current, after: null}));
   fields.append(remove); area.append(fields);
   if (window.zoneSymmetry.isOn()) {
+    const result = symmetryResult();
+    if (!partner && result?.axis && !result.axis.centred && result.projections[wall][0] !== wall) return;
     const status = document.createElement("div"); status.className = "elevation-pair-status";
     area.append(status);
-    const result = symmetryResult();
     if (partner) status.textContent = pairWords(wall, current.id);
     if (!result || partner) return;
     if (selfMirrored(wall, current)) { status.textContent = "這一塊跨在鏡子正中，自己對稱"; return; }
@@ -746,9 +762,6 @@ function selectedEditor(wall, view, width, height) {
       status.textContent = result.message;
     } else if (!result.axis) {
       status.textContent = `${inputAxisWords(result)}。請先檢查方案，讓主位對齊兩支喇叭的中點。`;
-    } else if (result.projections[wall][0] !== wall && !result.axis.centred) {
-      const distances = axisDistances(result.axis);
-      if (distances) status.textContent = `鏡子離左牆 ${distances.left} 公尺，房間正中是 ${distances.centre} 公尺：主位和兩支喇叭的中點都要在正中，左右牆才會跟著畫`;
     } else if (result.placement_refusals?.[`${wall}@${current.id}`]) {
       const reason = result.placement_refusals[`${wall}@${current.id}`];
       const prefix = reason.startsWith("跨在對稱軸") ? "這一塊沒有另一邊：" : "這一塊翻過去放不下：";
@@ -1129,13 +1142,13 @@ window.addEventListener("DOMContentLoaded", () => {
         banner($("messages").textContent, "notice");
         return;
       }
-      const next = "已置中。要補上既有的框，請在原牆選取那一塊，按「補畫另一邊」。";
-      banner(next, "ok");
-      zoneNote(next, "ok");
+      banner(centredMessage, "ok");
+      zoneNote(centredMessage, "ok");
     }));
   };
   for (const id of ["room-fields", "speakers", "receivers"]) $(id).addEventListener("input", () => {
     showSelectionBanner = false;
+    if (zoneNoteText === centredMessage) zoneNote("", "");
     if (mirrorWarning || !$("elevation-banner").hidden) { mirrorWarning = null; banner(); note("", ""); }
     renderElevation();
   });

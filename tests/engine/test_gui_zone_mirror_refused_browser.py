@@ -318,7 +318,7 @@ def test_repair_crossing_centres_box(tmp_path: Path, browser: Browser) -> None:
 def test_repair_side_message_and_switch(tmp_path: Path, browser: Browser) -> None:
     with _room(tmp_path, browser, wall="x0") as page:
         _zoom(page)
-        words = "左右牆不跟著畫：對稱軸離左牆 2.45 公尺，房間正中是 2.60 公尺"
+        words = "放開後，只切左牆"
 
         def during() -> None:
             expect(page.locator("#elevation-banner")).to_contain_text(words)
@@ -326,8 +326,8 @@ def test_repair_side_message_and_switch(tmp_path: Path, browser: Browser) -> Non
 
         _drag(page, 5.5, H, START, END, during=during)
         _settled(page)
-        expect(page.locator("#elevation-banner")).to_contain_text(words)
-        expect(page.locator("#elevation-note")).to_contain_text("『房間和擺位』的『座標數字』")
+        expect(page.locator("#elevation-banner")).to_have_text("左牆切成 4 區，右牆仍是整面")
+        expect(page.locator("#elevation-note")).to_be_empty()
         expect(page.locator("#elevation-note")).not_to_contain_text("補畫另一邊")
         page.locator("#elevation-wall-xL").click()
         expect(page.locator("#elevation-note")).to_be_empty()
@@ -417,19 +417,13 @@ def test_repair_leaves_a_full_strip_at_the_wall(tmp_path: Path, browser: Browser
         _matches_mirror(page, FRONT, boxes["z1"], boxes["z2"])
 
 
-def test_side_wall_says_which_numbers_to_change(tmp_path: Path, browser: Browser) -> None:
-    """左右牆不跟著畫時，說到「喇叭與座位」哪一格加多少；照著加完，對稱軸就在房間正中。"""
+def test_side_wall_offers_one_centring_action(tmp_path: Path, browser: Browser) -> None:
+    """偏軸時只需按一次置中，再核對新軸距。"""
     with _room(tmp_path, browser, wall="x0") as page:
         _drag(page, 5.5, H, START, END)
         _settled(page)
-        expect(page.locator("#elevation-note")).to_contain_text("把兩支喇叭、主位與周圍點的 x 都加上 0.15，對稱軸就在房間正中")
-        page.evaluate("""() => {
-          for (const field of document.querySelectorAll('#speakers input[id$="-x"], #receivers input[id$="-x"]')) {
-            field.value = (Number(field.value) + 0.15).toFixed(4);
-            field.dispatchEvent(new Event("input", {bubbles: true}));
-            field.dispatchEvent(new Event("change", {bubbles: true}));
-          }
-        }""")
+        expect(page.locator("#elevation-axis-words")).to_have_text("鏡子：喇叭中線，離左牆 2.45 公尺；不在正中，左右牆不跟著畫")
+        page.get_by_role("button", name="將喇叭與座位一起置中").click()
         _settled(page)
         expect(page.locator("#elevation-axis-words")).to_contain_text("2.60")
         expect(page.locator("#elevation-axis-words")).not_to_contain_text("不在正中")

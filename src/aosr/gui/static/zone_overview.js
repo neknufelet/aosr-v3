@@ -2078,7 +2078,7 @@ function symmetryBox() {
   }
   if (pairing.axis && !pairing.axis.centred) {
     const left = pairing.axis.left, right = zoneLimits.symmetry.projections[left][0];
-    body.prepend(el("div", null, `鏡子不在正中，左牆 ${zoneList(left).length} 區、右牆 ${zoneList(right).length} 區，各自切區。要一起畫，按側牆的「切區」把喇叭與座位置中；已有的框可選取後補畫另一邊。`));
+    body.prepend(el("div", null, `鏡子不在正中，左牆 ${zoneList(left).length} 區、右牆 ${zoneList(right).length} 區，各自切區。`));
   }
   box.append(head, body);
   return box;

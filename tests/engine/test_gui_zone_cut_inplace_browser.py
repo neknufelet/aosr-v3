@@ -294,7 +294,7 @@ def test_held_finish_keeps_cut_warning_until_a_fresh_press(tmp_path: Path, brows
             with page.expect_response("**/api/zone-cut") as cut:
                 held[0].continue_()
             reason = cut.value.json()["reason"]
-            assert "左右牆不跟著畫：對稱軸離左牆 2.45 公尺，房間正中是 2.60 公尺" in reason
+            assert reason == "左牆切成 4 區，右牆仍是整面"
         else:
             reason = "沒有切：自編越界"
             if gesture == "mouse":
@@ -309,7 +309,10 @@ def test_held_finish_keeps_cut_warning_until_a_fresh_press(tmp_path: Path, brows
         elif gesture == "Escape":
             page.keyboard.down("Escape")
             page.keyboard.up("Escape")
-        expect(page.locator("#elevation-note")).to_contain_text("不在房間正中" if gesture == "one_wall" else "自編越界")
+        if gesture == "one_wall":
+            expect(page.locator("#elevation-note")).to_be_empty()
+        else:
+            expect(page.locator("#elevation-note")).to_contain_text("自編越界")
         expect(page.locator("#elevation-banner")).to_be_visible()
         expect(page.locator("#elevation-banner")).to_have_text(reason)
         if gesture == "one_wall":

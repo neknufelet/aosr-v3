@@ -7,7 +7,11 @@ from typing import cast
 import pytest
 from starlette.testclient import TestClient
 
+from aosr.config.capabilities import load_capabilities
+from aosr.config.directivity_defaults import load_directivity_defaults
+from aosr.config.paths import config_path
 from aosr.gui.app import STATIC, GuiSettings, create_app
+from aosr.gui.input_setup import InputEdit, InputShapeError, edit_input
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_input_answers import CABINETS, FURNITURE
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -352,18 +356,43 @@ def test_scheme_level_furniture_error_gives_no_placement_warning(tmp_path: Path)
     assert any("定不出前牆" in str(item["text"]) for item in checked["problems"])
 
 
-def test_centre_axis_moves_only_the_listening_group_in_a_turned_room(tmp_path: Path) -> None:
-    """旋轉後要移長度方向的座標。數字字串可讀，另外列的座位留在原地。"""
-    document = symmetry_document(across_shift_m=0.15, turned=True)
+@pytest.mark.parametrize(("turned", "coordinate", "shift"), [(False, "y", -0.2), (True, "x", 0.15)])
+def test_centre_axis_moves_each_listening_point(tmp_path: Path, turned: bool, coordinate: str, shift: float) -> None:
+    document = symmetry_document(across_shift_m=-shift, turned=turned)
     speakers = cast(dict[str, dict[str, object]], document["speakers"])
-    speakers["left"]["x"] = "1.35"
+    speakers["left"][coordinate] = str(speakers["left"][coordinate])
     points = cast(dict[str, list[dict[str, object]]], document["receiver_set"])["points"]
     points.append({"receiver_id": "guest", "role": "other_seat", "importance": 0.1, "position_m": [1.0, 1.3, 1.2]})
-    cast(list[object], points[0]["position_m"])[0] = "2.15"
+    index = "xyz".index(coordinate)
+    main = cast(list[object], points[0]["position_m"])
+    main[index] = str(main[index])
+    expected = symmetry_document(turned=turned)
+    cast(dict[str, list[object]], expected["receiver_set"])["points"].append(points[-1])
     with _app(tmp_path) as client:
         centred = edit(client, document, "centre_axis", True)
-    positions = cast(dict[str, list[dict[str, object]]], centred["receiver_set"])["points"]
-    assert positions[-1] == points[-1]
-    assert cast(list[float], positions[0]["position_m"])[0] == pytest.approx(2.0)
-    assert cast(dict[str, dict[str, float]], centred["speakers"])["left"]["x"] == pytest.approx(1.2)
     assert centred["scene"] == document["scene"]
+    actual_speakers = cast(dict[str, dict[str, float]], centred["speakers"])
+    expected_speakers = cast(dict[str, dict[str, float]], expected["speakers"])
+    for name in ("left", "right"):
+        assert actual_speakers[name] == pytest.approx(expected_speakers[name])
+    actual_points = cast(dict[str, list[dict[str, object]]], centred["receiver_set"])["points"]
+    for actual, target in zip(actual_points, cast(dict[str, list[dict[str, object]]], expected["receiver_set"])["points"], strict=True):
+        assert actual == {**target, "position_m": pytest.approx(cast(list[float], target["position_m"]))}
+    assert actual_points[-1] == points[-1]
+
+
+def test_centre_axis_rejects_entire_edit_if_a_surrounding_point_crosses_the_wall(tmp_path: Path) -> None:
+    document = symmetry_document(across_shift_m=-0.18)
+    points = cast(dict[str, list[dict[str, object]]], document["receiver_set"])["points"]
+    right = next(point for point in points if point["receiver_id"] == "right")
+    cast(list[float], right["position_m"])[1] = 3.91
+    request = InputEdit(scheme=document, action="centre_axis", value=True)
+    original = deepcopy(request.scheme)
+    with pytest.raises(InputShapeError, match="無法一起置中.*主位右方"):
+        edit_input(request, load_capabilities(config_path("capabilities.toml")),
+                   load_directivity_defaults(config_path("directivity_defaults.toml")))
+    assert request.scheme == original
+    with _app(tmp_path) as client:
+        rejected = client.post("/api/input-edit", json=request.model_dump())
+    assert rejected.status_code == 400
+    assert set(rejected.json()) == {"error"} and "主位右方" in rejected.json()["error"]
