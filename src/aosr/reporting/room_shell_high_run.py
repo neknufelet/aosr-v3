@@ -6,6 +6,7 @@
 - 喇叭當全向聲源（自訂房間還沒有喇叭指向性可選）；散射每個圖層都用材料預設值。
 - 「硬牆」那一檔用 :data:`~aosr.config.shell_lane.SHELL_HARD_WALL_IMPEDANCE_RATIO` 倍 ρc。
 - 被擋掉的路徑：同一張路徑表把遮擋拿掉再算一次，多出來的那幾條就是被天雲、板子擋掉的。
+- 嵌在牆上的喇叭（貼著外殼那一面）沿那一面的法線往房內挪 :data:`SPEAKER_WALL_NUDGE_M` 才算得了鏡像。
 """
 from __future__ import annotations
 
@@ -39,8 +40,17 @@ from aosr.reporting.room_shell_picture import layer_color
 
 # 回聲圖每條反射的大小取這一段頻率的平均（人耳最敏感、反射最分得出來的那一段）。
 ECHO_BAND_HZ = (500.0, 2000.0)
-# 衰減圖畫到第幾階：每一階換成「平均自由路徑 ÷ 聲速」的時間。
-DECAY_ORDERS = 12
+# 衰減圖：逐階算到降 60 dB（每一階換成「平均自由路徑 ÷ 聲速」的時間）。要算幾階先用平均吸音率估
+# （降 60 dB 要 ln(10⁶)/(−ln(1−ᾱ)) 階），多算一倍留給吸音不平均的房間，最多 DECAY_MAX_ORDERS 階。
+DECAY_FLOOR_DB = -60.0
+DECAY_MAX_ORDERS = 3000
+DECAY_MAX_POINTS = 240
+# 吸音只看實數阻抗、跟頻率無關，晚期衰減每個頻點都一樣，取一個頻點算就好。
+DECAY_FREQUENCY_HZ = 1000.0
+# 嵌牆喇叭往房內挪的距離（公尺）：5 毫米，一階反射的路程只多一公分，回聲圖上看不出來。
+SPEAKER_WALL_NUDGE_M = 0.005
+# 喇叭離聽位比這個近就不算（回聲圖以直達聲當 0 dB，距離是 0 就沒有基準）。
+MIN_SPEAKER_SEAT_M = 0.1
 OMNI = SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL)
 FloatArray = NDArray[np.float64]
 
@@ -97,6 +107,17 @@ def _blocked(faces: ShellFaces, table: ShellPathTable) -> list[dict[str, object]
             for i in range(free.path_count) if tuple(int(v) for v in free.bounce_plane[i]) not in kept]
 
 
+def _off_the_wall(point: tuple[float, float, float], faces: ShellFaces) -> tuple[float, float, float]:
+    """貼著（或差一點點穿出）外殼某一面的點，沿那一面的法線（朝空氣）挪到離面 :data:`SPEAKER_WALL_NUDGE_M`。"""
+    moved = np.asarray(point, dtype=np.float64)
+    planes = np.unique(faces.plane_of[:faces.shell_triangles])
+    for plane in planes[faces.supporting[planes]]:
+        height = float(moved @ faces.plane_normals[plane] - faces.plane_offsets[plane])
+        if -SPEAKER_WALL_NUDGE_M < height < SPEAKER_WALL_NUDGE_M:
+            moved = moved + (SPEAKER_WALL_NUDGE_M - height) * faces.plane_normals[plane]
+    return (float(moved[0]), float(moved[1]), float(moved[2]))
+
+
 def _db(values: FloatArray | tuple[float, ...]) -> list[float]:
     return [round(float(10.0 * np.log10(max(float(v), 1e-30))), 2) for v in values]
 
@@ -122,17 +143,34 @@ def _speaker(faces: ShellFaces, late: ShellLateGeometry, source: tuple[float, fl
                           "total": _db(lane.geometric_energy)}}
 
 
-def _decay(late: ShellLateGeometry, impedance: dict[str, complex], rho_c: float, c: float, volume: float,
-           frequencies: tuple[float, ...]) -> list[dict[str, float]]:
-    """晚期能量逐階（回聲圖那一段頻率平均），每一階換成時間：第 k 階 ≈ k × 平均自由路徑 ÷ 聲速。"""
-    rows = impedance_absorption_rows({name: (impedance[name],) * len(frequencies) for name in late.layers}, rho_c)
-    absorption = np.asarray([rows[name] for name in late.layers], dtype=np.float64)
-    result = solve_shell_late_energy_by_order(late, absorption, frequencies, max_order=DECAY_ORDERS)
-    band = [(ECHO_BAND_HZ[0] <= b.frequency_hz <= ECHO_BAND_HZ[1]) for b in result.bands]
-    energy = np.mean([b.energy_by_order for b, keep in zip(result.bands, band, strict=True) if keep], axis=0)
-    free_path = 4.0 * volume / float(late.areas.sum())
-    return [{"t_ms": round((k + 1) * free_path / c * 1000.0, 2), "db": value}
-            for k, value in enumerate(_db(energy / energy[0]))]
+def _decay_orders(absorption: FloatArray, layer_areas: FloatArray) -> int:
+    alpha = float(layer_areas @ absorption / layer_areas.sum())
+    if alpha <= 0.0:
+        return DECAY_MAX_ORDERS
+    needed = 2.0 * np.log(10.0 ** (-DECAY_FLOOR_DB / 10.0)) / -np.log1p(-min(alpha, 1.0 - 1e-12))
+    return int(min(DECAY_MAX_ORDERS, max(12, np.ceil(needed))))
+
+
+def _decay(late: ShellLateGeometry, impedance: dict[str, complex], rho_c: float, c: float,
+           volume: float) -> dict[str, object]:
+    """晚期能量逐階到降 60 dB，每一階換成時間：第 k 階 ≈ k × 平均自由路徑 ÷ 聲速；另回 T30 推的殘響時間。"""
+    rows = impedance_absorption_rows({name: (impedance[name],) for name in late.layers}, rho_c)
+    absorption = np.asarray([rows[name][0] for name in late.layers], dtype=np.float64)
+    orders = _decay_orders(absorption, late.layer_areas())
+    band = solve_shell_late_energy_by_order(late, absorption[:, None], (DECAY_FREQUENCY_HZ,), max_order=orders).bands[0]
+    energy = np.asarray(band.energy_by_order, dtype=np.float64)
+    level = 10.0 * np.log10(np.maximum(energy / energy[0], 1e-30))
+    step_ms = 4.0 * volume / float(late.areas.sum()) / c * 1000.0
+    times = (np.arange(len(level)) + 1) * step_ms
+    end = int(np.argmax(level <= DECAY_FLOOR_DB)) + 1 if bool((level <= DECAY_FLOOR_DB).any()) else len(level)
+    keep = np.unique(np.linspace(0, end - 1, min(end, DECAY_MAX_POINTS)).round().astype(np.int64))
+    fit = (level <= -5.0) & (level >= -35.0)
+    t60 = None
+    if int(fit.sum()) >= 2:
+        slope = float(np.polyfit(times[fit] / 1000.0, level[fit], 1)[0])
+        t60 = round(-60.0 / slope, 2) if slope < 0 else None
+    return {"points": [{"t_ms": round(float(times[k]), 2), "db": round(float(level[k]), 2)} for k in keep],
+            "t60_s": t60}
 
 
 def run(snapshot: Mapping[str, object], *, engine_commit: str,
@@ -154,15 +192,19 @@ def run(snapshot: Mapping[str, object], *, engine_commit: str,
     late = shell_late_geometry(faces, patch_edge_m=patch_edge_m)
     frequencies = high_frequencies()
     seat = next(item for item in room.seats if item.kind == MAIN_SEAT)
-    speakers = [{"label": f"喇叭 {number}（{speaker.kind}）", "position": list(speaker.position),
-                 **_speaker(faces, late, speaker.position, seat.position, impedance, rho_c, c, frequencies)}
-                for number, speaker in enumerate(room.speakers, start=1)]
+    positions = [_off_the_wall(speaker.position, faces) for speaker in room.speakers]
+    for number, position in enumerate(positions, start=1):
+        if float(np.linalg.norm(np.subtract(position, seat.position))) < MIN_SPEAKER_SEAT_M:
+            raise ValueError(f"喇叭 {number} 跟聽位幾乎在同一點（不到 {MIN_SPEAKER_SEAT_M * 100:.0f} 公分），請把其中一個移開")
+    speakers = [{"label": f"喇叭 {number}（{speaker.kind}）", "position": list(position),
+                 **_speaker(faces, late, position, seat.position, impedance, rho_c, c, frequencies)}
+                for number, (speaker, position) in enumerate(zip(room.speakers, positions, strict=True), start=1)]
     order = sorted(faces.layers)
     triangles = {name: np.round(faces.corners[faces.layer_of == faces.layers.index(name)], 4).tolist()
                  for name in order}
     return {"engine_commit": engine_commit, "frequencies_hz": [round(f, 3) for f in frequencies],
             "seat": list(seat.position), "speakers": speakers,
-            "decay": _decay(late, impedance, rho_c, c, _room_volume(room), frequencies),
+            "decay": _decay(late, impedance, rho_c, c, _room_volume(room)),
             "layers": [{"name": name, "color": layer_color(i)} for i, name in enumerate(order)],
             "triangles": triangles, "solid_layers": sorted({t.layer for solid in room.solids for t in solid.triangles}),
             "hidden_area_m2": round(late.hidden_area_m2, 2),
