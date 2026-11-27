@@ -546,6 +546,17 @@ def initial_assembly(entry: TunableLayersEntry) -> Assembly:
     return Assembly(layers=entry.layers, backing="rigid")
 
 
+def preview_material(entry: LibraryEntry) -> StandaloneSurface:
+    """拿一筆材料去算時用的牆面材料：可最佳化與可調多層取初值排法，背後要原牆的構造當剛背。"""
+    if isinstance(entry, TunableLayersEntry):
+        return initial_assembly(entry)
+    if isinstance(entry, OptimizableEntry):
+        return template_assembly(entry)
+    if isinstance(entry, ConstructionEntry):
+        return entry.preview_assembly()
+    return entry.surface_material()
+
+
 def load_user_library(path: Path) -> tuple[LibraryEntry, ...]:
     """使用者材料庫；檔案不在就是空的。代號或顯示名跟內建撞到就拒收（內建唯讀）。"""
     if not path.exists():
