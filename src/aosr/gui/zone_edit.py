@@ -28,6 +28,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.geometry.shoebox import Room
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
 from aosr.reporting.scheme import Scheme
 from aosr.physics.zone_fill import FILL_PREFIX, Box, FillResult, fill_wall, wall_size_m
@@ -326,9 +327,14 @@ def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -
     source_only = partial(_source_cut, body, change, key, source, preview=preview)
     editing = change.before is not None and not change.complete
     try:
-        scheme = Scheme.model_validate(doc)
-    except ValidationError:
-        return source_only() if editing else source_only("的方案還有沒填好的地方，定不出對稱軸", fix="請先檢查方案。")
+        scheme = checked_scheme(doc)
+    except SchemeProblemsError as exc:
+        if editing:
+            return source_only()
+        problem = exc.first_fix()
+        if preview:
+            return source_only(problem)
+        return {**source_only(), "invalid_scheme": True, "message": f"另一邊沒有跟著畫：{problem}"}
     axis = symmetry_axis(scheme)
     if isinstance(axis, str):
         return source_only() if editing else source_only(axis, fix="請調整喇叭或主位，再選框按「補畫另一邊」。")

@@ -280,7 +280,10 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
       repairBefore = drawnBoxes(wall).find(b => b.id === mirror.after?.id);
       fields = repairWords(wall, repairBefore, repair);
     }
-    if (data.message) {
+    if (data.invalid_scheme) {
+      kind = "notice";
+      message = data.message;
+    } else if (data.message) {
       kind = data.source_edit ? "ok" : "notice";
       message = data.message.replaceAll("{first}", mirror.after ? named(data.first) : first);
       if (data.other) {
@@ -734,7 +737,9 @@ function selectedEditor(wall, view, width, height) {
     if (partner) status.textContent = pairWords(wall, current.id);
     if (!result || partner) return;
     if (selfMirrored(wall, current)) { status.textContent = "這一塊跨在鏡子正中，自己對稱"; return; }
-    if (!result.axis) {
+    if (!result.available) {
+      status.textContent = result.message;
+    } else if (!result.axis) {
       status.textContent = `${inputAxisWords(result)}。請先檢查方案，讓主位對齊兩支喇叭的中點。`;
     } else if (result.projections[wall][0] !== wall && !result.axis.centred) {
       const distances = axisDistances(result.axis);

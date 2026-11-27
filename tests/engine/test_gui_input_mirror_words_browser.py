@@ -18,10 +18,12 @@ from aosr.gui.home_view import NO_SCHEME_MATERIALS_NOTE
 from aosr.gui.zone_symmetry import Axis, symmetry_axis
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine._input_page_steps import reveal
 from tests.engine._surface_zone_cases import room109_document
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
 from tests.engine.test_gui_input_clear_undo_browser import _release
 from tests.engine.test_gui_zone_elevation_browser import _drag, _open_scheme, _write
+from tests.engine.test_gui_zone_mirror_draw_browser import _drawn, _matches_mirror
 
 WIDTH = 5.0        # 房間寬（左牆到右牆）
 SPREAD = 0.7       # 兩支喇叭各離中線多遠
@@ -122,3 +124,36 @@ def test_the_home_note_points_at_buttons_that_are_really_on_the_bar(tmp_path: Pa
         nav.click()
         expect(page.locator("#zone-page")).to_be_visible()
         _assert_quiet(watched)
+
+
+def test_invalid_draft_names_the_field_then_mirrors_again(tmp_path: Path, browser: Browser) -> None:
+    document = _mirror_room(2.4)
+    cast(dict[str, object], document["scene"])["room_m"] = {"Lx": 6, "Ly": WIDTH, "Lz": 3}
+    _write(tmp_path, document)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-xL").click()
+        expect(page.locator("#elevation-symmetry-on")).to_have_attribute("aria-pressed", "true")
+        field = reveal(page, "#speaker-left-x")
+        original = field.input_value()
+        with page.expect_response("**/api/plan") as invalid:
+            field.fill("")
+            field.press("Tab")
+        assert invalid.value.status == 422
+        assert invalid.value.json()["problems"][0]["text"] == "左聲道喇叭 x 座標：空著沒填"
+        _drag(page, WIDTH, 3, (0.35, 0.3), (1.15, 1.2))
+        problem = "先改左聲道喇叭 x 座標：空著沒填"
+        expect(page.locator("#elevation-note")).to_have_text("另一邊沒有跟著畫：" + problem)
+        assert set(_drawn(page, "xL")) == {"z1"}
+        page.locator("#zone-page-open").click()
+        expect(page.locator("#zone-symmetry")).to_contain_text(problem)
+        page.locator("#zone-page-close").click()
+        with page.expect_response("**/api/plan") as repaired:
+            field.fill(original)
+            field.press("Tab")
+        assert repaired.value.status == 200
+        _drag(page, WIDTH, 3, (0.6, 1.65), (1.3, 2.45))
+        boxes = _drawn(page, "xL")
+        assert set(boxes) == {"z1", "z2", "z3"}
+        _matches_mirror(page, "xL", boxes["z2"], boxes["z3"])
