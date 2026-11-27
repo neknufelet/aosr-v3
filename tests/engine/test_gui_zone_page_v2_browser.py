@@ -167,7 +167,18 @@ def test_candidate_options_follow_pointer_and_keyboard(tmp_path: Path, browser: 
         expect(toggle).to_have_css("pointer-events", "none")
         row.hover()
         expect(toggle).to_have_css("pointer-events", "auto")
+        # 使用者瞄準收合時的「詳情」，移上去再原地按一下，離開後明細仍固定展開。
+        toggle.scroll_into_view_if_needed()
+        box = toggle.bounding_box()
+        assert box is not None
+        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        page.mouse.move(x, y)
+        expect(row.locator(".zv-remove")).to_be_visible()
+        page.mouse.click(x, y)
         page.locator("#zone-panel h2").hover()
+        expect(row.locator(".zv-remove")).to_be_visible()
+        toggle.press("Enter")
+        expect(row.locator(".zv-remove")).to_be_hidden()
         row.get_by_role("checkbox").focus()
         page.keyboard.press("Tab")
         expect(row.locator(".zv-members > summary")).to_be_focused()

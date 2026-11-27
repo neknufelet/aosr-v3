@@ -13,7 +13,7 @@ from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._surface_zone_cases import room109_document
 from tests.engine._zone_panel_steps import open_panel
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
-from tests.engine.test_gui_zone_choices_browser import DOOR, FLOOR_WOOD, HIDDEN_ON_WALLS, _sample_library, _values
+from tests.engine.test_gui_zone_choices_browser import DOOR, FLOOR_CHOICES, FLOOR_WOOD, HIDDEN_ON_WALLS, _sample_library, _values
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 from tests.engine.test_gui_zone_modes_browser import _modes
 
@@ -81,7 +81,8 @@ def test_both_pickers_group_rows_and_remember_folds(tmp_path: Path, browser: Bro
         _fixed_panel(page, "floor")
         groups = page.locator("#zone-panel-material details")
         assert groups.evaluate_all("els => els.map(e => e.getAttribute('aria-label'))") == ["地板", "多孔吸音", "共振吸音", "我組的"]
-        assert _values(page, "#zone-panel-material [role=radio]") == ["carpet_on_concrete", FLOOR_WOOD]
+        assert _values(page, "#zone-panel-material [role=radio]") == FLOOR_CHOICES
+        assert _values(page, "#zone-panel-material [data-material-group=surface] [role=radio]") == FLOOR_CHOICES
         expect(groups.first.locator(f"[value={FLOOR_WOOD}]")).to_be_visible()
         assert watched.page_errors == [] and watched.console_errors == []
 

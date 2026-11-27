@@ -415,9 +415,10 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-builder iframe{width:100%;flex:1;min-height:0;border:0}
 #zone-page .zv-main{grid-template-columns:minmax(0,1fr) clamp(350px,31vw,440px)}
 #zone-page .zv-mapwrap{max-width:100%}
-#zone-page .zv-row-options summary{width:fit-content;margin-left:auto}
+/* 明細滑入就展開，開關要一直留在原來的點擊位置。 */
+#zone-page .zv-row-options > summary{position:absolute;right:3px;top:8px;width:fit-content}
 #zone-page .zv-material .zv-covered-why{grid-column:3/-1;font-size:13px}
-#zone-page .zv-form details.zv-row-options:not([open]){position:absolute;right:3px;top:8px;padding:0}
+#zone-page .zv-form details.zv-row-options:not([open]){display:contents}
 #zone-page .zv-slab.porous{background:repeating-linear-gradient(35deg,transparent 0 4px,#c5a75a 4px 5px,transparent 5px 9px),#f6e7b0}
 #zone-page .zv-edit > .zv-build{flex:none;width:calc(100% - 32px);margin:4px 16px 8px}
 

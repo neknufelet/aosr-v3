@@ -1590,17 +1590,21 @@ function candidateRow(id, items, ticks, members, sync) {
   options.classList.add("zv-row-options");
   // 滑到「選項」可直接選動作；點一下固定展開，觸控和鍵盤仍可直接開關。
   const toggle = options.firstElementChild;
-  let preview = false;
+  // 只把使用者點開的明細帶過重畫。滑入的暫時預覽不能變成「本來已開」，
+  // 否則候選回覆剛好重畫後，第一下點擊反而會把明細收掉。
+  options.ontoggle = null;
   toggle.onpointerenter = event => {
-    if (event.pointerType === "mouse" && !options.open) { preview = true; options.open = true; }
+    if (event.pointerType === "mouse") options.open = true;
   };
-  toggle.addEventListener("click", event => {
-    if (preview && event.detail) event.preventDefault();
-    preview = false;
+  options.addEventListener("click", event => {
+    if (toggle.contains(event.target)) {
+      if (!event.detail || !options.open || openDetails.has(options.id)) return;
+      event.preventDefault();  // 固定滑入的預覽，保留展開。
+    }
+    openDetails.add(options.id);
   }, true);
   row.onpointerleave = () => {
-    if (preview && !options.contains(document.activeElement)) options.open = false;
-    preview = false;
+    if (!openDetails.has(options.id) && !options.contains(document.activeElement)) options.open = false;
   };
   row.append(options);
   if (count) {

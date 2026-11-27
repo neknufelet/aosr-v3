@@ -365,11 +365,13 @@ def test_picking_a_card_scrolls_the_panel_heading_into_view(tmp_path: Path, brow
         button = page.locator("#zone-group-2-select")
         button.scroll_into_view_if_needed()
         button.click()
-        heading = page.locator("#zone-panel h2").bounding_box()
-        assert heading is not None
+        # 同一次排版讀取標題和面板，避免候選回覆重畫時量到上一個已拆掉的節點。
+        heading, panel = page.evaluate("""() => ['#zone-panel h2', '#zone-panel'].map(selector =>
+            document.querySelector(selector).getBoundingClientRect().toJSON())""")
+        assert heading["height"] > 0 and heading["width"] > 0
         assert 0 <= heading["y"] <= 700 - heading["height"]
-        panel = page.locator("#zone-panel").bounding_box()
-        assert panel is not None and 8 <= panel["y"] < 700
+        assert panel["height"] > 0 and panel["width"] > 0
+        assert 8 <= panel["y"] < 700
 
 
 @pytest.mark.parametrize("action", ["remove-glass_wool_24k", "only-glass_wool_48k"])
@@ -866,13 +868,16 @@ def test_clicking_a_visible_map_zone_keeps_the_scroll_position(tmp_path: Path, b
         page = watched.page
         _open_overview(page)
         open_groups(page)
-        pane = page.locator(".zv-mapwrap")
-        pane.evaluate("node => node.scrollTo(0, 60)")
-        before = pane.evaluate("node => node.scrollTop")
-        assert before > 0
+        # 寫、讀捲動位置用同一個仍在頁上的地圖節點；點區以後讀當下那一張。
+        before = page.evaluate("""() => {
+            const pane = document.querySelector('.zv-mapwrap');
+            pane.scrollTop = 60;
+            return pane.scrollTop;
+        }""")
+        assert before == 60
         _click_zone(page, "yL/z3")
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "yL/z3")
-        assert pane.evaluate("node => node.scrollTop") == before
+        assert page.evaluate("document.querySelector('.zv-mapwrap').scrollTop") == before
 
 
 def test_enter_on_a_partly_listed_covered_product_preserves_its_zones(tmp_path: Path, browser: Browser) -> None:

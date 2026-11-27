@@ -29,6 +29,8 @@ HIDDEN_ON_WALLS = ("ceiling_gypsum9mm_gap300",
                    "demo109_rockwool60k_capped", "demo109_measured_pet35_synthetic_b7")
 DOOR = "hall_door_hollow_core"
 FLOOR_WOOD = "joist_floor_plank_fixed"
+FLOOR_CHOICES = ["carpet_on_concrete", "wood_floor_on_joists", "wood_floor_on_sleepers",
+                 "concrete_floor", "hard_surface_average", FLOOR_WOOD]
 
 
 PLAIN_PRODUCT = "fabric_pet_a_gap100"  # 內建的一筆固定成品：牆面能貼、不是哪一種可調玻璃棉包含的、也不是「鋼板直接貼在棉上」的構造
@@ -83,13 +85,13 @@ def test_menus_list_only_what_this_face_can_take(tmp_path: Path, browser: Browse
         page.locator("#zone-panel-cancel").click()
         page.locator("#zone-page-close").click()
         page.locator("#elevation-wall-floor").click()
-        assert material_values(page, "floor", "whole_wall") == ["carpet_on_concrete", FLOOR_WOOD]
+        assert material_values(page, "floor", "whole_wall") == FLOOR_CHOICES
         choose_mode(page, "floor", "whole_wall", "search")
         assert _chips(page, "floor", "whole_wall") == ["none"]
         open_panel(page, "floor", "whole_wall")
         expect(page.locator("#zone-panel-form")).to_contain_text("這裡沒有可調的材料：程式只能從「不貼」開始")
         page.locator("#zone-panel-picker-search").focus()
-        expect(page.locator("#zone-panel-picker [role=checkbox][aria-checked=false]")).to_have_count(2)
+        assert _values(page, "#zone-panel-picker [role=checkbox][aria-checked=false]") == FLOOR_CHOICES
         expect(page.locator("#zone-panel-pick-carpet_on_concrete")).to_be_enabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
