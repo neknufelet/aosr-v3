@@ -847,7 +847,15 @@ def test_the_zone_page_gets_the_pairing_from_the_limits_route(tmp_path: Path) ->
     del half["speakers"]
     response = client.post("/api/zone-limits", json={"scheme": half, "design": searching(ALL_ZONES)})
     assert response.status_code == 200 and response.json()["symmetry"]["available"] is False
-    assert response.json()["symmetry"]["message"]
+    assert response.json()["symmetry"]["message"] == "先改喇叭：缺這一格"
+
+    speakers = cast(dict[str, dict[str, object]], document["speakers"])
+    for side in ("left", "right"):
+        speakers[side]["x"] = None
+    document["purpose"] = 3
+    response = client.post("/api/zone-limits", json={"scheme": document, "design": None})
+    assert response.status_code == 200
+    assert response.json()["symmetry"] == {"available": False, "partners": {}, "message": "先改方案用途：要填文字等 3 處"}
 
 
 def test_a_design_that_cannot_start_a_search_still_answers_the_limits_route(tmp_path: Path) -> None:

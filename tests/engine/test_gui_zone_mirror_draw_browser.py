@@ -117,6 +117,8 @@ def test_front_preview_and_search_pair(tmp_path: Path, browser: Browser) -> None
         _matches_mirror(page, FRONT, first, second)
         assert _rect(page, "#elevation [data-zone-id=z2] > rect") == pytest.approx(preview, rel=0, abs=1e-9)
         expect(page.locator(".mirror-link text")).to_have_text("左右對稱")
+        partner = page.evaluate("zoneCalled('yL', 'z2')")
+        expect(page.locator(".elevation-pair-status")).to_have_text(f"位置和{partner}左右對稱")
         _shot(page, tmp_path, "front-pair")
         _optimize(page)
 
@@ -198,9 +200,8 @@ def test_side_walls(tmp_path: Path, browser: Browser, centred: bool) -> None:
         else:
             assert _zones(page, "xL") == before
             expect(page.locator("#elevation-complete")).to_have_count(0)
-            # 第二趟決定第 6 條：選取框這一句也叫鏡子（輸入頁上一個東西只用一個叫法）。
-            expect(page.locator("#elevation-selected")).to_contain_text("鏡子離左牆 2.45 公尺，房間正中是 2.60 公尺")
-            expect(page.locator("#elevation-note")).to_contain_text("不在房間正中")
+            expect(page.locator("#elevation-axis-words")).to_contain_text("離左牆 2.45 公尺；不在正中")
+            expect(page.locator("#elevation-banner")).to_have_text("左牆切成 4 區，右牆仍是整面")
             _shot(page, tmp_path, "side-axis-offset")
 
 
@@ -439,7 +440,11 @@ def test_unpaired_edit_stays_green(tmp_path: Path, browser: Browser, condition: 
                 page.evaluate("scheme.purpose = ''")
         page.locator("#elevation-height").fill("1.1")
         _cut_by(page, "press:Enter")
-        expect(page.locator("#elevation-note.ok")).to_contain_text("切成")
+        if condition == "side":
+            expect(page.locator("#elevation-banner.ok")).to_have_text("左牆切成 4 區，右牆仍是整面")
+            expect(page.locator("#elevation-note")).to_be_empty()
+        else:
+            expect(page.locator("#elevation-note.ok")).to_contain_text("切成")
         _cut_by(page, "#elevation-delete")
         expect(page.locator("#elevation-note.ok")).to_contain_text("回到整面一區")
 
@@ -465,7 +470,7 @@ def test_existing_exact_mirror_completes_pair_quietly(tmp_path: Path, browser: B
 def test_input_axis_words_and_switch(tmp_path: Path, browser: Browser, centred: bool) -> None:
     with _room(tmp_path, browser, (FIRST,), centred=centred) as page:
         distance = "2.60" if centred else "2.45"
-        where = "" if centred else "；不在正中，左右牆不跟著畫"  # #1265 說明字瘦身：在正中不多講
+        where = "" if centred else "；不在正中"  # #1265 說明字瘦身：在正中不多講
         expect(page.locator("#elevation-axis-words")).to_have_text(f"鏡子：喇叭中線，離左牆 {distance} 公尺{where}")
         page.locator("#elevation [data-zone-id=z1] > rect").click()
         expect(page.locator("#elevation-selected")).to_contain_text("這一塊沒有另一邊")

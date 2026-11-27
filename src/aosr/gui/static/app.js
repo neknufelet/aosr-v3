@@ -477,13 +477,14 @@ function pressedCopy(designName) {
           sameEdits: () => revision === editRevision,
           samePage: () => scheme === live && generation === zoneDesignGeneration};
 }
-async function editInput(actionName, value, wall) {
+async function editInput(actionName, value, wall, held = false) {
   if (!await changeInputScheme(async () => {
     const data = await api("/api/input-edit", "POST", {scheme: wall ? wallDocument() : collect(), action: actionName, value, ...(wall ? {wall} : {})});
     return data.scheme;
-  })) return;
+  }, held)) return false;
   markStale();
   await refreshPlan();
+  return true;
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
