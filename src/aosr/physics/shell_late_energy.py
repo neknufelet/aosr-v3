@@ -82,11 +82,6 @@ class ShellLateGeometry:
         """參與交換的格數。"""
         return int(self.areas.shape[0])
 
-    def layer_areas(self) -> FloatArray:
-        """每個圖層參與交換的面積（被蓋住、看不到的不算），順序同 ``layers``。"""
-        return np.asarray(np.bincount(self.patch_layer, weights=self.areas, minlength=len(self.layers)),
-                          dtype=np.float64)
-
 
 def split_longest_edge(corners: FloatArray, owners: IntArray, max_edge_m: float) -> tuple[FloatArray, IntArray]:
     """沿最長邊對切，直到每個三角形的最長邊不超過 ``max_edge_m``；頂點順序（法線方向）不變。"""
@@ -142,9 +137,8 @@ def _blocked_samples(points: FloatArray, a: IntArray, b: IntArray, live: IntArra
 
 
 def _raw_form_factors(corners: FloatArray, samples: FloatArray, normals: FloatArray, areas: FloatArray,
-                      patch_planes: IntArray, occluders: Occluders, tol_m: float) -> tuple[FloatArray, BoolArray]:
-    """多點積分的原始形狀因子：``F_ij ≈ Σ_a Σ_b (1/n)·(A_j/n)·cosθ_a·cosθ_b/(π r²)``，被擋的那一對不算；
-    另回每個取樣點有沒有看到任何一格（(格數, n)），用來把格子被蓋住的那一份面積扣掉。"""
+                      patch_planes: IntArray, occluders: Occluders, tol_m: float) -> FloatArray:
+    """多點積分的原始形狀因子：``F_ij ≈ Σ_a Σ_b (1/n)·(A_j/n)·cosθ_a·cosθ_b/(π r²)``，被擋的那一對不算。"""
     count, per_patch, _ = samples.shape
     points = samples.reshape(-1, 3)
     owner = np.repeat(np.arange(count), per_patch)
@@ -152,7 +146,6 @@ def _raw_form_factors(corners: FloatArray, samples: FloatArray, normals: FloatAr
     weight = np.repeat(areas / per_patch, per_patch) / per_patch
     patch_box = np.stack((corners.min(axis=1), corners.max(axis=1)), axis=1)
     raw = np.zeros((count, count), dtype=np.float64)
-    sees = np.zeros(count * per_patch, dtype=np.bool_)
     pair_i, pair_j = np.nonzero(normals @ normals.T < 1.0 - 1e-12)
     rows = np.repeat(np.arange(per_patch), per_patch)
     cols = np.tile(np.arange(per_patch), per_patch)
@@ -173,10 +166,9 @@ def _raw_form_factors(corners: FloatArray, samples: FloatArray, normals: FloatAr
             hidden = _blocked_samples(points, a, b, live, pair_box, per_patch * per_patch,
                                       (patch_planes[pi], patch_planes[pj]), occluders, tol_m)
             kernel[live[hidden]] = 0.0
-        sees[a[kernel > 0]] = True
         contribution = (kernel * weight[b] / np.pi).reshape(len(pi), -1).sum(axis=1)
         np.add.at(raw, (pi, pj), contribution)
-    return raw, sees.reshape(count, per_patch)
+    return raw
 
 
 def _patch_normals(corners: FloatArray) -> FloatArray:
@@ -196,14 +188,12 @@ def shell_late_geometry(
         raise ValueError("多點積分的對切輪數不可為負")
     corners, owners = split_longest_edge(faces.corners, np.arange(len(faces.corners), dtype=np.int64), patch_edge_m)
     areas = triangle_areas(corners)
-    raw, sees = _raw_form_factors(corners, _midpoint_samples(corners, splits), _patch_normals(corners), areas,
-                                  faces.plane_of[owners], faces.occluders, tol_m)
-    # 一格只算看得到的那一份面積（取樣點看得到的比例）：貼牆的板子只蓋住半格，被蓋住的那半格不算進吸音與交換。
-    visible_areas = areas * sees.mean(axis=1)
-    seen = (raw.sum(axis=1) > 0.0) & (visible_areas > 0.0)
-    hidden = float(areas.sum() - visible_areas[seen].sum())
+    raw = _raw_form_factors(corners, _midpoint_samples(corners, splits), _patch_normals(corners), areas,
+                            faces.plane_of[owners], faces.occluders, tol_m)
+    seen = raw.sum(axis=1) > 0.0
+    hidden = float(areas[~seen].sum())
     raw = raw[np.ix_(seen, seen)]
-    kept_areas = visible_areas[seen]
+    kept_areas = areas[seen]
     return ShellLateGeometry(
         layers=faces.layers,
         patch_layer=np.asarray(faces.layer_of[owners[seen]], dtype=np.int64),

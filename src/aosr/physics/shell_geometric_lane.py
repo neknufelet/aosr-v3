@@ -109,22 +109,19 @@ def _scattering_table(prepared: ShellAcoustics, scattering_by_layer: Mapping[str
                       count: int) -> FloatArray:
     rows = _rows(scattering_by_layer or {}, prepared.faces.layers, count, "散射係數", MATERIAL_SCATTERING_DEFAULT_S)
     table = np.asarray([[value.real for value in row] for row in rows], dtype=np.float64)
-    if (any(value.imag != 0.0 for row in rows for value in row) or not np.isfinite(table).all()
-            or bool(((table < 0) | (table > 1)).any())):
+    if any(value.imag != 0.0 for row in rows for value in row) or bool(((table < 0) | (table > 1)).any()):
         raise ValueError("散射係數必須是 0 到 1 的實數")
     return table
 
 
 def _room_scattering(areas: FloatArray, impedance: ComplexArray, scattering: FloatArray, rho_c: float) -> FloatArray:
-    """同長方體那一路 ``_scattering_at`` 的加權與判斷順序：權重和為 0 回 0、全部一樣回那一個值、其餘照
-    面積 × 垂直入射反射能量加權。面積用晚期那邊留下來的（被板子蓋住、看不到的不算）。"""
+    """同長方體那一路 ``_scattering_at`` 的加權：面積 × 垂直入射反射能量；全部一樣就是那一個值。"""
     weights = areas[:, None] * np.abs((impedance - rho_c) / (impedance + rho_c)) ** 2
     denominator = weights.sum(axis=0)
     blended = np.divide((weights * scattering).sum(axis=0), denominator,
                         out=np.zeros_like(denominator), where=denominator != 0.0)
     same = (scattering == scattering[:1]).all(axis=0)
-    chosen = np.where(same, scattering[0], blended)
-    return np.asarray(np.where(denominator == 0.0, 0.0, chosen), dtype=np.float64)
+    return np.asarray(np.where(same, scattering[0], blended), dtype=np.float64)
 
 
 def _retained_by_path(paths: ShellPathTable, scattering: FloatArray) -> FloatArray:
@@ -151,6 +148,25 @@ def _directivity(prepared: ShellAcoustics, source_model: SourceModelSpec,
         for direction in paths.departure
     ])
     return np.asarray(factors, dtype=np.float64), np.asarray(two_parameter_power_ratio(frequencies_hz, curve))
+
+
+def scattered_path_pressures(
+    *,
+    prepared: ShellAcoustics,
+    sound_speed_m_s: float,
+    rho_c_pa_s_per_m: float,
+    frequencies_hz: tuple[float, ...],
+    impedance_by_layer: Mapping[str, LayerImpedance],
+    scattering_by_layer: Mapping[str, LayerScattering] | None = None,
+) -> ComplexArray:
+    """每條路徑每個頻點留在鏡面的聲壓（全向聲源）：路徑聲壓乘 ``Π_b √(1−s_b)``。第 0 列是直達。"""
+    if not frequencies_hz:
+        raise ValueError("frequencies_hz 不可為空")
+    count = len(frequencies_hz)
+    impedance = _impedance_table(prepared, impedance_by_layer, count)
+    scattering = _scattering_table(prepared, scattering_by_layer, count)
+    pressure = path_pressures(prepared.paths, impedance, rho_c_pa_s_per_m, sound_speed_m_s, np.asarray(frequencies_hz))
+    return np.asarray(pressure * _retained_by_path(prepared.paths, scattering), dtype=np.complex128)
 
 
 def solve_shell_geometric_lane(
@@ -181,7 +197,7 @@ def solve_shell_geometric_lane(
     absorption = np.asarray([absorption_rows[layer] for layer in prepared.faces.layers], dtype=np.float64)
     late_result = solve_shell_late_energy_by_order(prepared.late, absorption, frequencies_hz,
                                                    max_order=paths.max_order)
-    room_s = _room_scattering(prepared.late.layer_areas(), impedance, scattering, rho_c_pa_s_per_m)
+    room_s = _room_scattering(prepared.faces.layer_areas(), impedance, scattering, rho_c_pa_s_per_m)
     s_tuple = tuple(float(value) for value in room_s)
     late = tuple(value * float(ratio) for value, ratio in
                  zip(_late_share_energy(late_result.bands, s_tuple), power_ratio, strict=True))

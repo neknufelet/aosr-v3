@@ -1,0 +1,7 @@
+/* 自訂房間頁（#1315）：左邊圖層清單、右邊模型圖；色塊對得上圖上的顏色。 */
+.model-grid{display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1.4fr);gap:1rem;align-items:start}
+.swatch{display:inline-block;width:.9rem;height:.9rem;border:1px solid #333;margin-right:.4rem;vertical-align:-.1rem}
+#problems{margin:.2rem 0 .6rem;padding-left:1.2rem}
+figure{margin:0}
+@media (max-width:760px){.model-grid{grid-template-columns:1fr}}
+#state{white-space:pre-line}

@@ -45,6 +45,8 @@ from aosr.gui.capability_view import capability_lists
 from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.home_view import home_routes
+from aosr.gui.room_model import RoomModels, room_model_routes
+from aosr.gui.room_model_high import RoomModelHigh, room_model_high_routes
 from aosr.gui.labels import label_tables
 from aosr.gui.material_curves import material_curve_routes, range_check
 from aosr.gui.material_editor import material_routes
@@ -90,7 +92,8 @@ STANDING_TEXT = {
 STATIC_NAMES = {"material-tuning.js", "app.js", "home.js", "room_facts.js", "wall_section.js", "walls.js", "elevation.js", "zone_names.js", "zone_modes.js", "zone_limits.js", "check_state.js", "zone_rules.js", "zone_overview.js", "zone_overview.css", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
-                "material-ui.js", "material-designer.js", "material-designer.css", "material-cutaway.js", "material-kind.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css"}
+                "material-ui.js", "material-designer.js", "material-designer.css", "material-cutaway.js", "material-kind.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css",
+                "room_model.js", "room_model.css", "room_model_high.js", "room_model_high.css"}
 
 
 def repo_root() -> Path:
@@ -107,6 +110,8 @@ class GuiSettings:
     data_dir: Path = Path.home() / "room-acoustic-data"
     runner: tuple[str, ...] | None = None
     modal_runner: tuple[str, ...] | None = None
+    room_model_runner: tuple[str, ...] | None = None
+    room_model_high_runner: tuple[str, ...] | None = None
     # 另外准許的網址主機名：從自己其他 Tailscale 裝置直接連進來時，瀏覽器帶的是這台的 Tailscale 名字；預設空的＝只認本機。
     extra_hosts: tuple[str, ...] = ()
     # 連線來源只准這幾個網段；空的＝不看來源（只聽 127.0.0.1 時外面本來就連不進來）。
@@ -286,6 +291,11 @@ class GuiHandlers:
         self.archive_delete = ArchiveDelete(self.scheme_archive)
         modal_runner = settings.modal_runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "modal")
         self.modal_jobs = ModalJobs(self.data_dir, modal_runner, settings.engine_commit, capabilities_path)
+        room_model_runner = settings.room_model_runner or (sys.executable, "-m", "aosr.reporting.room_shell_run")
+        self.room_models = RoomModels(self.data_dir, room_model_runner, settings.engine_commit, capabilities_path)
+        high_runner = settings.room_model_high_runner or (sys.executable, "-m", "aosr.reporting.room_shell_high_run")
+        self.room_model_high = RoomModelHigh(self.room_models, self.data_dir, high_runner, settings.engine_commit,
+                                             capabilities_path)
         self.gradient = GradientJobs(self.data_dir, launcher=settings.gradient_launcher or SystemdLauncher(),
                                      engine_commit=settings.engine_commit, capabilities=capabilities_path,
                                      scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings)
@@ -941,6 +951,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/modal-jobs/{run_id}/stop", handlers.modal_job, methods=["POST"]),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
         *material_routes(handlers.data_dir, handlers.gradient.search_settings), *material_curve_routes(),
+        *room_model_routes(handlers.room_models, STATIC), *room_model_high_routes(handlers.room_model_high),
         *zone_result_routes(ZoneResultDeps(handlers.data_dir, handlers.jobs, handlers.capabilities, handlers.directivity,
             handlers.startup_physics_identity, handlers._server_stale, handlers._updated_response, handlers._load_result)),
     ])
