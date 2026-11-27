@@ -6,6 +6,8 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, expect
 from aosr.gui import reference_only
+from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._zone_panel_steps import choose_mode, edit_candidates
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -76,11 +78,12 @@ def test_zones_sharing_a_list_are_named_in_one_sentence_on_the_card_and_at_the_b
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         served = _served_refusals(page)
         assert len(served) == 1 and len(cast(list[object], served[0]["zones"])) == 18
         text = cast(str, served[0]["text"])
         assert text.count(KIND) == 1 and text.count("、") == 17 and text.endswith(_refused(page, "x0/a").split("」", 1)[1])
-        expect(page.locator("#zone-list-reference")).to_have_text(text)
+        expect(page.locator("#zone-group-reference")).to_have_text(text)
         expect(page.locator("#zone-page-blocked")).to_have_text(text)
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
@@ -88,9 +91,10 @@ def test_zones_sharing_a_list_are_named_in_one_sentence_on_the_card_and_at_the_b
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         first, second = _refused(page, "x0/b"), _refused(page, "x0/a")  # 方案裡 b 排在 a 前面
         assert [row["text"] for row in _served_refusals(page)] == [first, second]
-        cards = {cast(str, card.get_attribute("id")): card.text_content() for card in page.locator("#zone-page .zv-list .zv-problem[id$='-reference']").all()}
+        cards = {cast(str, card.get_attribute("id")): card.text_content() for card in page.locator("#zone-page .zv-search-group .zv-problem[id$='-reference']").all()}
         assert sorted(cast(str, text) for text in cards.values()) == sorted([first, second]) and len(cards) == 2, cards
         expect(page.locator("#zone-page-blocked")).to_have_text(f"{first}；{second}")
         assert (watched.console_errors, watched.page_errors) == ([], [])
@@ -103,6 +107,7 @@ def test_the_other_walls_card_carries_the_reminder_when_the_rule_pastes_such_a_c
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         page.locator("#zone-rule-mode").select_option("fixed")
         expect(page.locator("#zone-rule-reference")).to_have_count(0)  # 還沒選貼哪一種
         page.locator("#zone-rule-material").select_option(HIT)
@@ -135,7 +140,7 @@ def test_a_plain_product_pasted_on_an_original_wall_that_is_such_a_construction_
         _open_page(page)
         _click_zone(page, "x0/a")
         _click_zone(page, "x0/b")
-        page.locator("#zone-panel-material").select_option(PLAIN_ID)
+        pick_fixed_row(page, PLAIN_ID)
         _apply(page)
         pasted = cast(dict[str, dict[str, object]], page.evaluate(
             "Object.fromEntries(scheme.scene.surface_zones_by_wall.x0.filter(zone => zone.id).map(zone => [zone.id, zone.material]))"))
@@ -161,6 +166,7 @@ def test_back_to_the_other_walls_says_why_it_cannot_and_changes_nothing(tmp_path
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         before = page.evaluate("JSON.stringify([zoneDesign.zones, scheme.scene.surface_zones_by_wall])")
         page.locator("#zone-special-reset").click()
@@ -175,6 +181,7 @@ def test_back_to_the_other_walls_says_why_it_cannot_and_changes_nothing(tmp_path
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         page.locator("#zone-special-reset").click()
         _settled(page)
         assert _allowed(page)["y0/s"] == WOOLS
@@ -189,6 +196,7 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_on_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         page.locator("#zone-rule-mode").select_option("search")
         _settled(page)
         lists = _allowed(page)
@@ -200,6 +208,7 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_on_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         page.locator("#zone-rule-mode").select_option("search")
         _settled(page)
         lists = _allowed(page)
@@ -234,6 +243,7 @@ def test_splitting_a_shared_list_hides_the_old_sentence_everywhere_until_the_new
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         both = cast(str, _served_refusals(page)[0]["text"])
         expect(page.locator(_CARD_SENTENCES)).to_have_text([both])
         expect(page.locator("#zone-page-search-why")).to_have_text("清單有紅框要先處理")
@@ -262,9 +272,11 @@ def test_a_sentence_for_a_list_that_no_longer_has_it_is_hidden_until_the_new_che
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         expect(page.locator(_CARD_SENTENCES)).to_have_text([_refused(page, "x0/a")])
         limits = _HeldLimits(page)
         _click_zone(page, "x0/a")
+        row_options(page, HIT)
         page.locator(f"#zone-panel-remove-{HIT}").click()
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
@@ -286,6 +298,7 @@ def test_merging_into_a_shared_list_hides_the_old_sentences_everywhere_until_the
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         old = [cast(str, row["text"]) for row in _served_refusals(page)]
         assert len(old) == 2
         assert sorted(page.locator(_CARD_SENTENCES).all_text_contents()) == sorted(old)
@@ -314,6 +327,7 @@ def test_a_design_zone_the_scheme_does_not_have_keeps_the_red_box_on_the_card(tm
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         name = cast(str, page.evaluate("wallNames.x0"))
         text = reference_only.plan_refused(f"{name}「b」、{name}「a」", HIT_LABEL)
         expect(page.locator(_CARD_SENTENCES)).to_have_text([text])
@@ -331,6 +345,7 @@ def test_the_other_walls_card_carries_the_reminder_whichever_following_zone_is_s
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         page.locator("#zone-rule-mode").select_option("fixed")
         page.locator("#zone-rule-material").select_option(PLAIN_ID)
         _settled(page)
@@ -345,6 +360,7 @@ def test_the_other_walls_card_has_no_reminder_while_the_material_is_still_being_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         page.locator("#zone-rule-mode").select_option("fixed")
         expect(page.locator("#zone-rule-material")).to_have_value("")
         expect(page.locator("#zone-rule-material option").first).to_have_text("選要貼哪一種")
@@ -360,13 +376,14 @@ def test_with_the_library_unread_no_list_is_written_for_other_zones_from_the_pan
         page = watched.page
         _no_library(page)
         _open_page(page)
+        open_groups(page)
         assert page.evaluate("zoneReference") is None
         _click_zone(page, "x0/b")
         page.locator("#zone-panel-mode-search").check()
         _apply(page)
         lists = cast(dict[str, list[str] | None], page.evaluate(_ALLOWED))
         assert lists == {"x0/a": LISTED, "x0/b": None}
-        unknown = page.locator(".zv-list[data-zones='x0/b']")
+        unknown = page.locator(".zv-search-group[data-zones='x0/b']")
         expect(unknown).to_contain_text("程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）")
         unknown.get_by_role("button", name="選這幾區").click()
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
@@ -385,6 +402,7 @@ def test_with_the_library_unread_back_to_the_other_walls_writes_no_list(tmp_path
         page = watched.page
         _no_library(page)
         _open_page(page)
+        open_groups(page)
         page.locator("#zone-special-reset").click()
         _settled(page)
         lists = cast(dict[str, list[str] | None], page.evaluate(_ALLOWED))
@@ -398,11 +416,13 @@ def test_a_sentence_naming_a_zone_that_no_longer_lists_it_is_hidden_until_the_ne
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         both = cast(str, _served_refusals(page)[0]["text"])
         assert both.count("、") == 1
         expect(page.locator("#zone-page-blocked")).to_have_text(both)
         limits = _HeldLimits(page)
         _click_zone(page, "x0/a")
+        row_options(page, HIT)
         page.locator(f"#zone-panel-remove-{HIT}").click()
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
@@ -455,14 +475,15 @@ def test_the_panel_curve_keeps_the_band_inside_the_chart_and_folds_the_reason_ag
         page = watched.page
         _open_page(page)
         _click_zone(page, "x0/a")
-        page.locator("#zone-panel-material").select_option(HIT)
+        pick_fixed_row(page, HIT)
         expect(page.locator("#zone-panel .zv-ref-band")).to_have_count(1, timeout=COMPUTED_MS)
+        page.locator("#zone-panel-preview > summary").click()
         page.locator("#zone-panel-ref-note summary").click()
         expect(page.locator("#zone-panel-ref-note details p")).to_be_visible()
         page.locator("#zone-panel-cancel").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         _click_zone(page, "x0/b")
-        page.locator("#zone-panel-material").select_option(HIT)
+        pick_fixed_row(page, HIT)
         expect(page.locator("#zone-panel-ref-note")).to_have_count(1, timeout=COMPUTED_MS)
         assert page.locator("#zone-panel-ref-why").evaluate("fold => fold.open") is False
         expect(page.locator("#zone-panel-ref-note details p")).to_be_hidden()
@@ -475,10 +496,10 @@ def test_the_panel_curve_keeps_the_band_inside_the_chart_and_folds_the_reason_ag
         _prepare(tmp_path)
         with real_server(tmp_path) as base, _open(browser, base) as watched:
             page = watched.page
-            _band_at(page, hz)
+            _band_at(page, hz, material_id=HIT)
             _open_page(page)
             _click_zone(page, "x0/a")
-            page.locator("#zone-panel-material").select_option(HIT)
+            pick_fixed_row(page, HIT)
             expect(page.locator("#zone-panel-ref-note .ref-say")).to_have_text(cast(str, WORDS["sentence"]), timeout=COMPUTED_MS)
             seen = cast(dict[str, float | None], page.evaluate(edge))
             if drawn:

@@ -16,6 +16,7 @@ from aosr.gui.zone_design import DesignSettings, write_design
 from aosr.gui.zone_edit import CutBox, WallName, cut_wall
 from aosr.gui.zone_symmetry import Frame, ZoneFrame, symmetry_axis
 from aosr.reporting.scheme import Scheme
+from tests.engine._zone_material_steps import open_groups
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._input_page_steps import reveal
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
@@ -251,7 +252,8 @@ def test_overview_select_and_drop_pair(tmp_path: Path, browser: Browser) -> None
         first = page.locator("#zone-map [data-wall=yL][data-zone=z1] .zv-fill")
         first.click()
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "yL/z1 yL/z2")
-        expect(page.locator("#zone-panel")).to_contain_text("跟著一起選")
+        expect(page.locator("#zone-panel h2")).to_contain_text("跟著選")
+        page.locator("#zone-panel-zones summary").click()
         page.screenshot(path=tmp_path / "overview-selection.png")
         page.locator("#zone-panel-drop-yL-z2").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
@@ -519,6 +521,7 @@ def test_special_edit_selects_its_group_when_off(tmp_path: Path, browser: Browse
     with _room(tmp_path, browser, (FIRST, SECOND)) as page:
         page.locator("#elevation-symmetry-off").click()
         page.locator("#zone-page-open").click()
+        open_groups(page)
         _settled(page)
         page.locator("#zone-map [data-wall=yL][data-zone=z1] .zv-fill").click()
         page.locator("#zone-panel-mode-search").check()

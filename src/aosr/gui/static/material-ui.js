@@ -113,7 +113,7 @@ function placeBand(u, reference) {
   word.textContent = reference.band_words;
 }
 
-function drawPlot(reply) {
+function drawPlot(reply, height = 320) {
   destroyPlot();
   const spans = reply.spans;
   const reference = reply.reference_only || null;
@@ -128,7 +128,7 @@ function drawPlot(reply) {
     }
     ctx.restore();
   };
-  plot = new uPlot({width: chartWidth(), height: 320, legend: {show: false},
+  plot = new uPlot({width: chartWidth(), height, legend: {show: false},
     scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}, y: {range: [0, 1]}},
     axes: [{label: "頻率（Hz）"}, {label: "無規入射吸音係數"}],
     series: [{}, {label: "吸音係數", stroke: "#15617b", width: 2, points: {show: false}}],

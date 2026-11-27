@@ -19,6 +19,8 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
+from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._input_page_steps import open_scheme
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -56,13 +58,12 @@ _GROUPS = """() => [...document.querySelectorAll('#zone-special .zv-group')].map
     ({zones: group.dataset.zones.split(' '), what: group.querySelector('.zv-what').textContent}))"""
 _ALLOWED = """() => Object.fromEntries(Object.entries(zoneDesign.zones).flatMap(([wall, zones]) => Object.entries(zones)
     .filter(([, setting]) => setting.mode === 'search').map(([key, setting]) => [`${wall}/${key}`, setting.allowed])))"""
-_SHOWN_OPTION = "document.getElementById('zone-panel-material').selectedOptions[0].textContent"
-# 下拉收起來那一格：顯示的那一筆的字寬（照那一格自己的字型量），與格子的寬（右邊還有箭頭與留白）。
+_SHOWN_OPTION = """document.querySelector('#zone-panel-material [aria-checked=true] strong').textContent"""
 _SHOWN_WIDTHS = """() => {
-    const select = document.getElementById('zone-panel-material'), style = getComputedStyle(select);
-    const pen = document.createElement('canvas').getContext('2d');
+    const name = document.querySelector('#zone-panel-material [aria-checked=true] strong');
+    const style = getComputedStyle(name), pen = document.createElement('canvas').getContext('2d');
     pen.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    return [pen.measureText(select.selectedOptions[0].textContent).width, select.clientWidth];
+    return [pen.measureText(name.textContent).width, name.closest('button').clientWidth];
 }"""
 
 
@@ -134,7 +135,7 @@ def test_batch_material_pick_shows_the_recorded_construction_note(tmp_path: Path
         _open_overview(page)
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
-        page.locator("#zone-panel-material").select_option("batch_panel")
+        pick_fixed_row(page, "batch_panel")
         _apply(page)
         note = page.locator("#zone-page-note")
         expect(note).to_be_visible()
@@ -151,16 +152,17 @@ def test_task_one_front_panels_fixed_and_the_other_walls_handed_to_the_computer(
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
-        expect(page.locator("#zone-panel h2")).to_have_text("已選 2 區")
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 2 區")
         assert page.evaluate(_SELECTED) == ["yL/z1", "yL/z2"]
         # 面板不蓋圖：整塊在圖的右邊。
         panel, chart = page.locator("#zone-panel").bounding_box(), page.locator("#zone-map").bounding_box()
         assert panel is not None and chart is not None and panel["x"] >= chart["x"] + chart["width"]
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
-        expect(page.locator("#zone-panel-apply")).to_have_text("套用到選中的 2 區")
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 2 區")
         _apply(page)
         groups = cast(list[dict[str, object]], page.evaluate(_GROUPS))
         assert groups[0]["zones"] == ["yL/z1", "yL/z2"]
@@ -183,8 +185,8 @@ def test_task_one_front_panels_fixed_and_the_other_walls_handed_to_the_computer(
         page.screenshot(path=str(tmp_path / "task-one-same-as-rule.png"))
         _apply(page)
         assert [group["zones"] for group in cast(list[dict[str, object]], page.evaluate(_GROUPS))] == [["yL/z1", "yL/z2"]]
-        expect(page.locator("#zone-list-who")).to_have_text("現在管 15 區：沒另外指定的牆區")
-        assert page.locator("#zone-list-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
+        expect(page.locator("#zone-group-who")).to_have_text("這組有 15 區：沒另外指定的牆區")
+        assert page.locator("#zone-group-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
         expect(page.locator("#zone-result-fixed")).to_contain_text("指定貼 4 區")
         page.screenshot(path=str(tmp_path / "task-one-done.png"))
         _send_to_search(page)
@@ -219,6 +221,7 @@ def test_task_two_other_walls_bare_and_only_one_zone_handed_to_the_computer(tmp_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         page.locator("#zone-rule-mode").select_option("keep_original")
         _settled(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "keep_original")
@@ -226,8 +229,8 @@ def test_task_two_other_walls_bare_and_only_one_zone_handed_to_the_computer(tmp_
         page.locator("#zone-special-edit-1").click()
         assert page.evaluate(_SELECTED) == ["y0/auto1"]
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
-        expect(page.locator("#zone-panel-option-keep_original #zone-panel-same")).to_have_text("＝其他牆面")
-        expect(page.locator("#zone-panel-same")).to_have_count(1)
+        expect(page.locator("#zone-panel-option-keep_original")).to_have_text("保留原樣")
+        expect(page.locator("#zone-panel-same")).to_have_count(0)
         page.locator("#zone-panel-mode-keep_original").check()
         _apply(page)
         _click_zone(page, "xL/auto4")
@@ -236,7 +239,7 @@ def test_task_two_other_walls_bare_and_only_one_zone_handed_to_the_computer(tmp_
         page.locator("#zone-panel-mode-search").check()
         _apply(page)
         assert [group["zones"] for group in cast(list[dict[str, object]], page.evaluate(_GROUPS))] == [["yL/z1", "yL/z2"], ["xL/auto4"]]
-        expect(page.locator("#zone-list-who")).to_have_text("現在管 2 區：右牆 3 靠前牆那條、天花 1 主位上面那塊")
+        expect(page.locator("#zone-group-who")).to_have_text("這組有 2 區：右牆 3 靠前牆那條、天花 1 主位上面那塊")
         expect(page.locator("#zone-result-still")).to_contain_text("牆面 14 區")
         page.screenshot(path=str(tmp_path / "task-two-done.png"))
         _send_to_search(page)
@@ -284,7 +287,7 @@ def test_opening_the_page_and_saving_without_changes_leaves_both_files_byte_iden
             expect(page.locator("#zone-map")).to_be_visible()
             _click_zone(page, "y0/auto2")
             _click_zone(page, "ceiling/z2")
-            expect(page.locator("#zone-panel h2")).to_have_text("已選 2 區")
+            expect(page.locator("#zone-panel-apply")).to_have_text("套用到 2 區")
             page.locator("#zone-panel-mode-search").check()
             page.locator("#zone-panel-cancel").click()
             expect(page.locator("#zone-panel")).to_have_count(0)
@@ -299,31 +302,40 @@ def test_opening_the_page_and_saving_without_changes_leaves_both_files_byte_iden
             assert json.loads(design_file.read_text(encoding="utf-8"))["zones"] == design["zones"]
 
 
+def _prepare_fixed_only_group(tmp_path: Path, searching: set[str]) -> None:
+    fixed: dict[str, dict[str, object]] = {}
+    for zone in searching:
+        wall, key = zone.split("/")
+        fixed.setdefault(wall, {})[key] = {"mode": "search", "allowed": [PRODUCT]}
+    _prepare(tmp_path, {**SAMPLE_DESIGN, "zones": fixed})
+
+
 def test_editing_a_list_card_writes_the_list_into_every_zone_that_shares_it_and_no_other(tmp_path: Path, browser: Browser) -> None:
     _prepare(tmp_path, SAMPLE_DESIGN)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         searching = set(cast(dict[str, list[str]], page.evaluate(_ALLOWED)))
         assert {"y0/auto1", "ceiling/z1", "xL/auto4"} <= searching and len(searching) == 15
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["y0/auto1"] == SHORT
         # 拿掉一種：用這一份清單的 14 區都少一種；清單不一樣的那一區（後牆 auto1，自己一張卡）不動（#1199 修補 1）。
-        page.locator("#zone-list-select").click()
-        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        page.locator("#zone-group-select").click()
+        page.locator("#zone-panel-pick-glass_wool_96k").click()
         _apply(page)
         shorter = ["glass_wool_48k", "glass_wool_24k", "none"]
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(searching, shorter), "y0/auto1": SHORT}
         # 在那一區自己的卡上加 24K：它的清單跟另外 14 區變成同樣三種，兩張卡併成一張。
-        page.locator("#zone-list-2-select").click()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-group-2-select").click()
+        page.locator("#zone-panel-picker-search").focus()
         page.locator("#zone-panel-pick-glass_wool_24k").click()
         _apply(page)
-        expect(page.locator("#zone-page .zv-list")).to_have_count(1)
+        expect(page.locator("#zone-page .zv-search-group")).to_have_count(1)
         assert set(cast(dict[str, list[str]], page.evaluate(_ALLOWED))["y0/auto1"]) == set(shorter)
         shorter_everywhere = {**dict.fromkeys(searching, shorter), "y0/auto1": [*SHORT, "glass_wool_24k"]}
         # 從合併後的卡選區，小框加一筆普通成品，套用到整組。
-        page.locator("#zone-list-select").click()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-group-select").click()
+        page.locator("#zone-panel-picker-search").focus()
         # （#1208 起合成庫那幾筆 VPR 列著但勾不了，另有考卷；這裡加的是一筆一般的固定成品。）
         expect(page.locator(f"#zone-panel-pick-{VPR}")).to_contain_text("VPR（鋼板共振吸音）＋前面聚酯棉 60 mm")
         page.locator(f"#zone-panel-pick-{PRODUCT}").click()
@@ -332,30 +344,29 @@ def test_editing_a_list_card_writes_the_list_into_every_zone_that_shares_it_and_
         assert watched.page_errors == [] and watched.console_errors == []
 
     # 小框擋住只剩固定成品的草稿。另開舊存檔考卡上的紅字與修復。
-    fixed: dict[str, dict[str, object]] = {}
-    for zone in searching:
-        wall, key = zone.split("/")
-        fixed.setdefault(wall, {})[key] = {"mode": "search", "allowed": [PRODUCT]}
-    _prepare(tmp_path, {**SAMPLE_DESIGN, "zones": fixed})
+    _prepare_fixed_only_group(tmp_path, searching)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
-        expect(page.locator("#zone-list-problem")).to_have_text(
-            "只放了固定成品，程式沒得選。程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」。"
-            "要的就是這一筆、不必讓程式選：按這張卡的「選這幾區」，改成「指定貼一種」。")
-        expect(page.locator("#zone-list-problem button")).to_have_count(0)
+        open_groups(page)
+        expect(page.locator("#zone-group-problem")).to_have_text(
+            "只放了固定成品，程式沒得選。加可調材料或「也可以不貼」，或"
+            "選這幾區改成「指定貼」。")
+        expect(page.locator("#zone-group-problem button")).to_have_count(0)
         expect(page.locator("#zone-page-search")).to_be_disabled()
         expect(page.locator("#zone-page-blocked")).to_contain_text("的紅框（只放了固定成品，程式沒得選），處理好才能拿去搜尋")
-        page.locator("#zone-list-select").click()
+        page.locator("#zone-group-select").click()
+        row_options(page, PRODUCT)
         page.locator(f"#zone-panel-remove-{PRODUCT}").click()
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
         expect(page.locator("#zone-panel-problem")).to_contain_text("至少勾一種材料，或勾「也可以不貼」")
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys(searching, [PRODUCT])
         page.locator("#zone-panel-undo").click()
+        row_options(page, "none")
         page.locator("#zone-panel-addto-none").click()
         _apply(page)
         expect(page.locator("#zone-page-search")).to_be_enabled()
-        expect(page.locator("#zone-list-problem")).to_have_count(0)
+        expect(page.locator("#zone-group-problem")).to_have_count(0)
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -375,7 +386,7 @@ def test_a_late_server_reply_redraws_the_page_but_keeps_the_selection_and_the_op
         page.wait_for_function("zoneLimitsShown !== zoneLimitsGeneration")
         # 回覆還在路上：再加選一區、改點指定貼一種並選好材料。
         _click_zone(page, "yL/z2")
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
         page.evaluate("document.getElementById('zone-panel').dataset.before = 'yes'")
         while not held:
@@ -386,13 +397,13 @@ def test_a_late_server_reply_redraws_the_page_but_keeps_the_selection_and_the_op
         expect(page.locator("#zone-panel")).not_to_have_attribute("data-before", "yes")
         assert page.evaluate(_SELECTED) == ["yL/z1", "yL/z2"]
         expect(page.locator("#zone-map .zv-ring")).to_have_count(2)
-        expect(page.locator("#zone-panel h2")).to_have_text("已選 2 區")
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 2 區")
         expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
-        expect(page.locator("#zone-panel-material")).to_have_value(VPR)
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", VPR)
         # 再點一次取消那一區；剛點的選項照留。
         _click_zone(page, "yL/z1")
         assert page.evaluate(_SELECTED) == ["yL/z2"]
-        expect(page.locator("#zone-panel-material")).to_have_value(VPR)
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", VPR)
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -422,17 +433,19 @@ def test_picking_the_ceiling_or_the_floor_lists_only_what_can_go_there_and_has_n
         on_ceiling, on_floor, on_wall = (cast(list[str], page.evaluate(usable, [wall])) for wall in ("ceiling", "floor", "yL"))
         assert on_ceiling and on_wall and set(on_floor) != set(on_wall)
         _click_zone(page, "ceiling/auto1")
-        expect(page.locator("#zone-panel .zv-chip")).to_have_text("天花 3 靠後牆那塊不選這區")
-        assert page.locator("#zone-panel-material option").evaluate_all(options) == on_ceiling
+        expect(page.locator("#zone-panel h2")).to_have_text("天花 3")
+        page.locator("#zone-panel-mode-fixed").check()
+        assert page.locator("#zone-panel-material [role=radio]").evaluate_all(options) == on_ceiling
         expect(page.locator("#zone-panel-same")).to_have_count(0)
         page.screenshot(path=str(tmp_path / "ceiling-picked.png"))
         page.locator("#zone-panel-cancel").click()
         _click_zone(page, "floor/auto1")
-        expect(page.locator("#zone-panel .zv-chip")).to_have_text("地板 4 主位底下那塊不選這區")
-        assert page.locator("#zone-panel-material option").evaluate_all(options) == on_floor
+        expect(page.locator("#zone-panel h2")).to_have_text("地板 4")
+        page.locator("#zone-panel-mode-fixed").check()
+        assert page.locator("#zone-panel-material [role=radio]").evaluate_all(options) == on_floor
         # 地板與牆一起選：只列兩面都能貼的。
         _click_zone(page, "yL/auto1")
-        assert page.locator("#zone-panel-material option").evaluate_all(options) == cast(list[str], page.evaluate(usable, ["floor", "yL"]))
+        assert page.locator("#zone-panel-material [role=radio]").evaluate_all(options) == cast(list[str], page.evaluate(usable, ["floor", "yL"]))
         expect(page.locator("#zone-panel-same")).to_have_count(0)
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -441,10 +454,11 @@ def test_same_as_rule_needs_the_same_material_and_a_long_name_wraps_on_the_map(t
     """規則是「指定貼一種」某一筆時：選到的區貼的是別筆，「指定貼一種」那一列不准標「＝其他牆面」（改標在下拉裡規則那一筆後面），
     下拉換成規則那一筆才標。另外指定的區名字太長一行放不下：照空白折行寫在圖上，不是整個不寫。"""
     _prepare(tmp_path)
-    option_words = "options => options.map(option => [option.value, option.textContent])"
+    option_words = "options => options.map(option => [option.value, option.querySelector('strong').textContent])"
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         wool = cast(str, page.evaluate("zoneLibrary.find(entry => entry.label === '48K 玻璃棉 50 mm 貼牆').id"))
         page.locator("#zone-rule-mode").select_option("fixed")
         page.locator("#zone-rule-material").select_option(VPR)
@@ -454,21 +468,22 @@ def test_same_as_rule_needs_the_same_material_and_a_long_name_wraps_on_the_map(t
         _click_zone(page, "yL/z3")
         expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
         expect(page.locator("#zone-panel-same")).to_have_count(0)
-        marked = [value for value, words in cast(list[list[str]], page.locator("#zone-panel-material option").evaluate_all(option_words))
+        marked = [value for value, words in cast(list[list[str]], page.locator("#zone-panel-material [role=radio]").evaluate_all(option_words))
                   if words.endswith("（＝其他牆面）")]
         assert marked == [VPR]
-        page.locator("#zone-panel-material").select_option(wool)
+        pick_fixed_row(page, wool)
         expect(page.locator("#zone-panel-same")).to_have_count(0)
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         expect(page.locator("#zone-panel-option-fixed #zone-panel-same")).to_have_text("＝其他牆面")
         # 列上已經標了：下拉裡那一筆不再帶「（＝其他牆面）」（收起來那一格顯示的就是它）；整個名字另外寫一次、會折行。
         assert "＝其他牆面" not in cast(str, page.evaluate(_SHOWN_OPTION))
-        expect(page.locator("#zone-panel-name")).to_have_text(cast(str, page.evaluate(_SHOWN_OPTION)))
+        expect(page.locator("#zone-panel-material [aria-checked=true] strong")).to_have_text(
+            "VPR（鋼板共振吸音）＋前面聚酯棉 60 mm 合成版（1.2 mm 鋼板、背後泡棉 90 mm，總厚約 15 cm）")
         # 改貼玻璃棉那一筆（跟規則不同筆 → 仍是另外指定）。
-        page.locator("#zone-panel-material").select_option(wool)
+        pick_fixed_row(page, wool)
         _apply(page)
         _click_zone(page, "yL/z1")
-        page.locator("#zone-panel-material").select_option(wool)
+        pick_fixed_row(page, wool)
         _apply(page)
         assert ["yL/z1", "yL/z3"] in [group["zones"] for group in cast(list[dict[str, object]], page.evaluate(_GROUPS))]
         # 寬的那一塊一行放不下整句：照空白折成幾行、整句都在；窄的那一塊折了也寫不完，就整個不寫（不寫半句）。
@@ -503,14 +518,15 @@ def test_a_rule_pasted_with_something_outside_the_library_still_marks_its_follow
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "fixed")
         expect(page.locator("#zone-rule-material")).to_have_value("")
         _click_zone(page, "xL/auto2")
-        expect(page.locator("#zone-panel-material")).to_have_value("")
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", "")
         expect(page.locator("#zone-panel-option-fixed #zone-panel-same")).to_have_text("＝其他牆面")
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         expect(page.locator("#zone-panel-same")).to_have_count(0)
-        page.locator("#zone-panel-material").select_option("")
+        pick_fixed_row(page, "")
         expect(page.locator("#zone-panel-same")).to_have_count(1)
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -526,6 +542,7 @@ def test_changes_made_on_the_page_are_stored_by_the_ordinary_save_after_going_ba
     with _serve(with_design) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         page.locator("#zone-rule-mode").select_option("keep_original")
         _settled(page)
         page.locator("#zone-special-edit-1").click()
@@ -553,8 +570,9 @@ def test_changes_made_on_the_page_are_stored_by_the_ordinary_save_after_going_ba
     with _serve(no_design) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _click_zone(page, "y0/auto2")
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         _apply(page)
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-keep_original").check()
@@ -579,10 +597,11 @@ def test_other_walls_never_changes_by_itself_while_zones_are_changed_one_group_a
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         expect(page.locator("#zone-rule-mode")).to_have_value("keep_original")
         # 先讓一塊空牆指定貼一種：剩 12 區不貼。
         _click_zone(page, "yL/auto1")
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         _apply(page)
         for zones, still, search in ((["xL/auto1", "xL/auto2", "xL/auto3"], 9, 3), (["xL/auto4", "xL/auto5", "xL/auto6"], 6, 6),
                                      (["y0/auto1", "y0/auto2"], 4, 8)):
@@ -607,6 +626,7 @@ def test_other_walls_never_changes_by_itself_while_zones_are_changed_one_group_a
         _save(page, design=True)
         _open_scheme(page, SAMPLE)
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -647,10 +667,11 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
     選項底下講程式從哪幾種裡選，套用後寫進去的就是那幾種。"""
     _prepare(tmp_path)
     framed = "() => [...document.querySelectorAll('#zone-map .zv-zone')].filter(zone => zone.querySelector('.zv-apart')).map(zone => `${zone.dataset.wall}/${zone.dataset.zone}`).sort()"
-    marked = "() => [...document.querySelectorAll('#zone-rules-brief .zv-now')].map(badge => badge.dataset.zone)"
+    marked = _SELECTED
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         # 另外指定的四區（前牆兩塊板、原本貼著別的兩塊）都有虛線框，跟著規則的區、天花、地板都沒有。
         apart = sorted(zone for group in cast(list[dict[str, list[str]]], page.evaluate(_GROUPS)) for zone in group["zones"])
         assert apart == ["y0/z1", "yL/z1", "yL/z2", "yL/z3"] and page.evaluate(framed) == apart
@@ -660,10 +681,10 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
         expect(page.locator("#zone-page-search-why")).to_have_text("還沒有由程式最佳化的區")
         # 選一區：摘要點名是哪一區。
         _click_zone(page, "yL/z3")
-        _expect_value(page, marked, ["yL/z3", "yL/z3"])
+        _expect_value(page, marked, ["yL/z3"])
         number = page.locator("#zone-map [data-wall='yL'][data-zone='z3'] .zv-badge text").text_content()
-        expect(page.locator("#zone-brief-editing")).to_have_text(f"正在改：前牆 {number}")
-        assert "（正在改）" not in page.locator("#zone-rules-brief").inner_text()
+        expect(page.locator("#zone-panel h2")).to_have_text(f"前牆 {number}")
+        assert "（正在改）" not in page.locator("#zone-panel h2").inner_text()
         # 選到由程式最佳化：底下講從哪幾種裡挑；套用後那一區的清單就是那幾種。
         expect(page.locator("#zone-panel-search-from")).to_have_count(0)
         page.locator("#zone-panel-mode-search").check()
@@ -739,8 +760,8 @@ def test_fixed_depth_only_keeps_every_material_and_other_zone(tmp_path: Path, br
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z1")
-        page.locator("#zone-panel-material").select_option("")
-        expect(page.locator("#zone-panel-material option:checked")).to_have_text("照現在貼的，不換")
+        pick_fixed_row(page, "")
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_text("照現在貼的，不換")
         expect(page.locator("#zone-panel-depth")).to_be_visible()
         page.locator("#zone-panel-depth").fill("12")
         _apply(page)
@@ -789,7 +810,7 @@ def test_fixed_depth_allows_apply_and_displays_the_server_refusal(tmp_path: Path
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z3")
-        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm_gap100")
+        pick_fixed_row(page, "glass_wool_48k_50mm_gap100")
         expect(page.locator("#zone-panel-depth")).to_be_visible()
         page.locator("#zone-panel-depth").fill("12")
         _apply(page)

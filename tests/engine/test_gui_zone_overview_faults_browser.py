@@ -12,6 +12,8 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
+from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import pick_fixed_row
 from tests.engine._input_page_steps import archive_then_recreate, open_example_scheme, open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
@@ -75,7 +77,7 @@ def _modes(page: Page, zones: list[str]) -> dict[str, str]:
 def _minority_rule(page: Page) -> None:
     """規則是「不貼，保留原樣」但照著它的只剩 4 區，由程式最佳化的另外指定有 8 區（比規則那一組多）。"""
     _click_zone(page, "yL/auto1")
-    page.locator("#zone-panel-material").select_option(VPR)
+    pick_fixed_row(page, VPR)
     _apply(page)
     for zones in (["xL/auto1", "xL/auto2", "xL/auto3"], ["xL/auto4", "xL/auto5", "xL/auto6"], ["y0/auto1", "y0/auto2"]):
         for zone in zones:
@@ -118,6 +120,7 @@ def test_changing_the_rule_twice_while_the_plan_check_is_slow_never_writes_into_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _settled(page)
         _minority_rule(page)
         held = _hold(page, "**/api/plan")
@@ -147,6 +150,7 @@ def test_a_plan_check_that_fails_once_leaves_the_rule_as_set_and_says_so_on_the_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _settled(page)
         _minority_rule(page)
         aborted: list[str] = []
@@ -177,6 +181,7 @@ def test_a_plan_check_that_fails_once_leaves_the_rule_as_set_and_says_so_on_the_
         page.evaluate("say('考卷寫在輸入頁訊息列的一句警示', 'notice')")
         expect(page.locator("#messages")).to_have_text("考卷寫在輸入頁訊息列的一句警示")
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         expect(page.locator("#zone-page-said")).to_have_count(0)
         assert watched.page_errors == []
@@ -190,12 +195,13 @@ def test_a_refused_save_from_send_to_search_is_explained_on_the_page(tmp_path: P
         name = cast(str, open_example_scheme(page, base, tmp_path)["scheme_id"])
         before = archive_then_recreate(page, tmp_path, name)
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         page.locator("#zone-rule-mode").select_option("search")
         _settled(page)
         # 再指定貼一區：方案跟資料夾裡那一份真的不一樣了（一樣的話存檔算沒變動、不會被擋）。
         _click_zone(page, "x0/whole_wall")
-        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        pick_fixed_row(page, "glass_wool_48k_50mm")
         _apply(page)
         expect(page.locator("#zone-page-search")).to_be_enabled()
         page.locator("#zone-page-search").click()
@@ -215,6 +221,7 @@ def test_a_scheme_without_zones_takes_a_rule_change(tmp_path: Path, browser: Bro
         open_example_scheme(page, base, tmp_path)
         assert page.evaluate("scheme.scene.surface_zones_by_wall === undefined || scheme.scene.surface_zones_by_wall === null")
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "keep_original")
         page.locator("#zone-rule-mode").select_option("search")
@@ -239,9 +246,10 @@ def test_walls_made_only_of_doors_and_windows_still_let_the_ceiling_be_picked(tm
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         expect(page.locator("#zone-rule-mode")).to_have_count(0)
         _click_zone(page, "ceiling/auto1")
-        expect(page.locator("#zone-panel h2")).to_have_text("已選 1 區")
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 1 區")
         expect(page.locator("#zone-panel-same")).to_have_count(0)
         page.locator("#zone-panel-mode-search").check()
         _apply(page)
@@ -276,6 +284,7 @@ def test_a_drawing_failure_keeps_the_last_screen_and_the_way_back(tmp_path: Path
         expect(page.locator("#zone-page")).to_be_hidden()
         page.evaluate("() => { window.elevationGeometry.markerItems = window.realMarkerItems; }")
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         expect(broken).to_have_count(0)
         _settled(page)
@@ -309,6 +318,7 @@ def test_opening_another_scheme_forgets_the_rule_and_the_selection_of_the_last_o
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         page.locator("#zone-rule-mode").select_option("search")
         _settled(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
@@ -319,6 +329,7 @@ def test_opening_another_scheme_forgets_the_rule_and_the_selection_of_the_last_o
         page.locator("#zone-page-close").click()
         _open_scheme(page, OTHER)
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         expect(page.locator("#zone-panel")).to_have_count(0)
         assert page.evaluate(_SELECTED) == []
@@ -361,7 +372,7 @@ def test_nothing_on_the_page_reacts_while_a_batch_is_on_its_way(tmp_path: Path, 
 
 def test_the_page_is_locked_while_send_to_search_is_saving_and_what_is_stored_is_what_was_there_at_the_press(tmp_path: Path, browser: Browser) -> None:
     """按了「拿去搜尋」、存方案那一步還沒回來（#1187 的存檔鎖）：這一頁跟輸入頁一起鎖住——圖上點別區、按套用都沒作用、
-    沒有送出換材料。放行之後存下去的是按下那一刻那一份（面板上點了、還沒套用的那一區沒被寫進去），照常跳到搜尋頁。"""
+    沒有送出換材料。放行之後存下去的是按下那一刻那一份（切換後選回原樣的那一區沒有寫入），照常跳到搜尋頁。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -370,9 +381,11 @@ def test_the_page_is_locked_while_send_to_search_is_saving_and_what_is_stored_is
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-search").check()
         _apply(page)
-        # 面板上再點好一區與做法、先不套用：等一下存檔途中去按它的套用。
+        # 另一區切換做法後又選回原樣：等一下存檔途中去按它的套用。
         _click_zone(page, "y0/auto2")
         page.locator("#zone-panel-mode-search").check()
+        page.locator("#zone-panel-mode-keep_original").check()
+        expect(page.locator("#zone-page-search")).to_have_text("拿去搜尋")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
         other = page.locator("#zone-map [data-wall='xL'][data-zone='auto1'] .zv-fill").bounding_box()
         button = page.locator("#zone-panel-apply").bounding_box()
@@ -410,10 +423,10 @@ def test_a_send_to_search_blocked_by_a_change_still_on_its_way_says_so_on_the_pa
         page.on("request", lambda request: saved.append(request.url) if request.method == "PUT" else None)
         limits = _hold(page, "**/api/zone-limits")
         _click_zone(page, "y0/auto2")
-        page.locator("#zone-panel-mode-search").check()
         page.evaluate("void refreshZoneLimits()")
         _wait_held(page, limits, 1)
         page.locator("#zone-page-search").click()
+        page.locator("#zone-panel-mode-search").check()
         batch = _hold(page, "**/api/zone-material/batch")
         page.locator("#zone-panel-apply").click()
         _wait_held(page, batch, 1)
@@ -463,6 +476,7 @@ def test_a_refused_rule_change_puts_other_walls_back_as_it_was_and_says_why(tmp_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _settled(page)
         before = page.evaluate("JSON.stringify([zoneDesign, scheme])")
         page.route("**/api/zone-material/batch", lambda route: route.fulfill(
@@ -474,7 +488,7 @@ def test_a_refused_rule_change_puts_other_walls_back_as_it_was_and_says_why(tmp_
         _settled(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "keep_original")
         expect(page.locator("#zone-rule-mode")).to_have_value("keep_original")
-        expect(page.locator("#zone-rule")).to_have_class("zv-rule still")
+        expect(page.locator("#zone-rule-mode")).to_have_class("zv-pick still")
         assert page.evaluate("JSON.stringify([zoneDesign, scheme])") == before
         assert watched.page_errors == []
 
@@ -529,7 +543,7 @@ def test_a_pick_that_is_the_wall_itself_writes_no_depth(tmp_path: Path, browser:
         expect(page.locator("#zone-map")).to_be_visible()
         _settled(page)
         _click_zone(page, "xL/auto1")
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         page.locator("#zone-panel-depth").fill("12")
         _apply(page)
         assert page.evaluate("structuredClone(zoneDesign.zones.xL.auto1)") == {"mode": "keep_original"}
@@ -557,7 +571,7 @@ def test_picking_what_the_wall_already_is_becomes_keep_original_and_says_so_on_t
         _settled(page)
         # 新頁：另一塊空牆旁邊那塊（auto1）再選同一筆 → 照樣當成不貼。
         _click_zone(page, "xL/auto1")
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         _apply(page)
         assert _modes(page, ["xL/auto1"]) == {"xL/auto1": "keep_original"}
         expect(page.locator("#zone-map [data-wall='xL'][data-zone='auto1']")).to_have_attribute("data-shown", "still")
@@ -610,6 +624,7 @@ def test_reset_is_refused_with_a_reason_when_the_rule_is_pasted_with_something_o
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _settled(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "fixed")
         count = page.locator("#zone-special").get_attribute("data-count")
@@ -643,8 +658,8 @@ def test_keeping_what_is_pasted_now_applies_without_asking_the_server_to_change_
         _click_zone(page, "xL/auto1")
         _click_zone(page, "xL/auto2")
         page.locator("#zone-panel-mode-fixed").check()
-        expect(page.locator("#zone-panel-material")).to_have_value("")
-        expect(page.locator("#zone-panel-material option").first).to_have_text("照現在貼的，不換")
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", "")
+        expect(page.locator("#zone-panel-material [role=radio]").first).to_have_text("照現在貼的，不換")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
         _apply(page)
         expect(page.locator("#zone-page-note")).to_have_text("2 區改成「指定貼一種」")
@@ -674,7 +689,7 @@ def test_a_zone_that_is_gone_after_a_recut_drops_out_of_the_selection_with_what_
         expect(page.locator("#zone-slot")).to_be_visible()
         assert page.evaluate(_SELECTED) == []
         _click_zone(page, "yL/z1")
-        expect(page.locator("#zone-panel h2")).to_have_text("已選 1 區")
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 1 區")
         expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
         expect(page.locator("#zone-panel-mode-keep_original")).not_to_be_checked()
         assert watched.page_errors == [] and watched.console_errors == []
@@ -702,6 +717,7 @@ def test_editing_the_list_keeps_other_walls_handed_to_the_computer(tmp_path: Pat
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _settled(page)
         page.locator("#zone-rule-mode").select_option("search")
         _settled(page)
@@ -712,12 +728,12 @@ def test_editing_the_list_keeps_other_walls_handed_to_the_computer(tmp_path: Pat
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         followers = [zone for zone, mode in cast(dict[str, str], page.evaluate(_MODES)).items() if mode == "search"]
         assert len(followers) == 3
-        page.locator("#zone-list-select").click()
-        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        page.locator("#zone-group-select").click()
+        page.locator("#zone-panel-pick-glass_wool_96k").click()
         _apply(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         expect(page.locator("#zone-rule-mode")).to_have_value("search")
-        expect(page.locator("#zone-list-who")).to_have_text("現在管 3 區：沒另外指定的牆區")
+        expect(page.locator("#zone-group-who")).to_have_text("這組有 3 區：沒另外指定的牆區")
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {zone: [item for item in WOOLS if item != "glass_wool_96k"] for zone in followers}
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -761,6 +777,22 @@ def test_plan_labels_are_drawn_again_on_the_way_back_after_a_change_made_on_the_
         assert watched.page_errors == [] and watched.console_errors == []
 
 
+def _check_unsaved_header_layout(page: Page) -> None:
+    for width in (1280, 1400, 1440):
+        page.set_viewport_size({"width": width, "height": 1000})
+        assert page.locator("#zone-page .zv-head").evaluate("""head => {
+            const bounds = head.getBoundingClientRect();
+            const text = document.createRange();
+            text.selectNodeContents(head.querySelector(".zv-unsaved"));
+            return [...head.children].every(child => {
+                const r = child.getBoundingClientRect();
+                return r.top >= bounds.top && r.bottom <= bounds.bottom && r.right <= bounds.right;
+            }) && text.getClientRects().length === 1;
+        }"""), width
+    tops = {round(cast(dict[str, float], page.locator(f"#zone-result-{key}").bounding_box())["y"]) for key in ("search", "fixed", "still")}
+    assert max(tops) - min(tops) < 8
+
+
 def test_a_line_says_changes_are_not_in_the_file_yet_until_they_are_saved(tmp_path: Path, browser: Browser) -> None:
     """這一頁沒有存檔鍵，改動當場套到畫面、但要存檔才進檔案。1400×1000 下：剛打開、還沒改過時沒有那一句；改規則之後
     第一屏看得到一句白話講還沒存、兩條存的路（回輸入頁按儲存、或按拿去搜尋）；標題列與底列都還是一行。
@@ -774,6 +806,7 @@ def test_a_line_says_changes_are_not_in_the_file_yet_until_they_are_saved(tmp_pa
         page.goto(base)
         page.wait_for_function("document.body.dataset.inputReady === 'true'")
         _open_overview(page)
+        open_groups(page)
         _settled(page)
         line = page.locator("#zone-page-unsaved")
         expect(line).to_have_count(0)
@@ -789,32 +822,22 @@ def test_a_line_says_changes_are_not_in_the_file_yet_until_they_are_saved(tmp_pa
         # 第一屏看得到、整句在視窗裡、一行；標題列沒被撐高；「回房間方案輸入」還在它右邊、沒被擠出去。
         assert box["y"] >= 0 and box["y"] + box["height"] <= 1000 and box["x"] >= 0 and box["height"] < 40
         assert now["height"] == head["height"] and back["x"] >= box["x"] + box["width"] and back["x"] + back["width"] <= 1400
-        for width in (1280, 1400, 1440):
-            page.set_viewport_size({"width": width, "height": 1000})
-            assert page.locator("#zone-page .zv-head").evaluate("""head => {
-                const bounds = head.getBoundingClientRect();
-                const text = document.createRange();
-                text.selectNodeContents(head.querySelector(".zv-unsaved"));
-                return [...head.children].every(child => {
-                    const r = child.getBoundingClientRect();
-                    return r.top >= bounds.top && r.bottom <= bounds.bottom && r.right <= bounds.right;
-                }) && text.getClientRects().length === 1;
-            }"""), width
-        tops = {round(cast(dict[str, float], page.locator(f"#zone-result-{key}").bounding_box())["y"]) for key in ("search", "fixed", "still")}
-        assert max(tops) - min(tops) < 8
+        _check_unsaved_header_layout(page)
         # 回輸入頁再進來，還沒存：照樣在。
         page.locator("#zone-page-close").click()
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(line).to_be_visible()
         # 輸入頁按儲存（方案與每一區的做法都存成）：再進來就沒有了。
         page.locator("#zone-page-close").click()
         _save(page, design=True)
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         expect(line).to_have_count(0)
         # 改清單也算改動；存過之後再改，那一句再出現。
-        page.locator("#zone-list-select").click()
-        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        page.locator("#zone-group-select").click()
+        page.locator("#zone-panel-pick-glass_wool_96k").click()
         _apply(page)
         expect(line).to_be_visible()
         page.locator("#zone-page-close").click()
@@ -892,12 +915,12 @@ def test_the_not_saved_line_stays_when_a_save_did_not_really_store_everything(tm
 # 捲到最底之後：底列的上緣，與清單卡、左右兩欄各自最後一個東西的下緣（px，照視窗量）。
 _BOTTOMS = """() => { scrollTo(0, document.documentElement.scrollHeight);
     const bottom = node => node.getBoundingClientRect().bottom;
-    return {bar: document.getElementById('zone-result').getBoundingClientRect().top, list: bottom(document.getElementById('zone-list')),
+    return {bar: document.getElementById('zone-result').getBoundingClientRect().top, list: bottom(document.getElementById('zone-group')),
             side: bottom(document.querySelector('#zone-page .zv-side').lastElementChild),
             map: bottom(document.querySelector('#zone-page .zv-mapwrap').lastElementChild), view: innerHeight,
             end: Math.abs(scrollY + innerHeight - document.documentElement.scrollHeight) < 1}; }"""
 # 叫瀏覽器把清單卡捲進畫面、靠視窗下緣（跳到某一格、按 Tab 走到某一格時瀏覽器做的就是這件事）：卡的下緣與底列的上緣。
-_BROUGHT_INTO_VIEW = """() => { const card = document.getElementById('zone-list');
+_BROUGHT_INTO_VIEW = """() => { const card = document.getElementById('zone-group');
     scrollTo(0, 0); card.scrollIntoView({block: 'end'});
     return {list: card.getBoundingClientRect().bottom, bar: document.getElementById('zone-result').getBoundingClientRect().top}; }"""
 
@@ -916,12 +939,13 @@ def test_scrolled_to_the_end_nothing_is_left_under_the_bottom_bar(tmp_path: Path
         page.goto(base)
         page.wait_for_function("document.body.dataset.inputReady === 'true'")
         _open_overview(page)
+        open_groups(page)
         _settled(page)
         page.locator("#zone-rule-mode").select_option("search")
         _settled(page)
         for opened in (False, True):
             if opened:
-                page.locator("#zone-list-select").click()
+                page.locator("#zone-group-select").click()
                 expect(page.locator("#zone-panel")).to_be_visible()
             brought = cast(dict[str, float], page.evaluate(_BROUGHT_INTO_VIEW))
             assert brought["list"] <= brought["bar"], (opened, brought)

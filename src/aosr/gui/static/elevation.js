@@ -101,9 +101,14 @@ function newBoxId(wall) {
   while (used.has(`z${n}`)) n += 1;
   return `z${n}`;
 }
+function markRepeatedNote() {
+  const noteLine = $("elevation-note"), top = $("elevation-banner");
+  noteLine.toggleAttribute("data-repeated", !top.hidden && top.textContent === noteLine.textContent);
+}
 function note(text, kind) {
   const line = $("elevation-note");
   line.textContent = text; line.className = kind;
+  markRepeatedNote();
 }
 function banner(text = "", kind = "", button = null) {
   const line = $("elevation-banner");
@@ -112,6 +117,7 @@ function banner(text = "", kind = "", button = null) {
   line.hidden = !text;
   bannerOwner = text ? scheme : null;
   if (button) line.append(button);
+  markRepeatedNote();
 }
 function repairWords(wall, before, repair) {
   const size = wallSize(wall), view = views[wall];
@@ -206,14 +212,21 @@ window.pendingMirrorCut = () => pendingMirror;
 // cut：真的切了之後、等圖面檢查之前要同步做的事（清掉的復原快照在這裡記：applyCut 結束時頁面已解鎖，等 /api/plan 的空檔
 // 人可以改別格，等檢查回來才記就會把改完的樣子當成清掉後那一刻，檢查丟錯則整個沒記到；#1265 單元 3 審查設計洞 1）。
 async function cutWall(wall, boxes, done, change, repairing = false, cut = null) {
+  if (inputBusy) { note("上一個改動還在處理，請稍等再切", "notice"); return false; }
   const mirror = change && window.zoneSymmetry.isOn() ? change : null;
+  const unlock = window.lockZoneCut();
   const applied = applyCut(wall, boxes, done, mirror, repairing);
   if (mirror && !pendingMirror) pendingMirror = applied;
-  let changed;
-  try { changed = await applied; } finally { if (pendingMirror === applied) pendingMirror = null; }
-  if (changed) cut?.();
-  if (changed) await refreshPlan();
-  return Boolean(changed);  // 清掉這一面的切法要知道真的切了沒（沒切就不給復原）
+  let outcome;
+  try {
+    outcome = await applied;
+    if (outcome) cut?.();
+  } finally {
+    if (pendingMirror === applied) pendingMirror = null;
+    unlock(outcome === "ok");
+  }
+  if (outcome) await refreshPlan();
+  return Boolean(outcome);  // 清掉這一面的切法要知道真的切了沒（沒切就不給復原）
 }
 
 function cutZoneLabel(surface, wall) {
@@ -223,7 +236,6 @@ function cutZoneLabel(surface, wall) {
 }
 
 async function applyCut(wall, boxes, done, mirror, repairing) {
-  if (inputBusy) { note("上一個改動還在處理，請稍等再切", "notice"); return; }
   if (measuredDrafts[wall]) { note(`${wallNames[wall]}有還沒套用的實測阻抗草稿：先套用或取消，再切這一面`, "notice"); return; }
   const draft = wallDocument();
   showSelectionBanner = false; mirrorWarning = null; banner();
@@ -311,7 +323,7 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
   markStale();
   action(updateMultiples);
   action(updateInputPreview);
-  return true;
+  return mirrorWarning?.summary ? "notice" : kind;
 }
 function pointerMetres(svg, event, geometry) {
   const point = svg.createSVGPoint();
@@ -640,11 +652,13 @@ function resizeHandle(svg, wall, box, g) {
   svg.append(handle);
 }
 // 選取的框用畫面方向的四個數字改：只改動到的那一格，另外三格沿用原值（顯示只到公釐，不拿顯示的數字回填）。
-function editSelected(wall, view, width, height, field, value) {
+function editSelected(wall, view, width, height, field, input) {
+  const value = input.valueAsNumber;
   const others = drawnBoxes(wall).filter(box => box.id !== elevationSelected);
   const current = drawnBoxes(wall).find(box => box.id === elevationSelected);
   if (!current) return;
   if (!Number.isFinite(value) || value < 0 || (["width", "height"].includes(field) && value <= 0)) {
+    input.setAttribute("aria-invalid", "true");
     note("請填 0 以上的數字（公尺）；寬與高要大於 0", "notice"); return;
   }
   let [a0, a1, b0, b1] = screenBox(view, width, height, current);
@@ -706,7 +720,8 @@ function selectedEditor(wall, view, width, height) {
     const wrap = document.createElement("label"); wrap.textContent = label;
     const input = document.createElement("input"); input.type = "number"; input.step = "0.01"; input.id = `elevation-${field}`;
     input.defaultValue = metres(value);  // 畫出來的值：跟它不同才算正在打字（限制判決先不重畫，#1111）
-    input.addEventListener("change", () => editSelected(wall, view, width, height, field, Number(input.value)));
+    input.addEventListener("input", () => input.removeAttribute("aria-invalid"));
+    input.addEventListener("change", () => editSelected(wall, view, width, height, field, input));
     wrap.append(input); fields.append(wrap);
   }
   const remove = document.createElement("button"); remove.id = "elevation-delete"; remove.textContent = "刪掉這個框";
@@ -924,7 +939,7 @@ function renderClearSlot(wall) {
   }
   const count = wallZones(wall).filter(zone => zone.area === "rectangle").length;
   const clear = document.createElement("button"); clear.type = "button"; clear.id = "elevation-clear"; clear.className = "danger";
-  clear.textContent = "清掉這一面的切法";
+  clear.textContent = slot.closest("#zone-page") ? "清掉這面" : "清掉這一面的切法";
   clear.disabled = !count;
   clear.onclick = () => action(async () => {
     const zones = structuredClone(wallZones(wall)), design = structuredClone(zoneDesign?.zones?.[wall] ?? null);
@@ -1015,7 +1030,8 @@ function renderElevation() {
   const wall = elevationWall, view = views[wall], size = wallSize(wall);
   if (!size) { $("elevation-size").textContent = "先把房間的長、寬、高都填好正數，才畫得出這一面。"; renderZoneTable(wall); return; }
   const [width, height] = size;
-  const scale = Math.min(560 / width, 320 / height), pad = 48;
+  const [maxWidth, maxHeight] = area.closest("#zone-page") ? [840, 600] : [560, 320];
+  const scale = Math.min(maxWidth / width, maxHeight / height), pad = 48;
   const geometry = {width, height, scale, pad};
   // 照算好的大小畫（一個 viewBox 單位一像素，字固定 14 像素；home.css 只在卡片比圖窄時縮）。
   const svg = node("svg", {id: "elevation-svg", viewBox: `0 0 ${width * scale + 2 * pad} ${height * scale + 2 * pad}`,
