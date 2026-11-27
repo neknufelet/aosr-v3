@@ -94,8 +94,8 @@ def test_while_the_mirror_is_being_checked_the_sentence_says_so_in_mirror_words(
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
         assert held, "限制檢查應該還在路上"
         expect(words).to_have_text("正在確認鏡子在哪…")
-        page.unroute("**/api/zone-limits")
         _release(held)  # 被新一次蓋掉而中止的那幾個不用再放
+        page.unroute("**/api/zone-limits")
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimitsReceived === zoneLimitsGeneration")
         expect(words).to_contain_text("鏡子：喇叭中線")
         _assert_quiet(watched)

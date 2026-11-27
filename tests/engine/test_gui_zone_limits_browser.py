@@ -524,8 +524,8 @@ def test_while_a_recut_is_checked_the_summary_keeps_the_zone_lines_no_zone_shows
         assert held, "限制檢查應該還在路上"
         expect(page.locator("#wall-zone-x0-whole_wall")).to_have_count(0)
         expect(page.locator("#zone-limits-summary")).to_have_text("有 1 條超過限制（標紅的區），改好之前不能拿去搜尋：" + refusal[0])
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         _settled(page)
         expect(page.locator("#zone-limits-summary")).not_to_contain_text(refusal[0])
         assert watched.page_errors == []

@@ -96,8 +96,8 @@ def test_a_verdict_redrawing_the_list_keeps_what_is_being_typed(tmp_path: Path, 
         box.click()
         page.keyboard.type("8")
         assert held, "限制檢查應該還在路上"
-        page.unroute("**/api/zone-limits")
         _release(held)
+        page.unroute("**/api/zone-limits")
         page.wait_for_function("() => zoneLimitsReceived === zoneLimitsGeneration")
         expect(box).to_have_value("8")
         expect(box).to_be_focused()
