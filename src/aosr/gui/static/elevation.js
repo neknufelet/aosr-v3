@@ -229,6 +229,7 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
   showSelectionBanner = false; mirrorWarning = null; banner();
   inputBusy = true;
   document.querySelector("main").inert = true;
+  $("zone-page").inert = true;
   let data, changedWalls, message = "", kind = "ok", fields = "", repairBefore = null;
   const payload = {scheme: draft, wall, boxes};
   if (mirror) payload.mirror = {...mirror, protected_walls: Object.keys(measuredDrafts)};
@@ -296,6 +297,7 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
     elevationThin = [];
   } finally {
     document.querySelector("main").inert = false;
+    $("zone-page").inert = false;
     inputBusy = false;
   }
   if (done) done(data);
@@ -924,7 +926,7 @@ function renderClearSlot(wall) {
   }
   const count = wallZones(wall).filter(zone => zone.area === "rectangle").length;
   const clear = document.createElement("button"); clear.type = "button"; clear.id = "elevation-clear"; clear.className = "danger";
-  clear.textContent = "清掉這一面的切法";
+  clear.textContent = slot.closest("#zone-page") ? "清掉這面" : "清掉這一面的切法";
   clear.disabled = !count;
   clear.onclick = () => action(async () => {
     const zones = structuredClone(wallZones(wall)), design = structuredClone(zoneDesign?.zones?.[wall] ?? null);
@@ -1015,7 +1017,8 @@ function renderElevation() {
   const wall = elevationWall, view = views[wall], size = wallSize(wall);
   if (!size) { $("elevation-size").textContent = "先把房間的長、寬、高都填好正數，才畫得出這一面。"; renderZoneTable(wall); return; }
   const [width, height] = size;
-  const scale = Math.min(560 / width, 320 / height), pad = 48;
+  const [maxWidth, maxHeight] = area.closest("#zone-page") ? [840, 600] : [560, 320];
+  const scale = Math.min(maxWidth / width, maxHeight / height), pad = 48;
   const geometry = {width, height, scale, pad};
   // 照算好的大小畫（一個 viewBox 單位一像素，字固定 14 像素；home.css 只在卡片比圖窄時縮）。
   const svg = node("svg", {id: "elevation-svg", viewBox: `0 0 ${width * scale + 2 * pad} ${height * scale + 2 * pad}`,

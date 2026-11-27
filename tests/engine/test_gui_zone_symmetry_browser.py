@@ -217,7 +217,7 @@ def test_zones_that_do_not_mirror_say_so_and_the_details_spell_out_both_cuts(tmp
         expect(page.locator("#zone-symmetry-missed .zv-sym-missed")).to_have_count(1)
         # 那一列直接寫原因與怎麼辦（老闆點頭的樣稿）；差幾公分與切法才在配對細節。
         expect(page.locator("#zone-symmetry-missed .zv-sym-missed")).to_contain_text(
-            "大小不同，各自調；要配對，回「房間方案輸入」切到左右對稱的位置")
+            "大小不同，各自調；要配對，按那一面的「切區」，切到左右對稱的位置")
         expect(page.locator("#zone-symmetry-pairs")).to_contain_text("配成 1 對")
         expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 4 區：1 對一起調、2 區各自調")
         expect(page.locator("#zone-symmetry-detail")).to_have_count(0)

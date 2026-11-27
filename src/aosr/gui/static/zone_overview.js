@@ -9,6 +9,8 @@ const TILE_DEPTH = 190, TILE_WIDTH = 140;  // 地板、天花那兩張小圖最�
 const WALL_ORDER = ["front", "back", "left", "right"];
 const VPR_WORDS = "鋼板共振吸音";
 let overviewOpen = false;
+let cutting = null;
+let cutGeneration = 0;
 let overviewReturnY = 0;        // 打開這一頁之前輸入頁捲到哪裡（回來時捲回去）
 let followed = [];              // 由左右對稱代選的區
 let selected = [];              // 選了哪幾區（「牆/區代號」，照點的先後）
@@ -507,9 +509,9 @@ function select(ids, partners = []) {
 // 換成選這幾區：面板上已經自己點過選項就留著（只換選了哪幾區），沒點過就照新選的那幾區重新起頭。
 async function pick(next, toggled = null) {
   if (symmetryIsOn() && zoneLimitsReceived !== zoneLimitsGeneration) {
-    const generation = zoneDesignGeneration;
+    const generation = zoneDesignGeneration, beforeCut = cutGeneration;
     await settledZoneLimits();
-    if (!overviewOpen || zoneDesignGeneration !== generation) return;
+    if (!overviewOpen || zoneDesignGeneration !== generation || cutGeneration !== beforeCut) return;
   }
   const partners = symmetryIsOn() ? zoneLimits?.symmetry?.partners : null;
   const partner = id => partners?.[id.replace("/", "@")]?.replace("@", "/");
@@ -538,7 +540,7 @@ async function pick(next, toggled = null) {
 function toggleSelected(id) { pick([], id); }
 // 一面牆的「整面」（#1199）：那一面全部的區扣掉門、窗（跟推「其他牆面」時扣的一樣），照號碼排。
 function wholeFace(wall) { return view.faces[wall].filter(item => !item.opening).map(item => item.id); }
-// 每一面一組鈕（疊在圖上，靠右對齊 place.right）：「切區 ▸」回輸入頁立面圖畫框（#1262）；
+// 每一面一組鈕（疊在圖上，靠右對齊 place.right）：「切區 ▸」在本頁立面圖畫框；
 // 四面牆再加「選整面」（#1199），一次選那一面全部的區。
 // 整面都是門窗的牆沒有「選整面」，「切區 ▸」照樣有（門窗也要能重切）。
 function byFace(zones) {
@@ -553,7 +555,7 @@ function faceTools(places) {
     const tools = el("div", "zv-face-tools"); tools.id = `zone-tools-${place.wall}`; tools.dataset.wall = place.wall;
     if (place.titleRow) tools.dataset.titleRow = "true";
     const cut = button("zv-whole", "切區 ▸", `zone-cut-${place.wall}`, () => cutFace(place.wall));
-    cut.setAttribute("aria-label", `${wallNames[place.wall]}切區：回「房間方案輸入」在立面圖畫框`);
+    cut.setAttribute("aria-label", `${wallNames[place.wall]}切區：在這一頁的立面圖畫框`);
     tools.append(cut);
     if (place.titleRow && wholeFace(place.wall).length) {
       const whole = button("zv-whole", "選整面", `zone-whole-${place.wall}`, () => pick(wholeFace(place.wall)));
@@ -564,14 +566,54 @@ function faceTools(places) {
     return tools;
   });
 }
-// 「切區 ▸」（#1262）：畫框在輸入頁的立面圖，這一頁只選區、選貼什麼。關掉這一頁、打開那一面的立面圖、捲到立面圖那一塊。
-// 先關頁再開立面圖（這一頁開著時輸入頁藏著，立面圖量不到寬度）；關頁會捲回打開這一頁之前的地方，所以捲動放最後。
+// 整塊搬，讓原有的拖曳、數字格與延後重畫監聽仍共用同一個立面圖。
 function cutFace(wall) {
-  closeOverview();
+  const page = $("zone-page"), map = page.querySelector(".zv-mapwrap");
+  const panel = $("elevation-panel"), home = document.createComment("立面圖原位");
+  const toolbar = panel.querySelector(".walls-row");
+  const title = el("strong", "zv-cut-title", `${wallNames[wall]}　切區`);
+  const done = button("zv-cut-done", "切好了", "zone-finish-cut", finishCut);
+  cutGeneration++;
+  cutting = {wall, map, home, title, done, revision: editRevision};
+  panel.before(home);
+  map.replaceWith(panel);
+  toolbar.prepend(title);
+  toolbar.append($("elevation-clear-slot"), done);
+  $("elevation-symmetry-title").textContent = "左右一起切";
+  // 舊選取顯示到切完，再按新座標核對；這段時間不能把草稿套到已重編的代號。
+  page.querySelector(".zv-side").inert = true;
+  page.querySelector(".zv-foot").inert = true;
   window.showElevationWall(wall);
-  $("elevation-panel")?.scrollIntoView({block: "start"});
-  $(`elevation-wall-${wall}`)?.focus({preventScroll: true});  // 鍵盤從那一面的牆名鈕接著走，不必從頁首重來
+  done.focus({preventScroll: true});
 }
+
+function restoreElevation() {
+  const {map, home, title, done, revision} = cutting;
+  if (window.elevationDrawing()) renderElevation();  // 中途離開：撤掉指標監聽，放開不會送出
+  const panel = $("elevation-panel");
+  panel.replaceWith(map);
+  home.replaceWith(panel);
+  $("elevation-wall-line").append($("elevation-clear-slot"));
+  $("elevation-symmetry-title").textContent = "兩邊一起畫";
+  title.remove(); done.remove();
+  if (revision !== editRevision) unsaved = true;
+  renderElevation();
+  cutting = null;
+}
+
+function finishCut() {
+  const wall = cutting.wall;
+  restoreElevation();
+  renderZoneOverview();
+  $(`zone-cut-${wall}`)?.focus({preventScroll: true});
+}
+
+document.addEventListener("keydown", event => {
+  if (cutting && event.key === "Escape" && !inputBusy) {
+    event.preventDefault();
+    finishCut();
+  }
+});
 // 牆名那一行讓出右邊那組鈕（#1262）：「面向它站…」壓到鈕就換短句，還壓到就不寫。量畫出來的字（字型各台不同，估的不準）。
 // 這一面由程式最佳化時寫哪一份清單：照畫面上那一份，這一面貼不了的拿掉（材料庫找不到的代號原樣留著）；一種都不剩就只放不貼。
 // 「鋼板直接貼在棉上」的構造不跟著帶（#1208，carriedList）：拿掉它之後只剩不貼或空了，改用預設的三種玻璃棉＋不貼。
@@ -1936,7 +1978,7 @@ function symmetryBox() {
       for (const entry of pairing.missed) {
         const item = el("span", "zv-sym-missed"); item.dataset.zones = [entry.firstItem, entry.secondItem].filter(Boolean).map(zone => zone.id).join(" ");
         // 為什麼沒配成、要怎麼辦，直接寫在這一列（伺服器給的那一句）；差幾公分與切法在配對細節。
-        item.append(el("span", "zv-sym-tag", "沒配成一對"), zonesBrief([entry.firstItem, entry.secondItem].filter(Boolean)), el("span", "zv-sym-sum", entry.summary));
+        item.append(el("span", "zv-sym-tag", "沒配成一對"), zonesBrief([entry.firstItem, entry.secondItem].filter(Boolean)), el("span", "zv-sym-sum", entry.summary.replace("回「房間方案輸入」", "按那一面的「切區」，")));
         missed.append(item);
       }
       body.append(missed);
@@ -1985,7 +2027,7 @@ function symmetryDetailCard() {
     }
     part.append(el("p", null).appendChild(withZones(entry.detail, entry)).parentElement);
     if (entry.cuts.length) {
-      part.append(el("div", "zv-sym-how", "怎麼改就配得上（兩種挑一種，回「房間方案輸入」切）："));
+      part.append(el("div", "zv-sym-how", "怎麼改就配得上（兩種挑一種，按那一面的「切區」）："));
       const list = el("ul");
       for (const cut of entry.cuts) { const row = el("li"); row.append(withZones(cut, entry)); list.append(row); }
       part.append(list);
@@ -2087,6 +2129,7 @@ function noteLines() {
 function saidWords() { return [keptSaid, pageSaid === keptSaid ? "" : pageSaid].filter(Boolean).join("；"); }
 
 function closeOverview() {
+  if (cutting) restoreElevation();
   overviewOpen = false;
   renderZoneOverview();
   // 這一頁開著時輸入頁是藏起來的：那時重畫的平面圖，字量不到寬度、避不開彼此。回來看得到了，照同一份再畫一次。
@@ -2115,7 +2158,7 @@ function renderZoneOverview() {
   document.body.classList.toggle("zone-page-open", overviewOpen);
   // 整份文件也掛一個記號：底列黏在視窗下緣，瀏覽器自己把東西捲進畫面時要讓出底列那一段（zone_overview.css）。
   document.documentElement.classList.toggle("zone-page-open", overviewOpen);
-  if (!overviewOpen) return;
+  if (!overviewOpen || cutting) return;  // 切完才換掉選取快照與右欄草稿
   const scrolled = window.scrollY;
   const mapScroll = page.querySelector(".zv-mapwrap")?.scrollTop ?? 0;
   let parts;
@@ -2142,7 +2185,7 @@ function renderZoneOverview() {
   if (mapPane) mapPane.scrollTop = mapScroll;
   const scrollBody = page.querySelector(".zv-panel-body");
   if (scrollBody && scrollZone === selected.join(" ") && scrollMode === draft?.mode) scrollBody.scrollTop = panelScroll;
-  const again = typing ? $(typing) : null;
+  const again = typing || focused.startsWith("zone-cut-") ? $(focused) : null;
   again?.focus({preventScroll: true});
   // 放回去的是新畫的一格，原本的反白帶不過來（數字格讀不到選取範圍）。那一格畫的是原值（草稿裡沒有它的字，沒有 typed 記號）
   // ＝使用者進了格子還沒打字：整格反白，跟 Tab 進去時一樣，接著打的字換掉舊值——不然黏在舊值後面，12.5 打 20 變成 12.520（#1231）。
@@ -2227,7 +2270,8 @@ window.zonePageSay = (text, kind) => {
   const next = kind === "notice" ? text : "";
   if (next === pageSaid) return;
   pageSaid = next;
-  renderZoneOverview();
+  if (cutting) $("zone-page").querySelector(".zv-notes").replaceWith(noteLines());
+  else renderZoneOverview();
 };
 // 「拿去搜尋」被還在路上的一批改動擋下（zone_modes.js 的 sendToSearch，#1188 第 6 條）：那一批落地後平面圖檢查通過，
 // 訊息列換成成功的一句、上面那一支會把警示拿掉——被擋的那一次什麼都沒存、沒跳頁，那一句不能跟著不見。

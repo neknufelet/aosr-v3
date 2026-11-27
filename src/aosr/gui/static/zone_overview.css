@@ -436,3 +436,21 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-material:disabled {opacity:1;background:#f2f4f4;color:#46545b}
 #zone-page .zv-material[data-covered]{cursor:default}
 #zone-page #zone-groups .zv-num {font-size:13px}
+
+/* 分區頁借用輸入頁的立面圖；左欄可捲，完成鈕在同一欄頂端。 */
+#zone-page #elevation-panel{overflow:auto;min-width:0}
+#zone-page .cutrow{display:block}
+#zone-page #elevation-walls,#zone-page #elevation-list,#zone-page .fact-editor,
+#zone-page #elevation-original-line,#zone-page #elevation-depth-line{display:none}
+#zone-page .walls-row{position:sticky;top:0;z-index:2;align-items:center;gap:10px;padding:2px 0 8px;background:var(--paper)}
+#zone-page .zv-cut-title{font-size:17px}
+#zone-page #elevation-symmetry{margin:0}
+#zone-page #elevation-axis-words{display:none}
+#zone-page #elevation-clear,#zone-page .zv-cut-done{padding:5px 12px;border-radius:7px;font-size:14px}
+#zone-page #elevation-clear{background:white;color:var(--ink);border:1px solid #97aeb8;text-decoration:none}
+#zone-page .zv-cut-done{margin-left:auto;background:var(--ink);color:white}
+#zone-page .wallline{margin:2px 0;color:var(--soft)}
+#zone-page #elevation svg{width:100%;height:auto;max-height:65dvh;margin:2.75rem 0 0;border:0;background:transparent}
+/* 提示與圖疊在同一格，拖曳中提示出現或收起都不能推動滑鼠下的牆面。 */
+#zone-page #elevation-banner{position:relative}
+#zone-page #elevation-note{margin:4px 0}
