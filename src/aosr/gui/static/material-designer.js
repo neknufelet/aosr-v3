@@ -329,6 +329,11 @@ const zoneEmbed = zoneParams.get("embed") === "zones" && window.parent !== windo
 const forCandidates = zoneEmbed && zoneParams.get("mode") === "search";
 if (zoneEmbed) {
   document.body.classList.add("embedded-zones");
+  if (forCandidates) {
+    const label = document.querySelector('.backs input[value="zone_wall"]').closest("label");
+    label.classList.add("unavailable");
+    label.querySelector("small").textContent = "程式挑還不收";
+  }
   byId("save").textContent = forCandidates ? "存入材料庫並加入候選" : "存入材料庫並選它";
   const curveConditions = el("details", {class: "curve-conditions"}, el("summary", {text: "曲線條件"}));
   byId("curve-notes").after(curveConditions);
@@ -367,7 +372,7 @@ function renderDesigner() {
   byId("name").disabled = readOnly;
   for (const input of document.querySelectorAll(".backs input, .where input")) {
     input.checked = input.value === draft[input.name];
-    input.disabled = readOnly;
+    input.disabled = readOnly || (forCandidates && input.name === "backing" && input.value === "zone_wall");
   }
   byId("product").checked = draft.product;
   byId("product").disabled = readOnly;
@@ -432,7 +437,7 @@ async function initDesigner() {
   if (id === null) {
     draft = freshConstruction();
     if (zoneEmbed) {
-      draft.backing = "zone_wall";
+      draft.backing = forCandidates ? "rigid" : "zone_wall";
       draft.placement = ["floor", "ceiling_build"].includes(zoneParams.get("placement")) ? zoneParams.get("placement") : "wall";
     }
   } else {

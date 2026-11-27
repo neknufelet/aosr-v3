@@ -9,6 +9,7 @@ from typing import cast
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import reference_only
+from tests.engine._zone_material_steps import open_groups
 from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._zone_panel_steps import apply_and_return, choose_fixed, choose_mode, edit_candidates, expect_mode, open_panel
 from tests.engine._construction_gui_server import real_server
@@ -210,6 +211,7 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         _click_zone(page, "y0/s")
         page.locator("#zone-panel-mode-search").check()
         page.locator("#zone-panel-picker-search").focus()
@@ -227,7 +229,7 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
         _apply(page)
         assert _allowed(page) == {"y0/s": [*WOOLS, PLAIN_ID]}
         # 從清單卡選區後，小框也照同一條規則。
-        page.locator("#zone-list-select").click()
+        page.locator("#zone-group-select").click()
         page.locator("#zone-panel-picker-search").focus()
         add = page.locator(f"#zone-panel-pick-{HIT}")
         expect(add).to_have_attribute("data-reference", "off")
@@ -245,14 +247,15 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         refused = _refused(page, "x0/a")
-        card = page.locator(f"#zone-page .zv-list [data-choice='{HIT}']")
+        card = page.locator(f"#zone-page .zv-search-group [data-choice='{HIT}']")
         expect(card).to_have_attribute("data-reference", "listed")
         expect(card.locator("input,button")).to_have_count(0)
         expect(card).to_contain_text(HIT_LABEL)
         expect(card.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["listed_why"]))
-        expect(page.locator("#zone-list-reference")).to_have_text(refused)
-        expect(page.locator("#zone-list-reference")).to_have_class("zv-problem")
+        expect(page.locator("#zone-group-reference")).to_have_text(refused)
+        expect(page.locator("#zone-group-reference")).to_have_class("zv-problem")
         expect(page.locator("#zone-page-blocked")).to_have_text(refused)
         expect(page.locator("#zone-page-blocked")).to_have_class("limit-red")
         expect(page.locator("#zone-page-search-why")).to_have_text("清單有紅框要先處理")
@@ -261,9 +264,9 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
         expect(page.locator("#zone-page-note")).to_have_text(refused)
         assert not page.url.endswith("/gradient") and "gradient?" not in page.url
         # 面板：勾著、灰字、可取消；N 不算它（48K 與不貼＝2 種）。
-        page.locator("#zone-list-select").click()
-        expect(page.locator("#zone-list-reference")).to_have_text(refused)
-        expect(page.locator("#zone-list")).to_contain_text(cast(str, WORDS["listed_why"]))
+        page.locator("#zone-group-select").click()
+        expect(page.locator("#zone-group-reference")).to_have_text(refused)
+        expect(page.locator("#zone-group")).to_contain_text(cast(str, WORDS["listed_why"]))
         expect(page.locator("#zone-panel-list [data-kind=fixed]")).to_have_count(1)
         row = page.locator(f"#zone-panel-row-{HIT}")
         row_options(page, HIT)
@@ -284,7 +287,7 @@ def test_a_stored_list_with_such_a_construction_shows_red_and_the_tick_can_only_
         _apply(page)
         assert _allowed(page) == {"x0/a": ["glass_wool_48k", "none"]}
         expect(page.locator("#zone-page-blocked")).to_have_count(0)
-        expect(page.locator("#zone-list-reference")).to_have_count(0)
+        expect(page.locator("#zone-group-reference")).to_have_count(0)
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
@@ -294,14 +297,15 @@ def test_taking_it_off_on_the_list_card_is_final_and_the_add_box_will_not_put_it
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
-        page.locator("#zone-list-select").click()
+        open_groups(page)
+        page.locator("#zone-group-select").click()
         row_options(page, HIT)
         page.locator(f"#zone-panel-remove-{HIT}").click()
         _apply(page)
         assert _allowed(page) == {"x0/a": ["glass_wool_48k", "none"]}
-        expect(page.locator(f"#zone-list [data-choice={HIT}]")).to_have_count(0)
+        expect(page.locator(f"#zone-group [data-choice={HIT}]")).to_have_count(0)
         expect(page.locator("#zone-page-blocked")).to_have_count(0)
-        page.locator("#zone-list-select").click()
+        page.locator("#zone-group-select").click()
         page.locator("#zone-panel-picker-search").focus()
         expect(page.locator(f"#zone-panel-pick-{HIT}")).to_be_disabled()
         # 那一格被人改成勾得到再點：寫清單的那一支自己也不收。
@@ -368,8 +372,9 @@ def test_handing_zones_to_the_program_never_carries_it_over_from_the_last_list_o
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_page(page)
+        open_groups(page)
         # ② 動一下有它的那一份清單（這一頁「上一次的組合」就是它），再把別區交給程式。
-        page.locator("#zone-list-select").click()
+        page.locator("#zone-group-select").click()
         row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         _apply(page)
@@ -461,10 +466,11 @@ def test_each_way_of_writing_a_list_keeps_it_out_by_itself_without_the_last_guar
         assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == WOOLS
         # ③ 從卡選區後小框的候選按鈕硬改成勾得到再點：清單不變。
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         _settled(page)
         before = _allowed(page)
-        page.locator("#zone-list-select").click()
+        page.locator("#zone-group-select").click()
         page.locator("#zone-panel-picker-search").focus()
         expect(page.locator(f"#zone-panel-pick-{HIT}")).to_be_disabled()
         page.locator(f"#zone-panel-pick-{HIT}").evaluate("box => { box.disabled = false; box.click(); }")
@@ -528,7 +534,7 @@ class _HeldLimits:
             route.continue_()
 
 
-_CARD_SENTENCES = "#zone-page .zv-list .zv-problem[id$='-reference']"
+_CARD_SENTENCES = "#zone-page .zv-search-group .zv-problem[id$='-reference']"
 
 
 def _no_old_sentence_anywhere(page: Page) -> None:

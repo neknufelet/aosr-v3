@@ -64,7 +64,7 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        assert mode_words(page, "x0", "whole_wall") == ["指定貼一種", "不貼，保留原樣", "由程式最佳化"]
+        assert mode_words(page, "x0", "whole_wall") == ["保留原樣", "指定貼", "程式挑"]
         # 指定貼一種：牆上能貼的固定成品（含合成的 VPR），門、窗、天花構造、地毯、示範房一筆都沒有；原牆不寫阻抗數字。
         fixed = material_values(page, "x0", "whole_wall")
         assert "glass_wool_48k_50mm" in fixed and "pet60_vpr_steel1p2mm_foam90_sample" in fixed
@@ -557,7 +557,7 @@ def test_floor_and_ceiling_are_never_called_the_original_wall(tmp_path: Path, br
         choose_fixed(page, "floor", "rug", "carpet_on_concrete")
         expect(said).to_have_text("1 區改成「指定貼一種：地毯直接鋪混凝土（文獻擬合）」")
         expect(said).not_to_contain_text("原牆")
-        assert mode_words(page, "floor", "rug") == ["指定貼一種", "不貼，保留原樣", "由程式最佳化"]
+        assert mode_words(page, "floor", "rug") == ["保留原樣", "指定貼", "程式挑"]
         assert "原牆" not in zones.inner_text()
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "floor-words.png"))
 

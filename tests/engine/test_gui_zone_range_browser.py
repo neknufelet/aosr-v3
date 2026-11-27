@@ -20,6 +20,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui.zone_design import DesignSettings, write_design
 from aosr.reporting.scheme import Scheme
+from tests.engine._zone_material_steps import open_groups
 from tests.engine._zone_material_steps import row_options
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
@@ -91,7 +92,7 @@ def test_a_narrowed_range_is_written_in_metres_into_the_picked_zones_only(tmp_pa
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
         page.locator("#zone-panel-mode-search").check()
-        expect(page.locator("#zone-panel-range-note")).to_have_text("範圍從材料頁帶來，可以改（只改這幾區，不改材料頁）材料頁 ▸")
+        expect(page.locator("#zone-panel-range-note")).to_have_text("範圍只改這幾區，不改材料頁材料頁 ▸")
         expect(page.locator("#zone-panel-materials")).to_have_attribute("href", "/materials")
         options = page.locator(_cell(page, WOOL, "porous", "low") + " option")
         assert options.evaluate_all("items => items.map(item => [item.textContent, item.value])") == [
@@ -140,7 +141,7 @@ def test_one_zone_panel_offers_cells_only_under_ticked_tunable_materials(tmp_pat
         page.locator(_cell(page, WOOL, "porous", "high")).select_option("0.1")
         page.locator(_cell(page, WOOL, "cavity", "high")).fill("15")
         rows = cast(list[dict[str, object]], page.locator("#zone-panel").evaluate(_TEXT_STYLES))
-        assert rows and all(cast(float, row["size"]) >= 13 and cast(float, row["contrast"]) >= 4.5 for row in rows), rows
+        assert rows and not [row for row in rows if cast(float, row["size"]) < 13 or cast(float, row["contrast"]) < 4.5], [row for row in rows if cast(float, row["size"]) < 13 or cast(float, row["contrast"]) < 4.5]
         page.locator("#zone-panel").scroll_into_view_if_needed()
         _shot(page, "1-one-zone-panel")
         assert watched.page_errors == [] and watched.console_errors == []
@@ -175,6 +176,7 @@ def test_zones_with_different_ranges_show_empty_cells_and_keep_their_own_unless_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
         row_options(page, WOOL)
@@ -184,9 +186,9 @@ def test_zones_with_different_ranges_show_empty_cells_and_keep_their_own_unless_
             for end in ("low", "high"):
                 expect(page.locator(_cell(page, WOOL, part, end))).to_have_value("")
         # 選著區時右欄的清單卡收起來：清單一樣、範圍不同的兩張也寫出各自的範圍，不是只差區名。
-        expect(page.locator(".zv-list[data-zones='yL/z1'] .zv-ranges")).to_have_text("這一區自己的範圍：48K 玻璃棉（棉 5～10 cm、空腔 0～15 cm）")
-        expect(page.locator(".zv-list[data-zones='yL/z2'] .zv-ranges")).to_have_text("這一區自己的範圍：48K 玻璃棉（棉 5～20 cm、空腔 0～10 cm）")
-        expect(page.locator(".zv-list[data-zones*='yL/z3'] .zv-ranges")).to_have_count(0)
+        expect(page.locator(".zv-search-group[data-zones='yL/z1'] [data-ranged]")).to_have_text("這一區自己的範圍：棉 5～10 cm、空腔 0～15 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
+        expect(page.locator(".zv-search-group[data-zones='yL/z2'] [data-ranged]")).to_have_text("這一區自己的範圍：棉 5～20 cm、空腔 0～10 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
+        expect(page.locator(".zv-search-group[data-zones*='yL/z3'] [data-ranged]")).to_have_count(0)
         _shot(page, "2-zones-differ")
         page.locator("#zone-panel-depth").fill("28")
         _apply(page)
@@ -263,23 +265,24 @@ def test_list_cards_split_by_range_and_read_out_the_range_each_group_uses(tmp_pa
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _settled(page)  # 限制檢查回來會重畫整頁：先等它畫好再讀、再捲（雲端慢機器上撞過「元素已不在頁面上」）
-        cards = page.locator("#zone-page .zv-list").evaluate_all("cards => cards.map(card => [card.id, card.dataset.zones.split(' ').sort()])")
-        assert cards == [["zone-list", ["yL/auto1", "yL/auto2", "yL/z3"]], ["zone-list-2", ["yL/z1", "yL/z2"]]], cards
-        expect(page.locator(f"#zone-list-choices > [data-choice={WOOL}] .zv-range")).to_have_text(
+        cards = page.locator("#zone-page .zv-search-group").evaluate_all("cards => cards.map(card => [card.id, card.dataset.zones.split(' ').sort()])")
+        assert cards == [["zone-group", ["yL/auto1", "yL/auto2", "yL/z3"]], ["zone-group-2", ["yL/z1", "yL/z2"]]], cards
+        expect(page.locator(f"#zone-group-choices > [data-choice={WOOL}] .zv-range")).to_have_text(
             "可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
-        ranged = page.locator(f"#zone-list-2-choices > [data-choice={WOOL}] .zv-range")
+        ranged = page.locator(f"#zone-group-2-choices > [data-choice={WOOL}] .zv-range")
         expect(ranged).to_have_text("這幾區自己的範圍：棉 5～10 cm、空腔 0～15 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
         expect(ranged).to_have_attribute("data-ranged", "true")
-        expect(page.locator(f"#zone-list-2-choices > [data-choice={THIN}] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        expect(page.locator(f"#zone-group-2-choices > [data-choice={THIN}] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         groups = page.locator("#zone-special .zv-group").evaluate_all("groups => groups.map(group => group.dataset.zones.split(' ').sort())")
         assert ["yL/auto1", "yL/auto2", "yL/z1", "yL/z2", "yL/z3"] in groups, groups
-        page.locator("#zone-list-2").scroll_into_view_if_needed()
+        page.locator("#zone-group-2").scroll_into_view_if_needed()
         _shot(page, "4-cards-read-ranges")
-        page.locator("#zone-list-2-select").click()
-        expect(page.locator("#zone-list-2-ranges")).to_have_text(
-            "這幾區自己的範圍：48K 玻璃棉（棉 5～10 cm、空腔 0～15 cm）")
-        expect(page.locator("#zone-list-2")).to_contain_text("1 筆範圍改窄了")
+        page.locator("#zone-group-2-select").click()
+        expect(page.locator("#zone-group-2 [data-ranged]")).to_have_text(
+            "這幾區自己的範圍：棉 5～10 cm、空腔 0～15 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
+        expect(page.locator("#zone-group-2")).to_contain_text("1 筆範圍改窄了")
         row_options(page, WOOL)
         page.locator(f"#zone-panel-remove-{WOOL}").click()
         _apply(page)
@@ -565,11 +568,12 @@ def test_when_ranges_split_the_rule_group_no_card_claims_the_zones_that_follow_t
         with _serve(folder) as base, _open(browser, base) as watched:
             page = watched.page
             _open_overview(page)
-            who = page.locator("#zone-page .zv-list .zv-who").all_inner_texts()
+            open_groups(page)
+            who = page.locator("#zone-page .zv-search-group .zv-who").all_inner_texts()
             assert any("沒另外指定的牆區" in line for line in who) is claimed, who
             if not claimed:
                 expect(page.locator("#zone-page .zv-range[data-ranged]")).to_have_count(1)
-                assert sum(line.startswith("這一張管 6 區：右牆整面") for line in who) == 1, who
+                assert sum(line.startswith("這組有 6 區：右牆整面") for line in who) == 1, who
             assert watched.page_errors == [] and watched.console_errors == []
 
 

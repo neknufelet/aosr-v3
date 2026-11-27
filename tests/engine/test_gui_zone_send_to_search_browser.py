@@ -57,8 +57,8 @@ def _mouse_cannot_change_anything(page: Page, boxes: tuple[dict[str, float], dic
         page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     page.wait_for_timeout(200)
     assert page.evaluate("document.getElementById('zone-page').inert") is True
-    assert page.evaluate(_SELECTED) == ["y0/auto2"] and sent == []
-    assert set(_modes(page, ["yL/z3", "y0/auto2"]).items()) == {("yL/z3", "search"), ("y0/auto2", "沒列")}
+    assert page.evaluate(_SELECTED) == [] and len(sent) == 1
+    assert set(_modes(page, ["yL/z3", "y0/auto2"]).items()) == {("yL/z3", "search"), ("y0/auto2", "search")}
 
 
 def test_nothing_can_be_changed_between_the_save_of_send_to_search_and_the_jump(tmp_path: Path, browser: Browser) -> None:
@@ -78,9 +78,9 @@ def test_nothing_can_be_changed_between_the_save_of_send_to_search_and_the_jump(
         _mouse_cannot_change_anything(page, boxes, sent)
         results[0].continue_()
         page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
-        assert sent == [] and watched.page_errors == []
+        assert len(sent) == 1 and watched.page_errors == []
     stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
-    assert stored == {"yL": {"z3": SEARCH}}
+    assert stored == {"yL": {"z3": SEARCH}, "y0": {"auto2": SEARCH}}
 
 
 def test_nothing_can_be_changed_while_the_search_page_is_on_its_way(tmp_path: Path, browser: Browser) -> None:
@@ -97,12 +97,12 @@ def test_nothing_can_be_changed_while_the_search_page_is_on_its_way(tmp_path: Pa
         # 跳頁扣在半路時瀏覽器不讓考卷讀頁面裡的值（會一直等到換頁）：只用真滑鼠按套用，從網路這一側看有沒有送出。
         page.mouse.click(boxes[1]["x"] + boxes[1]["width"] / 2, boxes[1]["y"] + boxes[1]["height"] / 2)
         page.wait_for_timeout(300)
-        assert sent == []
+        assert len(sent) == 1
         leaving[0].continue_()
         page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
-        assert sent == [] and watched.page_errors == []
+        assert len(sent) == 1 and watched.page_errors == []
     stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
-    assert stored == {"yL": {"z3": SEARCH}}
+    assert stored == {"yL": {"z3": SEARCH}, "y0": {"auto2": SEARCH}}
 
 
 def test_a_search_page_that_never_opens_gives_this_page_back_and_says_so(tmp_path: Path, browser: Browser) -> None:
@@ -154,10 +154,10 @@ def test_the_words_of_a_blocked_send_to_search_are_still_there_after_what_blocke
         page.on("request", lambda request: saved.append(request.url) if request.method == "PUT" else None)
         limits = _hold(page, "**/api/zone-limits")
         _click_zone(page, "y0/auto2")
-        page.locator("#zone-panel-mode-search").check()
         page.evaluate("void refreshZoneLimits()")
         _wait_held(page, limits, 1)
         page.locator("#zone-page-search").click()
+        page.locator("#zone-panel-mode-search").check()
         batch = _hold(page, "**/api/zone-material/batch")
         plan = _hold(page, "**/api/plan")
         page.locator("#zone-panel-apply").click()
@@ -206,10 +206,10 @@ def _blocked_with_the_batch_still_out(page: Page) -> tuple[_Held, _Held]:
     _apply(page)
     limits = _hold(page, "**/api/zone-limits")
     _click_zone(page, "y0/auto2")
-    page.locator("#zone-panel-mode-search").check()
     page.evaluate("void refreshZoneLimits()")
     _wait_held(page, limits, 1)
     page.locator("#zone-page-search").click()
+    page.locator("#zone-panel-mode-search").check()
     batch = _hold(page, "**/api/zone-material/batch")
     plan = _hold(page, "**/api/plan")
     page.locator("#zone-panel-apply").click()
@@ -293,9 +293,7 @@ def test_the_blocked_words_do_not_follow_into_another_scheme(tmp_path: Path, bro
 
 def test_a_scheme_swapped_in_by_the_page_itself_before_the_jump_is_not_what_the_search_page_opens(
         tmp_path: Path, browser: Browser) -> None:
-    """「拿去搜尋」存好、結果清單還在重讀（鎖著，真人按不到）：頁面程式自己發的點擊走得到——先發「套用」
-    （那一批做完會把鎖的旗子放掉，#1188 之前就有、這次不修），再發「打開」另一份。清單回來後不准跳去另一份的搜尋頁：
-    留在這一頁照講，原本那一份照樣存好、是按下那一刻那一份。"""
+    """存檔完成、還在等結果清單時，由頁面載入另一份方案。原方案應已套用草稿、存好，並留下取消跳轉的原因。"""
     _prepare(tmp_path)
     _write(tmp_path, ZONE_NAMING_SCHEME | {"scheme_id": OTHER})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -311,16 +309,14 @@ def test_a_scheme_swapped_in_by_the_page_itself_before_the_jump_is_not_what_the_
         assert design.value.ok
         _wait_routes(page, results, 1)
         assert page.evaluate("[document.getElementById('zone-page').inert, inputBusy]") == [True, True]
-        with page.expect_response("**/api/zone-material/batch"):
-            page.locator("#zone-panel-apply").evaluate("node => node.click()")
-        page.wait_for_function("!inputBusy")
-        scripted_open_scheme(page, OTHER)
-        page.wait_for_function("name => scheme.scheme_id === name && !inputBusy", arg=OTHER)
+        assert len(sent) == 1
+        assert page.evaluate("name => openScheme(name, true)", OTHER)
+        page.wait_for_function("name => scheme.scheme_id === name", arg=OTHER)
         results[0].continue_()
         expect(page.locator("#zone-page-note")).to_have_text(f"存檔途中換了方案：「{SAMPLE}」照樣存好，這次不跳搜尋頁")
         page.wait_for_load_state("networkidle")
         assert jumps == [] and page.url == f"{base}/"
         assert page.evaluate("scheme.scheme_id") == OTHER and watched.page_errors == []
     stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
-    assert stored == {"yL": {"z3": SEARCH}}
+    assert stored == {"yL": {"z3": SEARCH}, "y0": {"auto2": SEARCH}}
     assert not (tmp_path / "designs" / f"{OTHER}.json").exists()

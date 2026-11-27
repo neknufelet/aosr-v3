@@ -6,6 +6,7 @@ from pathlib import Path
 
 from playwright.sync_api import Browser, Locator, Page, expect
 
+from tests.engine._zone_material_steps import open_groups
 from tests.engine._zone_material_steps import row_options
 from tests.engine._zone_panel_steps import choose_mode, open_panel
 from tests.engine._construction_cases import construction
@@ -79,6 +80,7 @@ def test_whole_candidate_cost_follows_the_choice_only_in_the_panel(tmp_path: Pat
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         for choice, checked in (("sample_product", True), ("sample_product", False), ("sample_rigid", True)):
             _click_zone(page, "yL/z3")
             _pick_search(page)
@@ -94,7 +96,7 @@ def test_whole_candidate_cost_follows_the_choice_only_in_the_panel(tmp_path: Pat
                 product = form.locator("#zone-panel-row-sample_product")
                 expect(product).to_have_attribute("data-state", "all")
             _apply(page)
-            card = page.locator("#zone-list")
+            card = page.locator("#zone-group")
             _expect_candidate_cost(card, False)
             if checked and choice == "sample_product":
                 expect(card.locator("[data-choice=sample_product]")).to_be_visible()
@@ -105,6 +107,7 @@ def test_whole_candidate_cost_follows_the_choice_only_in_the_panel(tmp_path: Pat
             page.locator("#zone-page-close").click()
             _expect_candidate_cost(_open_candidate_table(page), False)
             page.locator("#zone-page-open").click()
+            open_groups(page)
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -113,6 +116,7 @@ def test_only_tunable_candidates_and_none_show_no_cost_in_all_three_views(tmp_pa
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _click_zone(page, "yL/z3")
         _pick_search(page)
         page.locator("#zone-panel-picker-search").focus()
@@ -120,9 +124,9 @@ def test_only_tunable_candidates_and_none_show_no_cost_in_all_three_views(tmp_pa
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         _expect_candidate_cost(page.locator("#zone-panel-form"), False)
         _apply(page)
-        card = page.locator("#zone-list")
+        card = page.locator("#zone-group")
         _expect_candidate_cost(card, False)
-        page.locator("#zone-list-select").click()
+        page.locator("#zone-group-select").click()
         _expect_candidate_cost(page.locator("#zone-panel-form"), False)
         _expect_candidate_cost(card, False)
         page.locator("#zone-panel-cancel").click()

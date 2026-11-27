@@ -83,3 +83,5 @@ input[type=radio],input[type=checkbox]{accent-color:#15617b}
 .embedded-zones #figure-key{display:none}
 .embedded-zones .performance h3{margin:.2rem 0}
 .embedded-zones #zone-depth{margin:.3rem 0}
+
+.backs label.unavailable{color:#62686b;background:#f2f3f3}

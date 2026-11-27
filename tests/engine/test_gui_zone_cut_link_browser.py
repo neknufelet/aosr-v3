@@ -262,12 +262,12 @@ def test_face_titles_make_room_for_their_buttons(tmp_path: Path, browser: Browse
         _open_overview(page)
         _settled(page)
         asides = _check_rows(page)
-        assert all((asides[wall] or "").startswith("左手邊") for wall in WALLS), asides
+        assert all(asides[wall] is None for wall in WALLS), asides
         assert (asides["floor"], asides["ceiling"]) == ("從上往下看", "方向同地板圖")
         _switch_to(page, "zone-narrow-sample")
         asides = _check_rows(page)
         assert asides["yL"] is None and asides["y0"] is None, asides
-        assert all((asides[wall] or "").startswith("面向它站") for wall in ("x0", "xL")), asides
+        assert all(asides[wall] is None for wall in ("x0", "xL")), asides
         _switch_to(page, "zone-rear-opening-sample")
         _check_rows(page)
         doors = page.locator("#zone-map [data-face='floor'] text.zv-tiny", has_text="門")

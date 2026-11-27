@@ -152,7 +152,7 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-show-all input{margin-top:2px}
 #zone-page .zv-away{margin:6px 0 0;font-size:13px;color:#a33;line-height:1.4}
 #zone-page .zv-same{display:inline-block;margin-left:8px;padding:0 7px;border:1.2px solid var(--ink);border-radius:9px;font-size:12.5px;line-height:18px;
-  vertical-align:2px;background:#fff;white-space:nowrap}
+  vertical-align:2px;background:#fff;color:var(--ink);white-space:nowrap}
 #zone-page .zv-show{margin:5px 0 3px;padding:7px 10px 3px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}
 #zone-page .zv-fullname{font-size:13px;line-height:1.45;margin:0 0 7px}
 #zone-page .zv-show h4{margin:0 0 5px;font-size:13px;font-weight:600}
@@ -422,3 +422,15 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-form details.zv-row-options:not([open]){position:absolute;right:3px;top:8px;padding:0}
 #zone-page .zv-slab.porous{background:repeating-linear-gradient(35deg,transparent 0 4px,#c5a75a 4px 5px,transparent 5px 9px),#f6e7b0}
 #zone-page .zv-edit > .zv-build{flex:none;width:calc(100% - 32px);margin:4px 16px 8px}
+
+#zone-page .zv-candidate:not(:hover):not(:focus-within) .zv-row-options:not([open]) summary{clip-path:inset(50%);pointer-events:none}
+
+#zone-page #zone-groups {font-size:14px;color:var(--ink)}
+#zone-page #zone-groups > summary {cursor:pointer}
+#zone-page .zv-search-group, #zone-page .zv-group-rule, #zone-page .zv-group-exceptions {border-top:1px solid var(--line);padding:6px 0}
+#zone-page .zv-group-choices {margin:4px 0;padding-left:18px}
+#zone-page .zv-group-choices small {display:block;font-size:13px}
+#zone-page .zv-owned {font-size:13px}
+
+#zone-page .zv-material:disabled {opacity:1;background:#f2f4f4;color:#46545b}
+#zone-page #zone-groups .zv-num {font-size:13px}
