@@ -166,11 +166,11 @@ def test_saved_rigid_construction_is_selectable_in_zone(tmp_path: Path, browser:
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-fixed").check()
         select = page.locator("#zone-panel-material")
-        option = select.locator("option").filter(has_text=name)
+        option = select.get_by_role("radio").filter(has_text=name)
         value = option.get_attribute("value")
         assert value
-        select.select_option(value)
-        expect(select).to_have_value(value)
+        option.click()
+        expect(option).to_have_attribute("aria-checked", "true")
 
 
 def test_phone_stack_fields_figure_and_save_fit(tmp_path: Path, browser: Browser) -> None:

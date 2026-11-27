@@ -106,9 +106,9 @@ def test_switched_on_paired_zones_carry_the_same_shape_and_name_each_other(tmp_p
         expect(box).to_have_attribute("data-state", "paired")
         expect(page.locator("#zone-symmetry-on")).to_have_attribute("aria-pressed", "true")
         expect(page.locator("#zone-symmetry-off")).to_have_attribute("aria-pressed", "false")
-        expect(box).to_contain_text("只管由程式最佳化的區")
-        expect(box).to_contain_text("兩區一起調，沒有主次")
-        expect(box).to_contain_text("對稱軸")
+        expect(page.locator("#zone-map [data-pair]:not([data-shown=search])")).to_have_count(0)
+        expect(page.locator("#zone-result-search")).to_contain_text("2 對一起調")
+        expect(page.locator("#zone-map .zv-sym-axis-label").first).to_have_text("對稱軸")
         expect(page.locator("#zone-symmetry-pairs .zv-sym-pair")).to_have_count(2)
         marks = _marks(page)
         assert set(marks) == {"x0/b", "x0/a", "y0/s", "yL/s"}
@@ -136,8 +136,8 @@ def test_switched_on_paired_zones_carry_the_same_shape_and_name_each_other(tmp_p
         expect(page.locator("text=左右對稱 >> visible=true")).to_have_count(1)
         page.locator("#zone-map [data-wall='x0'][data-zone='b'] .zv-fill").click()
         expect(page.locator("#zone-panel")).to_be_visible()
-        expect(page.locator("#zone-panel .zv-addmore", has_text="跟著一起選（左右對稱）")).to_have_count(1)
-        expect(page.locator("text=左右對稱 >> visible=true")).to_have_count(2)
+        expect(page.locator("#zone-panel h2")).to_contain_text("跟著選")
+        expect(page.locator("text=左右對稱 >> visible=true")).to_have_count(1)
         page.locator("#zone-panel-cancel").click()
         before = path.read_bytes()
         _save(page)
@@ -189,7 +189,7 @@ def test_with_no_zone_handed_to_the_program_it_says_there_is_nothing_to_pair(tmp
         box = page.locator("#zone-symmetry")
         expect(box).to_have_attribute("data-state", "none")
         expect(page.locator("#zone-symmetry-on")).to_have_attribute("aria-pressed", "true")
-        expect(box).to_contain_text("現在沒有由程式最佳化的區，所以沒有要配對的")
+        expect(box).to_contain_text("沒有由程式最佳化的區可配對")
         assert _marks(page) == {}
         expect(page.locator("#zone-symmetry-details")).to_have_count(0)
         expect(page.locator("#zone-symmetry .limit-red")).to_have_count(0)
@@ -217,7 +217,7 @@ def test_zones_that_do_not_mirror_say_so_and_the_details_spell_out_both_cuts(tmp
         expect(page.locator("#zone-symmetry-missed .zv-sym-missed")).to_have_count(1)
         # 那一列直接寫原因與怎麼辦（老闆點頭的樣稿）；差幾公分與切法才在配對細節。
         expect(page.locator("#zone-symmetry-missed .zv-sym-missed")).to_contain_text(
-            "大小不同，各自調；要配對，回「房間方案輸入」切到左右對稱的位置")
+            "大小不同，各自調；要配對，按那一面的「切區」，切到左右對稱的位置")
         expect(page.locator("#zone-symmetry-pairs")).to_contain_text("配成 1 對")
         expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 4 區：1 對一起調、2 區各自調")
         expect(page.locator("#zone-symmetry-detail")).to_have_count(0)
@@ -551,3 +551,38 @@ def test_a_verdict_landing_after_entering_a_box_never_glues_the_typed_number_ont
         zone = cast(Doc, page.evaluate("structuredClone(scheme.scene.surface_zones_by_wall.ceiling.find(zone => zone.id === 'q'))"))
         assert (zone["u_m"], zone["v_m"]) == ([1, 2], [2.5, 3.5]), zone
         assert watched.page_errors == [] and watched.console_errors == []
+
+
+def test_heading_distinguishes_both_added_partners(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, ALL_CUTS, _design({"x0": ["b", "a"], "y0": ["s"], "yL": ["s"]}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        expect(page.locator("#zone-symmetry")).to_have_attribute("data-state", "paired")
+        for wall, zone in (("x0", "b"), ("y0", "s")):
+            page.locator(f"#zone-map [data-wall='{wall}'][data-zone='{zone}'] .zv-fill").click()
+        expect(page.locator("#zone-map [data-selected=true]")).to_have_count(4)
+        panel = page.locator("#zone-panel")
+        follows = panel.locator("h2 small")
+        for wall, zone, face in (("x0", "a", "前牆"), ("yL", "s", "右牆")):
+            chip = panel.locator(f".zv-chip[data-zone='{wall}/{zone}'] .zv-num")
+            number = chip.text_content()
+            assert number and number.isdigit()
+            expect(follows).to_contain_text(face + " " + number)
+        expect(follows).to_contain_text("跟著選")
+        expect(follows).not_to_contain_text("左牆")
+
+
+def test_both_missed_pair_summaries_point_to_the_face_cut_button(tmp_path: Path, browser: Browser) -> None:
+    # 前牆兩區大小不同，後牆只有單側一區，讓伺服器一次產生兩種切區建議。
+    cuts = {"x0": UNEVEN["x0"], "xL": [FRONT_PAIR[0]]}
+    _prepare(tmp_path, cuts, _design({"x0": ["b", "a"], "xL": ["b"]}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        summaries = page.locator("#zone-symmetry-missed .zv-sym-sum:visible")
+        assert set(summaries.all_inner_texts()) == {
+            "大小不同，各自調；要配對，按那一面的「切區」，切到左右對稱的位置",
+            "對稱軸另一邊沒有一樣大小的區，各自調；要配對，按那一面的「切區」，在對稱的位置切出一區",
+        }
+        assert "回「房間方案輸入」" not in page.locator("#zone-page").inner_text()

@@ -1,5 +1,4 @@
-"""真瀏覽器考「這間房貼什麼」每一面的「切區 ▸」（#1262）：畫框在「房間方案輸入」的立面圖，這一頁只選區、選貼什麼；
-按「切區 ▸」回輸入頁、打開那一面的立面圖。切過之後回來，選到的區代號不在了、或換了一塊長方形，就不再算選著
+"""每一面的「切區 ▸」在分區頁左欄打開立面圖。切過之後回來，選到的區代號不在了、或換了一塊長方形，就不再算選著
 （自動補滿的區會重新編號，同一個代號可能指到另一塊）。牆窄的時候，牆名那一行的字讓出右邊兩顆鈕，不疊在一起。
 
 房間用區名考卷那間假房間（``_zone_naming_room``，數字是考卷自己編的）；窄房間是同一份改的，尺寸也是這裡自己編的。"""
@@ -43,7 +42,7 @@ def _cut_front_inside_auto2(page: Page) -> None:
 
 
 def test_every_face_has_a_cut_link_that_opens_its_elevation(tmp_path: Path, browser: Browser) -> None:
-    """六面都有「切區 ▸」：按了回輸入頁、那一面的立面圖打開而且在視窗裡；切一個框再回這一頁，看得到多出來的那一區。"""
+    """六面都有「切區 ▸」：按了仍在分區頁、那一面的立面圖打開而且在視窗裡；切一個框再回這一頁，看得到多出來的那一區。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -52,32 +51,24 @@ def test_every_face_has_a_cut_link_that_opens_its_elevation(tmp_path: Path, brow
         cuts = page.locator("#zone-page [id^='zone-cut-']")
         assert sorted(cuts.evaluate_all("buttons => buttons.map(button => button.id)")) == [f"zone-cut-{face}" for face in FACES]
         expect(cuts.first).to_have_text("切區 ▸")
-        expect(page.locator("#zone-cut-yL")).to_have_attribute("aria-label", "前牆切區：回「房間方案輸入」在立面圖畫框")
+        expect(page.locator("#zone-cut-yL")).to_have_attribute("aria-label", "前牆切區：在這一頁的立面圖畫框")
         # 「選整面」照舊只有四面牆有（地板、天花沒有）。
         assert page.locator("#zone-page [id^='zone-whole-']").count() == 4
-        # 地板：回輸入頁、地板那一面打開。
-        page.locator("#zone-cut-floor").click()
-        expect(page.locator("#zone-page")).to_be_hidden()
-        expect(page.locator("#elevation-wall-floor")).to_have_attribute("aria-pressed", "true")
-        expect(page.locator("#elevation-frame")).to_be_in_viewport()
-        # 從頁面最上面那顆（方案那一列）回分區頁，換按前牆：立面圖換成前牆，捲到立面圖那一塊
-        # （不是捲回打開分區頁之前的地方：那時捲在最上面，立面圖在視窗外）。
-        # #1265 單元 5c 拿掉 #home 兩張大卡後整頁短了，1100 高的視窗捲到最上面也看得到立面圖：視窗改 900 高（老闆用的 1440×900
-        # 那一種的高度），「捲到最上面時立面圖在視窗外」這個前提才成立。
         page.set_viewport_size({"width": 1400, "height": 900})
-        page.evaluate("window.scrollTo(0, 0)")
-        expect(page.locator("#elevation-frame")).not_to_be_in_viewport()
-        # #1265 單元 3 拿掉方案那一列那顆（派工單細節裁決 5）：頁面最上面改按頂上導覽列的「這間房貼什麼」（同一支 openZoneOverview）。
-        page.locator("#nav-zones").click()
-        expect(page.locator("#zone-map")).to_be_visible()
+        page.locator("#zone-cut-floor").click()
+        expect(page.locator("#zone-page")).to_be_visible()
+        expect(page.locator("#elevation-wall-floor")).to_have_attribute("aria-pressed", "true")
+        expect(page.locator("#zone-page #elevation-frame")).to_be_in_viewport()
+        page.get_by_role("button", name="切好了").click()
+        expect(page.locator("#zone-cut-floor")).to_be_focused()
         before = page.locator("#zone-map [data-wall='yL'][data-zone]").count()
         page.locator("#zone-cut-yL").click()
         expect(page.locator("#elevation-wall-yL")).to_have_attribute("aria-pressed", "true")
-        expect(page.locator("#elevation-wall-yL")).to_be_focused()  # 鍵盤從那一面的牆名鈕接著走
+        expect(page.get_by_role("button", name="切好了")).to_be_focused()  # 鍵盤焦點進到立面圖工具列
         expect(page.locator("#elevation-wall-floor")).to_have_attribute("aria-pressed", "false")
         expect(page.locator("#elevation-frame")).to_be_in_viewport()
         _cut_front_inside_auto2(page)
-        page.locator("#zone-page-open").click()
+        page.get_by_role("button", name="切好了").click()
         expect(page.locator("#zone-map")).to_be_visible()
         _settled(page)
         expect(page.locator("#zone-map [data-wall='yL'][data-zone='z4']")).to_have_count(1)
@@ -127,7 +118,8 @@ def test_a_selection_whose_rectangle_changed_after_cutting_is_dropped(tmp_path: 
         page.locator("#zone-panel-mode-search").check()
         page.locator("#zone-cut-x0").click()
         _drag(page, 5.5, 3.15, (2.0, 1.0), (3.0, 2.0))
-        _back_to_overview(page)
+        page.get_by_role("button", name="切好了").click()
+        _settled(page)
         expect(page.locator("#zone-map [data-wall='x0'][data-zone='z1']")).to_have_count(1)
         assert page.evaluate(_SELECTED) == []
         expect(page.locator("#zone-panel")).to_have_count(0)
@@ -138,7 +130,8 @@ def test_a_selection_whose_rectangle_changed_after_cutting_is_dropped(tmp_path: 
         expect(page.locator("#zone-panel-mode-search")).not_to_be_checked()  # 上一段丟掉的草稿沒有帶過來
         page.locator("#zone-cut-yL").click()
         _drag(page, *FRONT_SIZE, (2.35, 0.2), (2.85, 0.6))
-        _back_to_overview(page)
+        page.get_by_role("button", name="切好了").click()
+        _settled(page)
         assert page.evaluate(_SELECTED) == ["xL/auto3"]
         expect(page.locator("#zone-panel")).to_be_visible()
         assert "重切過" not in _said(page)
@@ -155,7 +148,8 @@ def test_all_dropped_with_an_untouched_panel_says_nothing_about_changes(tmp_path
         expect(page.locator("#zone-panel")).to_be_visible()
         page.locator("#zone-cut-x0").click()
         _drag(page, 5.5, 3.15, (2.0, 1.0), (3.0, 2.0))
-        _back_to_overview(page)
+        page.get_by_role("button", name="切好了").click()
+        _settled(page)
         assert page.evaluate(_SELECTED) == []
         expect(page.locator("#zone-panel")).to_have_count(0)
         assert _said(page) == "剛才選的區有 1 區那一面重切過，已經不是原來那一塊，不再算選著，要的話重新選"
@@ -249,9 +243,8 @@ def _back_door_scheme() -> dict[str, object]:
 
 
 def test_face_titles_make_room_for_their_buttons(tmp_path: Path, browser: Browser) -> None:
-    """牆名那一行的「面向它站…」放得下就照寫，放不下改短句，再放不下就不寫；量的是畫出來的字與鈕，不是估的。
-    三間房各看一次，哪一組鈕都不壓到圖上的字：假房間（前後牆五公尺多：四面都換短句）、窄房間（前後牆三公尺多：
-    前後牆不寫、側牆寫得下整句）、後牆靠右有門的假房間（地板小圖下緣外的「門」字不被「切區 ▸」蓋住）。"""
+    """一般與窄房間的四面牆都省去方向旁白，地板與天花保留方向。三間房的切區鈕都避開圖上的字，
+    包括後牆靠右的門在地板小圖下緣標出的「門」。"""
     _prepare(tmp_path)
     narrow = _narrow_scheme()
     narrow["scheme_id"] = "zone-narrow-sample"
@@ -262,12 +255,12 @@ def test_face_titles_make_room_for_their_buttons(tmp_path: Path, browser: Browse
         _open_overview(page)
         _settled(page)
         asides = _check_rows(page)
-        assert all((asides[wall] or "").startswith("左手邊") for wall in WALLS), asides
+        assert all(asides[wall] is None for wall in WALLS), asides
         assert (asides["floor"], asides["ceiling"]) == ("從上往下看", "方向同地板圖")
         _switch_to(page, "zone-narrow-sample")
         asides = _check_rows(page)
         assert asides["yL"] is None and asides["y0"] is None, asides
-        assert all((asides[wall] or "").startswith("面向它站") for wall in ("x0", "xL")), asides
+        assert all(asides[wall] is None for wall in ("x0", "xL")), asides
         _switch_to(page, "zone-rear-opening-sample")
         _check_rows(page)
         doors = page.locator("#zone-map [data-face='floor'] text.zv-tiny", has_text="門")

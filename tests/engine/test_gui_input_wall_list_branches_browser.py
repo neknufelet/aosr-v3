@@ -18,6 +18,7 @@ from typing import cast
 from playwright.sync_api import Browser, Page, expect
 
 from aosr.gui.zone_edit import CutBox, cut_wall
+from tests.engine._zone_material_steps import pick_fixed_row
 from tests.engine._bonded_backing_cases import MELAMINE_100
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -123,7 +124,7 @@ def test_a_fixed_zone_with_a_cap_names_the_cap(tmp_path: Path, browser: Browser)
         page.locator("#elevation-wall-x0").click()
         page.locator("#zone-goto-x0-whole_wall").click()
         page.locator("#zone-panel-mode-fixed").check()
-        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        pick_fixed_row(page, "glass_wool_48k_50mm")
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         page.locator("#zone-page-close").click()

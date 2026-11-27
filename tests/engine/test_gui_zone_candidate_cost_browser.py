@@ -6,6 +6,8 @@ from pathlib import Path
 
 from playwright.sync_api import Browser, Locator, Page, expect
 
+from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import row_options
 from tests.engine._zone_panel_steps import choose_mode, open_panel
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -45,7 +47,7 @@ def test_new_search_zone_saves_explicit_builtin_candidates(tmp_path: Path, brows
         page.locator("#elevation-wall-yL").click()
         choose_mode(page, "yL", "z3", "search")
         open_panel(page, "yL", "z3")
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         for choice in ("sample_tunable", "sample_rigid", "sample_product"):
             box = page.locator(f"#zone-panel-pick-{choice}")
             expect(box).to_be_visible()
@@ -78,13 +80,15 @@ def test_whole_candidate_cost_follows_the_choice_only_in_the_panel(tmp_path: Pat
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         for choice, checked in (("sample_product", True), ("sample_product", False), ("sample_rigid", True)):
             _click_zone(page, "yL/z3")
             _pick_search(page)
             if checked:
-                page.locator("#zone-panel-add").click()
+                page.locator("#zone-panel-picker-search").focus()
                 page.locator(f"#zone-panel-pick-{choice}").click()
             else:
+                row_options(page, choice)
                 page.locator(f"#zone-panel-remove-{choice}").click()
             form = page.locator("#zone-panel-form")
             _expect_candidate_cost(form, checked)
@@ -92,7 +96,7 @@ def test_whole_candidate_cost_follows_the_choice_only_in_the_panel(tmp_path: Pat
                 product = form.locator("#zone-panel-row-sample_product")
                 expect(product).to_have_attribute("data-state", "all")
             _apply(page)
-            card = page.locator("#zone-list")
+            card = page.locator("#zone-group")
             _expect_candidate_cost(card, False)
             if checked and choice == "sample_product":
                 expect(card.locator("[data-choice=sample_product]")).to_be_visible()
@@ -103,6 +107,7 @@ def test_whole_candidate_cost_follows_the_choice_only_in_the_panel(tmp_path: Pat
             page.locator("#zone-page-close").click()
             _expect_candidate_cost(_open_candidate_table(page), False)
             page.locator("#zone-page-open").click()
+            open_groups(page)
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -111,16 +116,17 @@ def test_only_tunable_candidates_and_none_show_no_cost_in_all_three_views(tmp_pa
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _click_zone(page, "yL/z3")
         _pick_search(page)
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         page.locator("#zone-panel-pick-sample_tunable").click()
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         _expect_candidate_cost(page.locator("#zone-panel-form"), False)
         _apply(page)
-        card = page.locator("#zone-list")
+        card = page.locator("#zone-group")
         _expect_candidate_cost(card, False)
-        page.locator("#zone-list-select").click()
+        page.locator("#zone-group-select").click()
         _expect_candidate_cost(page.locator("#zone-panel-form"), False)
         _expect_candidate_cost(card, False)
         page.locator("#zone-panel-cancel").click()
@@ -143,7 +149,7 @@ def test_panel_shows_cost_when_only_one_selected_zone_has_a_fixed_product(tmp_pa
         product = form.locator(f"#zone-panel-row-{PLAIN_PRODUCT}")
         expect(product).to_have_attribute("data-state", "some")
         _expect_candidate_cost(form, True)
-        form.locator(f"#zone-panel-addto-{PLAIN_PRODUCT}").click()
+        form.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}").click()
         expect(product).to_have_attribute("data-state", "all")
-        form.locator(f"#zone-panel-remove-{PLAIN_PRODUCT}").click()
+        form.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}").click()
         _expect_candidate_cost(form, False)

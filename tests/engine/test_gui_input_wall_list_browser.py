@@ -149,6 +149,7 @@ def test_the_list_counts_choices_the_same_way_as_the_zone_page(tmp_path: Path, b
         listed = page.locator("#wall-zone-what-x0-a").inner_text()
         page.locator("#zone-goto-x0-a").click()
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "x0/a")
+        page.locator("#zone-panel-candidate-info > summary").click()
         panel = page.locator("#zone-panel-search-from").inner_text()
         count = panel.removeprefix("程式從下面勾的 ").split(" 種")[0]
         assert count.isdigit() and int(count) < len(LISTED), panel
