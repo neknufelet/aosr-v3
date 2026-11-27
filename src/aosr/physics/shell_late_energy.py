@@ -3,8 +3,9 @@
 **跟長方體那一路同一套算式。** :mod:`aosr.physics.late_energy` 是六面各切 n×n、中心點形狀因子；
 這一支把外殼與造型的每個三角形切成小格（沿最長邊對切到不超過設定長度），形狀因子改用**多點積分**
 （每格再切成子三角形、取各自中心），兩點之間被造型擋住的那一對不算。原始形狀因子之後的步驟——
-逐列正規化、對稱化與雙邊縮放、``(I−R)y=E`` 直接解、逐階展開、面積加權平均吸音率的 Eyring
-比值、尾巴——全部呼叫長方體那一支的同一份程式，不寫第二份。
+``(I−R)y=E`` 直接解、逐階展開、面積加權平均吸音率的 Eyring
+比值、尾巴——呼叫長方體那一支的同一份程式；逐列正規化與雙邊縮放那一段另抄一份（理由見
+:func:`normalized_form_factors`），考卷逐位守著兩份一樣。
 
 **看不到任何一格的小格**（例如貼牆板子背後那一塊牆、貼天花板的造型頂面）不跟任何人交換能量，
 從交換與平均吸音率裡拿掉，面積記在 ``hidden_area_m2``。
@@ -27,7 +28,6 @@ from aosr.physics.late_energy import (
     LateEnergyOrderBand,
     LateEnergyOrderResult,
     _eyring_ratio,
-    _normalized_form_factors,
     _raw_energy_and_orders,
     _tail_energy,
 )
@@ -36,6 +36,34 @@ from aosr.physics.late_energy import (
 _SAMPLE_PAIRS_PER_CHUNK = 200_000
 # 交換矩陣一次帶幾個頻點進長方體那一支的直接解；只管記憶體（格數² × 頻點數），不影響答案。
 _FREQUENCIES_PER_CHUNK = 8
+
+
+def normalized_form_factors(raw: FloatArray, areas: FloatArray) -> FloatArray:
+    """原始形狀因子逐列正規化，再對稱化成交換矩陣並雙邊縮放到列和等於面積（守互易與列和）。
+
+    這一段逐字照 :func:`aosr.physics.late_energy._form_factors` 算完原始值之後的那一半；那一支在
+    物理身分的程式摘要裡，抽成共用函式會讓長方體那一路的身分變、老闆存的結果要重跑，所以這裡另抄
+    一份，由 ``tests/engine/test_shell_lane.py`` 拿長方體的中心點原始值餵兩邊、逐位比對守著不走樣。
+    """
+    raw_row_sum = np.sum(raw, axis=1)
+    if np.any(raw_row_sum <= 0.0):
+        raise ValueError("形狀因子有無法正規化的空列")
+    original = raw / raw_row_sum[:, None]
+    exchange = areas[:, None] * original
+    balanced = (exchange + exchange.T) / 2.0
+    deviation = float(np.max(np.abs(np.sum(balanced, axis=1) - areas) / areas))
+    while True:
+        row_sum = np.sum(balanced, axis=1)
+        if np.any(row_sum <= 0.0):
+            raise ValueError("交換矩陣有無法平衡的空列")
+        scale = np.sqrt(areas / row_sum)
+        candidate = balanced * np.multiply.outer(scale, scale)
+        candidate_deviation = float(np.max(np.abs(np.sum(candidate, axis=1) - areas) / areas))
+        if not candidate_deviation < deviation:
+            break
+        balanced = candidate
+        deviation = candidate_deviation
+    return np.asarray(balanced / areas[:, None], dtype=np.float64)
 
 
 @dataclass(frozen=True)
@@ -171,7 +199,7 @@ def shell_late_geometry(
         patch_layer=np.asarray(faces.layer_of[owners[seen]], dtype=np.int64),
         areas=kept_areas,
         centroids=np.asarray(corners[seen].mean(axis=1), dtype=np.float64),
-        form_factors=_normalized_form_factors(raw, kept_areas),
+        form_factors=normalized_form_factors(raw, kept_areas),
         hidden_area_m2=hidden,
     )
 

@@ -21,11 +21,14 @@ from aosr.geometry.shell_faces import ShellFaces, shell_faces
 from aosr.geometry.shoebox import Point, Room
 from aosr.physics.amplitude import Materials
 from aosr.physics.geometric_lane import solve_geometric_lane
+from aosr.physics import late_energy
 from aosr.physics.late_energy import LateEnergyInputs, solve_late_energy_by_order
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.room_paths import image_source_paths
 from aosr.physics.shell_geometric_lane import prepare_shell_acoustics, solve_shell_geometric_lane
-from aosr.physics.shell_late_energy import shell_late_geometry, solve_shell_late_energy_by_order
+from aosr.physics.shell_late_energy import (
+    normalized_form_factors, shell_late_geometry, solve_shell_late_energy_by_order,
+)
 from aosr.physics.shell_paths import load_path_table, path_pressures, save_path_table, shell_path_table
 
 
@@ -287,3 +290,18 @@ def test_floor_to_ceiling_pillar_hides_the_floor_and_ceiling_under_it(settings: 
     leaked = geometry.form_factors[np.ix_(under, under)].sum() if under.any() else 0.0
     assert leaked == pytest.approx(0.0, abs=1e-12)
     assert geometry.hidden_area_m2 >= 8.0 - 1e-9
+
+
+def test_normalization_copy_matches_the_shoebox_lane_bit_for_bit() -> None:
+    """正規化那一段是從長方體那一路抄來的：同一份中心點原始值餵兩邊，結果要逐位相同。"""
+    patches = late_energy._patch_geometry(Room(L, W, H), 6)
+    displacement = patches.centroids[None, :, :] - patches.centroids[:, None, :]
+    distance_squared = np.sum(displacement * displacement, axis=-1)
+    valid = distance_squared > 1e-12
+    safe = np.where(valid, distance_squared, 1.0)
+    direction = displacement * np.where(valid, 1.0 / np.sqrt(safe), 0.0)[..., None]
+    cos_i = np.einsum("ik,ijk->ij", patches.normals, direction)
+    cos_j = np.einsum("jk,ijk->ij", patches.normals, -direction)
+    raw = cos_i * cos_j * patches.areas[None, :] / (np.pi * safe)
+    raw = np.where(valid & (raw > 0.0), raw, 0.0)
+    assert np.array_equal(normalized_form_factors(raw, patches.areas), late_energy._form_factors(patches))
