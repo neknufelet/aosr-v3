@@ -35,7 +35,7 @@ from aosr.config.construction_presets import ConstructionPreset, load_constructi
 from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.config.product_air import product_air_environment
-from aosr.materials.catalog_absorption import CatalogAbsorption, impedance_on_axis
+from aosr.materials.catalog_absorption import MAX_RANDOM_INCIDENCE_ABSORPTION, CatalogAbsorption, impedance_on_axis
 from aosr.materials.construction_models import (
     AirLayer,
     Assembly,
@@ -472,12 +472,16 @@ def _catalog_entry(surface: CatalogSurface, axis: tuple[float, ...], rho_c: floa
     表的點夠密、涵蓋整條產品軸，表內對數內插跟逐點反推只差內插誤差；表外（用不到）當硬面：
     底構造是 1 mm 空氣層加剛背，低頻阻抗遠大於 ρc。
     """
-    # 頻帶外是平的（延伸），只留最外那一點；頻帶中心都在取點上，所以頻帶內照常密取。
+    # 超過 Paris 頂點的手冊值會被夾掉、不再是那一格；硬面不該走到這裡，寧可整筆拒收也不默默換掉。
+    # 直接看手冊值本身：帶心不一定落在取點上，只看取到的點會漏。
+    if any(alpha > MAX_RANDOM_INCIDENCE_ABSORPTION for alpha in surface.absorption):
+        raise ValueError(f"catalog surface {surface.id!r} has absorption above the Paris peak; it would be clamped")
+    # 頻帶外是平的（延伸），只留最外那一點；頻帶內照常密取（內建頻帶都是標準八度帶，落在取點上）。
     low, high = surface.band_center_hz[0], surface.band_center_hz[-1]
     kept = (axis[0], *(f for f in axis if low <= f <= high), axis[-1])
     converted = impedance_on_axis(CatalogAbsorption(surface.id, surface.band_center_hz, surface.absorption), kept, rho_c)
     if any(converted.clamped):
-        # 夾到 Paris 頂點的值不是手冊那一格；硬面不該走到這裡，寧可整筆拒收也不默默換掉。
+        # 保險：取點上的內插值也不准被夾。
         raise ValueError(f"catalog surface {surface.id!r} has absorption above the Paris peak; it would be clamped")
     # 存檔與材料頁清單要讀得動：頻率留到 0.001 Hz、阻抗留到 0.1 Pa·s/m，遠小於表內內插的差。
     points = [{"frequency_hz": round(frequency, 3), "real_pa_s_m": round(value, 1)}
@@ -540,6 +544,17 @@ def template_assembly(entry: OptimizableEntry) -> Assembly:
 def initial_assembly(entry: TunableLayersEntry) -> Assembly:
     """可調多層構造初值排出來的剛背多層構造（位置規則由多層構造自己核）。"""
     return Assembly(layers=entry.layers, backing="rigid")
+
+
+def preview_material(entry: LibraryEntry) -> StandaloneSurface:
+    """拿一筆材料去算時用的牆面材料：可最佳化與可調多層取初值排法，背後要原牆的構造當剛背。"""
+    if isinstance(entry, TunableLayersEntry):
+        return initial_assembly(entry)
+    if isinstance(entry, OptimizableEntry):
+        return template_assembly(entry)
+    if isinstance(entry, ConstructionEntry):
+        return entry.preview_assembly()
+    return entry.surface_material()
 
 
 def load_user_library(path: Path) -> tuple[LibraryEntry, ...]:

@@ -39,7 +39,17 @@
       area.textContent = layer.area_m2.toFixed(2);
       const select = document.createElement("select");
       select.dataset.layer = layer.name;
-      data.choices.forEach((choice) => select.add(new Option(choice.label, choice.key)));
+      const groups = new Map();
+      data.choices.forEach((choice) => {
+        if (!choice.group) { select.add(new Option(choice.label, choice.key)); return; }
+        if (!groups.has(choice.group)) {
+          const group = document.createElement("optgroup");
+          group.label = choice.group;
+          groups.set(choice.group, group);
+          select.append(group);
+        }
+        groups.get(choice.group).append(new Option(choice.label, choice.key));
+      });
       pick.append(select);
       row.append(name, area, pick);
       return row;
@@ -109,12 +119,12 @@
   });
 
   $("run").addEventListener("click", async () => {
-    const absorption = {};
-    document.querySelectorAll("#layers select").forEach((select) => { absorption[select.dataset.layer] = select.value; });
+    const materials = {};
+    document.querySelectorAll("#layers select").forEach((select) => { materials[select.dataset.layer] = select.value; });
     $("run").disabled = true;
     try {
       const forModel = model.id;
-      const job = await call(`/api/room-models/${forModel}/runs`, {absorption});
+      const job = await call(`/api/room-models/${forModel}/runs`, {materials});
       if (!model || model.id !== forModel) return;  // 等回應時換了房
       $("state").textContent = job.display_text || "計算低頻中";
       stopPolling();

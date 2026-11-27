@@ -1,7 +1,12 @@
 /* 自訂房間頁（#1315）：左邊圖層清單、右邊模型圖；色塊對得上圖上的顏色。 */
-.model-grid{display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1.4fr);gap:1rem;align-items:start}
+.model-grid{display:grid;grid-template-columns:minmax(260px,1.4fr) minmax(300px,1fr);gap:1rem;align-items:start}
 .swatch{display:inline-block;width:.9rem;height:.9rem;border:1px solid #333;margin-right:.4rem;vertical-align:-.1rem}
 #problems{margin:.2rem 0 .6rem;padding-left:1.2rem}
 figure{margin:0}
 @media (max-width:760px){.model-grid{grid-template-columns:1fr}}
 #state{white-space:pre-line}
+/* 材料名很長：表格固定欄寬，下拉跟著欄寬走，不把右邊的模型圖擠掉。 */
+.model-grid table{width:100%;table-layout:fixed}
+.model-grid th:nth-child(1){width:30%}
+.model-grid th:nth-child(2){width:14%}
+#layers select{width:100%}

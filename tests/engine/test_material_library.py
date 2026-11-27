@@ -356,3 +356,15 @@ def test_catalog_surface_above_the_paris_peak_is_refused_not_clamped() -> None:
     loud = surfaces[0].model_copy(update={"absorption": (0.99, *surfaces[0].absorption[1:])})
     with pytest.raises(ValueError, match="clamped"):
         library._catalog_entry(loud, library._catalog_axis(table), load_physics_constants(config_path("physics_constants.toml")).rho_c)
+
+
+def test_catalog_surface_above_the_paris_peak_off_the_sampling_points_is_refused() -> None:
+    """帶心不在阻抗表取點上（235 Hz）也要拒收：檢查看手冊值本身，不看取到了哪些點。"""
+    table, surfaces = load_catalog_surfaces(config_path("catalog_surfaces.toml"))
+    axis = library._catalog_axis(table)
+    centres = (surfaces[0].band_center_hz[0], 235.0, *surfaces[0].band_center_hz[2:])
+    assert all(abs(f - 235.0) > 1.0 for f in axis)
+    loud = surfaces[0].model_copy(update={"band_center_hz": centres,
+                                          "absorption": (surfaces[0].absorption[0], 0.99, *surfaces[0].absorption[2:])})
+    with pytest.raises(ValueError, match="clamped"):
+        library._catalog_entry(loud, axis, load_physics_constants(config_path("physics_constants.toml")).rho_c)

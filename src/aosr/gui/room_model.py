@@ -4,7 +4,8 @@
 :mod:`aosr.reporting.room_shell_run` 子行程，用跟模態診斷同一個工作管理員起、查、停。
 
 上傳走 JSON（整站 POST 只收 JSON）：檔案內容放 base64。同一份檔用內容雜湊當代號，重傳不重存。
-吸音先只給幾檔「幾倍 ρc 的實數阻抗」，材料庫之後再接；ρc 由子行程照物理常數算，這裡不寫數字。
+每個圖層從材料庫（內建＋使用者）選一筆，或選硬牆；起算時把選到的那一筆材料原樣封進快照，
+子行程照同一份材料算垂直入射阻抗（:func:`aosr.physics.wall_surfaces.normal_impedance`）。
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import re
 from pathlib import Path
 
 import numpy as np
+from pydantic import ValidationError
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
@@ -25,28 +27,19 @@ from aosr.config.room_shell_import import RoomShellImportSettings, load_room_she
 from aosr.geometry.rhino_room import read_rhino_room
 from aosr.geometry.room_shell import RoomShell, check_room_shell
 from aosr.gui.jobs import JobManager
+from aosr.gui.material_editor import user_library_path
+from aosr.gui.material_surfaces import GROUP_SHORT_WORDS, placement
+from aosr.materials.library import LibraryEntry, builtin_entries, full_library
 from aosr.reporting.room_shell_picture import cutaway_svg, layer_color
 
-# 每一檔：代號、畫面上的字、阻抗是幾倍 ρc（None＝硬牆）。α 是垂直入射吸音率，由倍數算出來。
-ABSORPTION_RATIOS: tuple[tuple[str, float | None], ...] = (
-    ("hard", None), ("light", 10.0), ("medium", 4.0), ("strong", 2.0), ("full", 1.0))
+# 「硬牆」的選項代號：材料代號一定是小寫英文字母開頭，這個代號不會跟任何一筆材料撞到。
+HARD_KEY = "-"
 # 參考時間：florian-coder 上量的測試房（300 Hz 網格、94 點、單緒 PARDISO 333 秒＋模態 70 秒），只供畫面提示。
 REFERENCE_SECONDS = 420
 REFERENCE_LABEL = "測試房 70 m³ 在 florian-coder 上"
 _MODEL_ID = re.compile(r"[0-9a-f]{64}")
 _RUN_ID = re.compile(r"[0-9a-f]{32}")
 _BODY_ALLOWANCE = 64 * 1024
-
-
-def _choice_label(ratio: float | None) -> str:
-    if ratio is None:
-        return "硬牆"
-    alpha = 1.0 - ((ratio - 1.0) / (ratio + 1.0)) ** 2
-    return f"α {alpha:.2f}"
-
-
-def absorption_choices() -> list[dict[str, str]]:
-    return [{"key": key, "label": _choice_label(ratio)} for key, ratio in ABSORPTION_RATIOS]
 
 
 def _layer_areas(room: RoomShell) -> dict[str, float]:
@@ -71,6 +64,7 @@ def _preview(room: RoomShell, names: list[str]) -> str:
 class RoomModels:
     def __init__(self, data_dir: Path, runner: tuple[str, ...], engine_commit: str, capabilities: Path) -> None:
         self.models = data_dir / "room-models"
+        self.library_path = user_library_path(data_dir)
         self.models.mkdir(parents=True, exist_ok=True)
         self.settings: RoomShellImportSettings = load_room_shell_import_settings(config_path("room_shell_import.toml"))
         # 上傳那包 JSON 的上限：檔案上限換成 base64 的長度，再留一點給檔名與括號。超過就不往下讀。
@@ -80,6 +74,21 @@ class RoomModels:
         self.manager = JobManager(data_dir / "room-model-jobs", runner, engine_commit, capabilities,
                                   reference_seconds=REFERENCE_SECONDS, reference_label=REFERENCE_LABEL,
                                   result_url_template="/api/room-model-jobs/{run_id}")
+
+    def library(self) -> tuple[LibraryEntry, ...]:
+        """內建＋使用者材料；使用者檔讀不進來就只列內建（材料庫那一頁會講原因）。"""
+        try:
+            return full_library(self.library_path)
+        except (ValueError, ValidationError, OSError):
+            return builtin_entries()
+
+    def choices(self) -> list[dict[str, str]]:
+        """下拉選單：硬牆在最前，材料照「能用在哪」分組（組的順序同材料庫那一頁），組內照材料庫順序。"""
+        order = list(GROUP_SHORT_WORDS)
+        entries = sorted(self.library(), key=lambda entry: order.index(placement(entry).group))
+        return [{"key": HARD_KEY, "label": "硬牆", "group": ""},
+                *({"key": entry.id, "label": entry.label, "group": GROUP_SHORT_WORDS[placement(entry).group]}
+                  for entry in entries)]
 
     def upload(self, document: object) -> dict[str, object]:
         if not isinstance(document, dict) or not isinstance(document.get("data_base64"), str):
@@ -115,7 +124,7 @@ class RoomModels:
                 "problems": [{"text": p.text, "blocking": p.blocking} for p in report.problems],
                 "layers": [{"name": name, "area_m2": round(area[name], 2), "color": layer_color(i)}
                            for i, name in enumerate(names)],
-                "speakers": len(room.speakers), "choices": absorption_choices(),
+                "speakers": len(room.speakers), "choices": self.choices(),
                 "preview_svg": _preview(room, names)}
 
     def start(self, model_id: str, document: object) -> dict[str, object]:
@@ -128,14 +137,15 @@ class RoomModels:
         if not isinstance(summary, dict) or summary.get("ok") is not True:
             raise ValueError("這份模型沒過匯入檢查，不能算")
         layers = summary["layers"]
-        chosen = document.get("absorption") if isinstance(document, dict) else None
+        chosen = document.get("materials") if isinstance(document, dict) else None
         if not isinstance(chosen, dict) or not isinstance(layers, list) or set(chosen) != set(layers):
-            raise ValueError("每個圖層都要選一種吸音")
-        ratios = dict(ABSORPTION_RATIOS)
-        if any(not isinstance(value, str) or value not in ratios for value in chosen.values()):
-            raise ValueError("吸音選項無效：每個圖層給一個選項代號（字串）")
+            raise ValueError("每個圖層都要選一種材料")
+        entries = {entry.id: entry for entry in self.library()}
+        if any(not isinstance(value, str) or (value != HARD_KEY and value not in entries) for value in chosen.values()):
+            raise ValueError("材料選項無效：每個圖層給一個材料代號（字串），或硬牆")
         snapshot = {"model_path": str(self.models / model_id / "model.3dm"),
-                    "impedance_ratio_by_layer": {name: ratios[chosen[name]] for name in layers}}
+                    "material_by_layer": {name: None if chosen[name] == HARD_KEY
+                                          else entries[chosen[name]].model_dump(mode="json") for name in layers}}
         text = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
         earlier = self.started.get(text)
         if earlier is not None:
