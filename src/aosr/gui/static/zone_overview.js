@@ -774,15 +774,20 @@ async function applyMethod(items, method, written = () => {}) {
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
   const pickedNotes = new Set(results.filter(change => change.picked_entry ||
     (method.mode === "keep_original" && change.origin === "original_scheme")).map(change => change.note));
-  const unrestored = results.flatMap((change, index) => changes[index].choice === "original" && change.origin === "unknown"
-    ? [`${zoneWhereText(items[index])}：${change.note}`] : []);
-  const changed = items.length - same.length - unrestored.length;
+  const unrestored = results.flatMap((change, index) => {
+    if (changes[index].choice !== "original" || change.origin !== "unknown") return [];
+    const item = items[index];
+    const material = item.entry ? `「${item.entry.label}」` : "目前材料";
+    const backing = method.mode === "search" ? `。把${material}當作最佳化時背後的${faceWord(item.wall)}` : "";
+    return [`${zoneWhereText(item)}：${change.note}${backing}`];
+  });
+  const changed = items.length - same.length - (method.mode === "keep_original" ? unrestored.length : 0);
   zoneNote([...(preserve ? ["已套用最深設定，各區保留目前的做法"] : changed ? [`${changed} 區改成「${what}」`] : []), ...same.map(item => sameAsOriginalWords(item.wall, item.key)), ...pickedNotes, ...unrestored].join(" "), unrestored.length ? "notice" : "ok");
   unsaved = true;
   written();
   changing += 1; showChanging();
   try { await afterZoneChange(); } finally { changing -= 1; showChanging(); }
-  return !unrestored.length;
+  return method.mode !== "keep_original" || !unrestored.length;
 }
 // 一區照 method 改過之後的那一份（寫進去之前還要過 setZoneSetting 的收法）；套用與套用前的範圍檢查都用這一支。
 // change.same_as_original：指定貼的那一筆跟這一區原本的面一模一樣（伺服器放回原樣），做法跟著記成不貼。
@@ -821,10 +826,9 @@ function ruleMethod() {
 // 小框裡每一種材料現在的樣子：選中的每一區照草稿加減之後的清單（lists），加上每一種「選中的區裡幾區有」（count）。
 // ids：出現在任何一區清單裡的代號，照最先出現的順序。材料庫沒讀全、有一區列不出來時回 null。
 async function applyRule(method) {
-  ruleDraft = false;
   const followers = view.inferred.rule.zones;
   // 規則換成剛寫進去的那一種（那幾區現在的做法鍵）：做法一寫完就定下來，接著的每一次重畫都照它。
-  if (!await applyMethod(followers, method, () => { keptRuleZone = followers[0].id; })) renderZoneOverview();
+  if (!await applyMethod(followers, method, () => { ruleDraft = false; keptRuleZone = followers[0].id; })) renderZoneOverview();
 }
 async function resetSpecial() {
   const method = ruleMethod();
@@ -951,7 +955,8 @@ function plannedRanges(items, lists, edits) {
 // 等回覆時整頁鎖住（同 applyMethod 換材料那一步）。回 true＝可以套用。
 async function rangesPass(items, method) {
   const generation = zoneDesignGeneration;
-  const design = structuredClone(designForEdit());
+  const design = structuredClone(zoneDesign ?? freshZoneDesign());
+  design.zones ??= {};
   for (const item of items) {
     design.zones[item.wall] ??= {};
     design.zones[item.wall][item.key] = settledSetting(settingAfter(item, method), zoneSetting(item.wall, item.key).allowed);
@@ -1122,20 +1127,20 @@ function previewCandidates(items, raw) {
   if (zoneLimitsFresh() && zoneLimits.status === "checked" && edited === undefined &&
       !Object.keys(draft.ranges).length && !Object.keys(draft.ticks).length &&
       items.every((item, i) => zoneLimits.candidates?.[item.wall]?.[item.key] &&
-        item.mode === "search" && sameList(item.setting.allowed, raw.lists[i]))) {
+        item.mode === "search" && item.allowed && sameList(item.allowed, raw.lists[i]))) {
     candidatePreview = null;
     return {rows: items.map(item => zoneLimits.candidates[item.wall][item.key])};
   }
   const key = JSON.stringify(selections);
   if (candidatePreview?.key !== key || candidatePreview.library !== zoneLibrary) {
-    const previous = candidatePreview;
     const preview = {key, library: zoneLibrary};
     candidatePreview = preview;
     api("/api/zone-candidates", "POST", selections).then(rows => { preview.rows = rows; })
       .catch(error => { preview.problem = errorText(error); })
       .finally(() => {
         if (candidatePreview !== preview || !overviewOpen || draft?.mode !== "search") return;
-        if (preview.displayedPending || !$("zone-panel-list") || JSON.stringify(previous?.rows) !== JSON.stringify(preview.rows)) renderZoneOverview();
+        const painted = $("zone-panel-form")?.candidateRows;
+        if (preview.problem || preview.displayedPending || !painted || JSON.stringify(painted) !== JSON.stringify(preview.rows)) renderZoneOverview();
       });
   }
   return candidatePreview;
@@ -1943,7 +1948,7 @@ function panelCard() {
   card.append(header, content);
   const ruled = new Set(ruleZones(view.faces, view.roles).map(item => item.id));
   const sameAs = rule && items.every(item => ruled.has(item.id)) ? rule.mode : null;
-  const allPasted = items.every(item => item.pasted);
+  const canKeepMaterial = items.every(item => item.pasted || zoneMethodMode(item.method) === "fixed");
   const choose = (mode, materialId = "") => { draft = {...untouched(), ...draft, query: draft?.mode === mode ? draft.query : "", mode, materialId, modeChanged: true, materialChanged: Boolean(materialId), rangeRefused: ""}; markDraftEdited(); renderZoneOverview(); };
   // 套用鈕與它上面那一句「為什麼不能套用」：在小框裡打字（最深那一格）時就地更新這兩樣，不重畫整頁（重畫會換掉正在打的那一格）。
   const apply = button("zv-btn zv-main-btn", `套用到 ${items.length} 區`, "zone-panel-apply", () => action(applyDraft));
@@ -1951,18 +1956,18 @@ function panelCard() {
   const sync = () => {
     const why = draftProblem(items);
     const ticks = draft?.mode === "search" && panelTicks(items);
-    if (ticks && card.isConnected && !why) {
+    if (ticks && content.isConnected && !why) {
       const preview = previewCandidates(items, ticks);
-      if (preview.rows && JSON.stringify(preview.rows) !== JSON.stringify(card.querySelector("#zone-panel-form")?.candidateRows)) {
+      if (preview.rows && JSON.stringify(preview.rows) !== JSON.stringify(content.querySelector("#zone-panel-form")?.candidateRows)) {
         renderZoneOverview(); return;
       }
     }
-    if (ticks) for (const line of card.querySelectorAll("[data-range-entry]")) {
+    if (ticks) for (const line of content.querySelectorAll("[data-range-entry]")) {
       describeRange(line, items, ticks, libraryEntry(line.dataset.rangeEntry));
     }
     problem.textContent = why; problem.hidden = !why;
-    apply.disabled = !draft || (draft.mode === "fixed" && !draft.materialId && !allPasted) || Boolean(why);
-    if (card.isConnected) $("zone-result")?.replaceWith(resultBar(apply.disabled));
+    apply.disabled = !draft || (draft.mode === "fixed" && !draft.materialId && !canKeepMaterial) || Boolean(why);
+    if (content.isConnected) $("zone-result")?.replaceWith(resultBar(apply.disabled));
   };
   for (const [mode, label] of [["keep_original", "保留原樣"], ["fixed", "指定貼"], ["search", ZONE_MODE_WORDS.search]]) {
     const row = el("label", "zv-segment"); row.id = `zone-panel-option-${mode}`;
@@ -2002,7 +2007,7 @@ function panelCard() {
       const option = entry => materialRow({entry, name: entry ? vprWords(entry.label) + (entry.id === ruleMaterial && !sameHere ? "（＝其他牆面）" : "") : "照現在貼的，不換",
         description: entry && fixedDescription(entry), role: "radio", state: String(draft.materialId === (entry?.id ?? "")),
         id: `zone-panel-material-${entry?.id ?? ""}`, activate: () => choose("fixed", entry?.id ?? "")});
-      if (allPasted) material.append(option(null));
+      if (canKeepMaterial) material.append(option(null));
       const rows = assignableEntries().filter(entry => walls.every(wall => usableHere(entry, wall)) || entry.id === draft.materialId);
       materialFamilies(material, walls, rows.map(entry => [entry, option(entry)]));
       content.append(deepestRow(items, walls, sync), materialFilter(material), ...awayLines(items), material);
@@ -2470,7 +2475,15 @@ function renderZoneOverview() {
   const scrollZone = prior?.dataset.zones, scrollMode = prior?.dataset.mode;
   const panelScroll = prior?.querySelector(".zv-panel-body")?.scrollTop ?? 0;
   visibleCurves.disconnect(); pendingSparks.clear();
+  // 背景檢查回來時仍是同一組區，保留正在操作的面板或清單卡，只換這次算出的內容。
+  const cards = page.querySelectorAll("#zone-panel, .zv-search-group");
   page.replaceChildren(...parts);
+  for (const card of cards) {
+    const next = $(card.id);
+    if (!next || card.dataset.zones !== next.dataset.zones || card.dataset.mode !== next.dataset.mode) continue;
+    card.replaceChildren(...next.childNodes);
+    next.replaceWith(card);
+  }
   page.querySelectorAll(".zv-spark[data-curve]").forEach(chart => visibleCurves.observe(chart));
   const mapPane = page.querySelector(".zv-mapwrap");
   if (mapPane) mapPane.scrollTop = mapScroll;
