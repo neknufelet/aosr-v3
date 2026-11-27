@@ -58,6 +58,7 @@ from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gradient.depth_fit import ZoneRange, narrowed_family, ranged_misfits
 from aosr.gui.material_surfaces import legacy_replacement
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_construction import OriginalReader
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
@@ -378,9 +379,9 @@ def draft_symmetry(document: object, design_value: object,
     （:func:`plan_search` 的 ``pair=False``）、搜尋設定與 :class:`TieInputs`，只在有位置對上的兩區時才叫；
     它說開不了（:class:`PlanRefused`）時那幾對照那個原因算沒配成。"""
     try:
-        scheme = Scheme.model_validate(document)
-    except ValidationError:
-        return {"available": False, "partners": {}, "message": "方案還有沒填好的地方，先算不了哪幾區成對"}
+        scheme = checked_scheme(document)
+    except SchemeProblemsError as exc:
+        return {"available": False, "partners": {}, "message": exc.first_fix()}
     try:
         design = None if design_value is None else DesignSettings.model_validate(design_value)
     except ValidationError:

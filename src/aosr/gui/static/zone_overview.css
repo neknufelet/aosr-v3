@@ -441,8 +441,10 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page #elevation-original-line,#zone-page #elevation-depth-line{display:none}
 #zone-page .walls-row{position:sticky;top:0;z-index:2;align-items:center;gap:10px;padding:2px 0 8px;background:var(--paper)}
 #zone-page .zv-cut-title{font-size:17px}
-#zone-page #elevation-symmetry{margin:0}
-#zone-page #elevation-axis-words{display:none}
+#zone-page #elevation-symmetry{margin:0;display:grid;column-gap:.6rem;align-items:center}
+#zone-page #elevation-centre-axis{grid-column:2;grid-row:1}
+#zone-page #elevation-axis-words{grid-column:1/-1;grid-row:2}
+#zone-page #elevation-symmetry:has(#elevation-centre-axis[hidden]) #elevation-axis-words{display:none}
 #zone-page #elevation-clear,#zone-page .zv-cut-done{padding:5px 12px;border-radius:7px;font-size:14px}
 #zone-page #elevation-clear{background:white;color:var(--ink);border:1px solid #97aeb8;text-decoration:none}
 #zone-page .zv-cut-done{margin-left:auto;background:var(--ink);color:white}
