@@ -120,7 +120,7 @@ def test_the_list_does_not_say_no_cap_while_the_limits_are_unknown(tmp_path: Pat
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
         page.route("**/api/zone-limits", lambda route: held.append(route))
-        _open_scheme(page, "room109")
+        _open_scheme(page, "room109", checks_held=True)
         page.locator("#elevation-wall-x0").click()
         expect(page.locator("#elevation-depth")).to_have_text("總厚度上限：照房間 15 公分")
         what = page.locator("#wall-zone-what-x0-z1")
