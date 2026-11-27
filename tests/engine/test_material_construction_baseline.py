@@ -97,5 +97,10 @@ def assert_old_fields(actual: object, expected: object) -> None:
 def test_legacy_materials_match_pre_construction_main(tmp_path: Path) -> None:
     expected = json.loads(ANSWER.read_text(encoding="utf-8"))
     actual = artifacts(tmp_path)
-    assert_old_fields(actual.pop("listing"), expected.pop("listing"))
+    # #1323 只在內建清單裡多了文獻硬面那幾行（門、窗、木地板…）；拿掉它們，其餘每一行仍逐值相同、順序不變。
+    listing = actual.pop("listing")
+    catalog = {entry.id for entry in library.catalog_entries()}
+    assert isinstance(listing, dict) and isinstance(listing["materials"], list)
+    listing["materials"] = [row for row in listing["materials"] if row["entry"]["id"] not in catalog]
+    assert_old_fields(listing, expected.pop("listing"))
     assert actual == expected
