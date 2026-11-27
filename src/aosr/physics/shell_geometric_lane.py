@@ -109,19 +109,22 @@ def _scattering_table(prepared: ShellAcoustics, scattering_by_layer: Mapping[str
                       count: int) -> FloatArray:
     rows = _rows(scattering_by_layer or {}, prepared.faces.layers, count, "散射係數", MATERIAL_SCATTERING_DEFAULT_S)
     table = np.asarray([[value.real for value in row] for row in rows], dtype=np.float64)
-    if any(value.imag != 0.0 for row in rows for value in row) or bool(((table < 0) | (table > 1)).any()):
+    if (any(value.imag != 0.0 for row in rows for value in row) or not np.isfinite(table).all()
+            or bool(((table < 0) | (table > 1)).any())):
         raise ValueError("散射係數必須是 0 到 1 的實數")
     return table
 
 
 def _room_scattering(areas: FloatArray, impedance: ComplexArray, scattering: FloatArray, rho_c: float) -> FloatArray:
-    """同長方體那一路 ``_scattering_at`` 的加權：面積 × 垂直入射反射能量；全部一樣就是那一個值。"""
+    """同長方體那一路 ``_scattering_at`` 的加權與判斷順序：權重和為 0 回 0、全部一樣回那一個值、其餘照
+    面積 × 垂直入射反射能量加權。面積用晚期那邊留下來的（被板子蓋住、看不到的不算）。"""
     weights = areas[:, None] * np.abs((impedance - rho_c) / (impedance + rho_c)) ** 2
     denominator = weights.sum(axis=0)
     blended = np.divide((weights * scattering).sum(axis=0), denominator,
                         out=np.zeros_like(denominator), where=denominator != 0.0)
     same = (scattering == scattering[:1]).all(axis=0)
-    return np.asarray(np.where(same, scattering[0], blended), dtype=np.float64)
+    chosen = np.where(same, scattering[0], blended)
+    return np.asarray(np.where(denominator == 0.0, 0.0, chosen), dtype=np.float64)
 
 
 def _retained_by_path(paths: ShellPathTable, scattering: FloatArray) -> FloatArray:
@@ -178,7 +181,7 @@ def solve_shell_geometric_lane(
     absorption = np.asarray([absorption_rows[layer] for layer in prepared.faces.layers], dtype=np.float64)
     late_result = solve_shell_late_energy_by_order(prepared.late, absorption, frequencies_hz,
                                                    max_order=paths.max_order)
-    room_s = _room_scattering(prepared.faces.layer_areas(), impedance, scattering, rho_c_pa_s_per_m)
+    room_s = _room_scattering(prepared.late.layer_areas(), impedance, scattering, rho_c_pa_s_per_m)
     s_tuple = tuple(float(value) for value in room_s)
     late = tuple(value * float(ratio) for value, ratio in
                  zip(_late_share_energy(late_result.bands, s_tuple), power_ratio, strict=True))
