@@ -357,12 +357,16 @@ def _depth_problems(material: ComparisonMaterial, mode: ZoneMode, cap: DepthCap 
     return []
 
 
+def _default_candidates(targets: DepthTargets) -> tuple[str, ...]:
+    return (*(family.id for family in targets.settings.family), NONE_TARGET)
+
+
 def zone_targets(allowed: Sequence[str] | None, targets: DepthTargets) -> tuple[str, ...] | None:
     """一區可選的目標（引擎的寫法：家族代號、``fixed:<代號>``、none）：沒寫清單是全部家族加不貼；清單有不認識的代號回 None
     （開跑那邊照講拒收，這裡不猜）。"""
     families = {family.id for family in targets.settings.family}
     if allowed is None:
-        return (*(family.id for family in targets.settings.family), NONE_TARGET)
+        return _default_candidates(targets)
     found: list[str] = []
     for item in allowed:
         if item == NONE_TARGET or item in families:
@@ -510,7 +514,7 @@ def _design_of(value: object, scheme_id: str) -> tuple[DesignSettings | None, li
 
 def zone_limits(document: Mapping[str, object], design_value: object = None,
                 range_check: RangeCheck | None = None,
-                depth_targets: Callable[[], DepthTargets] | None = None) -> dict[str, object]:
+                depth_targets: Callable[[], DepthTargets] | None = None, *, include_candidate_rows: bool = False) -> dict[str, object]:
     """一份方案（草稿也可以）逐面逐區的限制檢查；回 ``zones``（牆 → 區 → 幾條）、``walls``（整面的）、``caps``（每區生效上限；
     搜尋區另有 ``targets``：每一組的生效上限與哪一條擋住）、``red``（擋下的條數）與 ``refusals``（擋下的每一條，給開跑與
     「拿去搜尋」照講）。``depth_targets`` 用來查裸構造的身分（即使沒有深度上限），也查固定區和搜尋區的深度、可調範圍。
@@ -554,7 +558,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             construction = catalog.construction(room, wall, key, entry, current, setting, lines)
             lines.extend(_depth_problems(current, mode, cap, catalog.required, construction=construction))
             if mode == "search":
-                catalog.record_candidates(wall, key, setting, cap)
+                catalog.record_candidates(wall, key, setting, cap, include_candidate_rows)
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
                 lines.extend(problems)
                 if lines_by_group:
@@ -588,12 +592,13 @@ class _ZoneCatalog:
     candidates: dict[str, dict[str, dict[str, object]]] = field(default_factory=dict)
     load_error: Problem | None = None
 
-    def record_candidates(self, wall: str, key: str, setting: ZoneDesign | None, cap: DepthCap | None) -> None:
-        if setting is None or not setting.allowed or self.targets is None:
+    def record_candidates(self, wall: str, key: str, setting: ZoneDesign | None, cap: DepthCap | None, include_candidate_rows: bool) -> None:
+        if setting is None or (setting.allowed is None and not include_candidate_rows) or self.targets is None:
             return
-        selection = CandidateSelection(allowed=setting.allowed, ranges=setting.ranges, cap=cap.value_m if cap else None)
+        allowed = setting.allowed if setting.allowed is not None else _default_candidates(self.targets)
+        selection = CandidateSelection(allowed=allowed, ranges=setting.ranges, cap=cap.value_m if cap else None)
         effective = effective_candidates(selection, self.targets)
-        if effective.allowed != setting.allowed:
+        if include_candidate_rows or effective.allowed != allowed:
             self.candidates.setdefault(wall, {})[key] = effective.model_dump()
 
     @cached_property
@@ -689,10 +694,11 @@ def zone_limit_routes(range_check: RangeCheck | None,
                       symmetry: Callable[[object, object], dict[str, object]] | None = None) -> list[Route]:
     """``POST /api/zone-limits``：收 ``{"scheme": 草稿, "design": 設計設定或 null}``，內容有問題一律回 200 照講。
     ``symmetry`` 給了就順便回左右對稱的配對（#1206，鍵 ``symmetry``；算法在 ``zone_symmetry``，網頁只照著畫）：
-    分區頁每次改動後本來就會問這一支，配對跟著同一份草稿、同一個世代號回來。"""
+    分區頁每次改動後本來就會問這一支，配對跟著同一份草稿、同一個世代號回來。
+    分區畫面傳 include_candidate_rows 取得每個搜尋區算好的候選；其他呼叫沿用只傳清單有變的區。"""
 
-    def judged(scheme: dict[str, object], design: object) -> dict[str, object]:
-        result = zone_limits(scheme, design, range_check, depth_targets)
+    def judged(scheme: dict[str, object], design: object, include_candidate_rows: bool) -> dict[str, object]:
+        result = zone_limits(scheme, design, range_check, depth_targets, include_candidate_rows=include_candidate_rows)
         refused = _draft_reference_only(scheme, design, depth_targets)
         if refused:
             result["reference_only"] = refused
@@ -707,7 +713,7 @@ def zone_limit_routes(range_check: RangeCheck | None,
             return JSONResponse({"error": "限制檢查的請求不是 JSON"}, status_code=400)
         if not isinstance(body, dict) or not isinstance(body.get("scheme"), dict):
             return JSONResponse({"error": "限制檢查的請求要有 scheme（整份方案）"}, status_code=400)
-        return JSONResponse(await run_in_threadpool(judged, body["scheme"], body.get("design")))
+        return JSONResponse(await run_in_threadpool(judged, body["scheme"], body.get("design"), body.get("include_candidate_rows") is True))
 
     async def candidates(request: Request) -> Response:
         if depth_targets is None:

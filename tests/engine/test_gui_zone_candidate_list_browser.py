@@ -338,3 +338,55 @@ def test_mixed_depth_axis_names_each_zone_and_limit(tmp_path: Path, browser: Bro
         expect(axis).to_contain_text("各區不同")
         expect(axis).to_contain_text("前牆 ① 左聲道喇叭後面那塊：12 cm")
         expect(axis).to_contain_text("前牆 ③ 主位正前方那塊：25 cm")
+
+
+def test_overlapping_depth_replies_update_the_visible_candidates(tmp_path: Path, browser: Browser) -> None:
+    choices = [WOOL, DEEP_MEMBER, INDEPENDENT, "none"]
+    _prepare(tmp_path, _design({"yL": {"z3": {"mode": "search", "allowed": choices, "max_depth_m": 0.2}}}))
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        toggle = page.locator("#zone-panel-candidates-only")
+        toggle.click()
+        expect(toggle).to_have_text("只看候選（3）")
+        expect(page.locator(f"#zone-panel-pick-{INDEPENDENT}")).to_be_checked()
+        # 兩份回覆均由真伺服器計算。先扣住已收到的結果，等兩次輸入完成，再依序交還面板。
+        page.evaluate("""() => {
+            const original = api;
+            window.releaseDepth = {};
+            api = async (path, method, body, headers) => {
+                const result = await original(path, method, body, headers);
+                if (path !== "/api/zone-candidates") return result;
+                return new Promise(resolve => { releaseDepth[body[0].cap] = () => resolve(result); });
+            };
+        }""")
+        depth = page.locator("#zone-panel-depth")
+        depth.fill("12")
+        depth.fill("13")
+        page.wait_for_function("() => Boolean(releaseDepth[0.12] && releaseDepth[0.13])")
+        page.evaluate("releaseDepth[0.12]()")
+        expect(toggle).to_have_text("只看候選（3）")
+        page.evaluate("releaseDepth[0.13]()")
+        expect(toggle).to_have_text("只看候選（2）")
+        expect(depth).to_have_value("13")
+        expect(page.locator("#zone-panel-search-from")).to_contain_text("2 種")
+        rows = page.locator("#zone-panel-list [role=checkbox]:visible")
+        assert rows.evaluate_all("els => els.map(el => el.id)") == ["zone-panel-pick-none", f"zone-panel-pick-{WOOL}"]
+
+
+def test_default_search_candidates_match_the_read_only_wall(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, _design({"yL": {"z3": {"mode": "search", "max_depth_m": 0.01}}}))
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-candidates-only").click()
+        expect(page.locator("#zone-panel-candidates-only")).to_have_text("只看候選（1）")
+        expect(page.locator("#zone-panel-list [role=checkbox]:visible")).to_have_count(1)
+        expect(page.locator("#zone-panel-pick-none")).to_be_checked()
+        page.locator("#zone-panel-cancel").click()
+        page.locator("#zone-page-close").click()
+        page.locator("#elevation-wall-yL").click()
+        expect(page.locator("#wall-zone-what-yL-z3")).to_contain_text("從 1 種裡挑（不貼）")
+        assert "allowed" not in page.evaluate("zoneSetting('yL', 'z3')")
