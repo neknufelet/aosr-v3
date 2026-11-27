@@ -1,6 +1,7 @@
 """本機單人網頁：輸入、驗證、存檔、2D 圖與獨立計算。"""
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import json
 import os
@@ -44,6 +45,7 @@ from aosr.gui.capability_view import capability_lists
 from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.home_view import home_routes
+from aosr.gui.room_model import RoomModels, room_model_routes
 from aosr.gui.labels import label_tables
 from aosr.gui.material_curves import material_curve_routes, range_check
 from aosr.gui.material_editor import material_routes
@@ -56,7 +58,7 @@ from aosr.gui.zone_limits import zone_limit_routes
 from aosr.gui.zone_modes import zone_material_routes
 from aosr.gui.zone_result_routes import ZoneResultDeps, zone_result_routes
 from aosr.gui.scheme_archive import SchemeArchive
-from aosr.gui.plan_view import plan_for
+from aosr.gui.plan_view import out_of_room_scheme, plan_for
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
@@ -86,10 +88,11 @@ STANDING_TEXT = {
     ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
 }
-STATIC_NAMES = {"material-tuning.js", "app.js", "home.js", "walls.js", "elevation.js", "zone_names.js", "zone_modes.js", "zone_limits.js", "zone_rules.js", "zone_overview.js", "zone_overview.css", "measured.js", "results.js", "compare.js", "plan.js",
+STATIC_NAMES = {"material-tuning.js", "app.js", "home.js", "room_facts.js", "wall_section.js", "walls.js", "elevation.js", "zone_names.js", "zone_modes.js", "zone_limits.js", "check_state.js", "zone_rules.js", "zone_overview.js", "zone_overview.css", "measured.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
-                "material-ui.js", "material-designer.js", "material-designer.css", "material-cutaway.js", "material-kind.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css"}
+                "material-ui.js", "material-designer.js", "material-designer.css", "material-cutaway.js", "material-kind.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css",
+                "room_model.js", "room_model.css"}
 
 
 def repo_root() -> Path:
@@ -106,6 +109,7 @@ class GuiSettings:
     data_dir: Path = Path.home() / "room-acoustic-data"
     runner: tuple[str, ...] | None = None
     modal_runner: tuple[str, ...] | None = None
+    room_model_runner: tuple[str, ...] | None = None
     # 另外准許的網址主機名：從自己其他 Tailscale 裝置直接連進來時，瀏覽器帶的是這台的 Tailscale 名字；預設空的＝只認本機。
     extra_hosts: tuple[str, ...] = ()
     # 連線來源只准這幾個網段；空的＝不看來源（只聽 127.0.0.1 時外面本來就連不進來）。
@@ -285,6 +289,8 @@ class GuiHandlers:
         self.archive_delete = ArchiveDelete(self.scheme_archive)
         modal_runner = settings.modal_runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "modal")
         self.modal_jobs = ModalJobs(self.data_dir, modal_runner, settings.engine_commit, capabilities_path)
+        room_model_runner = settings.room_model_runner or (sys.executable, "-m", "aosr.reporting.room_shell_run")
+        self.room_models = RoomModels(self.data_dir, room_model_runner, settings.engine_commit, capabilities_path)
         self.gradient = GradientJobs(self.data_dir, launcher=settings.gradient_launcher or SystemdLauncher(),
                                      engine_commit=settings.engine_commit, capabilities=capabilities_path,
                                      scheme_lock=self.jobs._lock, settings_path=settings.gradient_settings)
@@ -444,7 +450,13 @@ class GuiHandlers:
 
     async def schemes(self, request: Request) -> Response:
         # 要拿工作鎖的路由放到執行緒等鎖：結果清單在執行緒裡持鎖慢讀時，主迴圈不能卡在這裡（#796）。
-        return JSONResponse({"schemes": await run_in_threadpool(self._scheme_names)})
+        saved_at = await run_in_threadpool(self._scheme_times)
+        return JSONResponse({"schemes": sorted(saved_at), "saved_at": saved_at})
+
+    def _scheme_times(self) -> dict[str, float]:
+        with self.jobs._lock:
+            return {path.stem: path.stat().st_mtime for path in (self.data_dir / "schemes").glob("*.json")
+                    if SAFE_ID.fullmatch(path.stem)}
 
     def _scheme_names(self) -> list[str]:
         with self.jobs._lock:
@@ -518,7 +530,9 @@ class GuiHandlers:
                         plan = plan_for(Scheme.model_validate(document), self.directivity, mark_blockers=True)
                         data.update(plan=plan, problems=plan_problems(problems, document, plan))
                     except ValueError:
-                        pass
+                        # 座標跑出房間也照樣帶圖（#1265）：超出的點列在 outside_keys、圖上標紅；問題清單照舊，不另判擋路。
+                        with contextlib.suppress(ValueError):
+                            data["plan"] = plan_for(out_of_room_scheme(document), self.directivity)
                     return JSONResponse(data, status_code=422)
                 return JSONResponse({**plan_for(Scheme.model_validate(document), self.directivity),
                                      "message": "檢查通過"})
@@ -676,7 +690,7 @@ class GuiHandlers:
                 label = f"「{item.scheme_id}」" if item else "這一筆結果"
                 if item and item.finished_text != "讀不出":
                     label += f"（{item.finished_text} 算完）"
-                message = (f"已搬回{label}；在結果清單可以查看" if restore else
+                message = (f"已搬回{label}；在「算過的結果與比較」裡可以查看" if restore else
                            f"已封存{label}；在下面「已封存」可以搬回")
                 return JSONResponse({"message": message})
         except ResultMoveConflict as exc:
@@ -932,6 +946,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/modal-jobs/{run_id}/stop", handlers.modal_job, methods=["POST"]),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
         *material_routes(handlers.data_dir, handlers.gradient.search_settings), *material_curve_routes(),
+        *room_model_routes(handlers.room_models, STATIC),
         *zone_result_routes(ZoneResultDeps(handlers.data_dir, handlers.jobs, handlers.capabilities, handlers.directivity,
             handlers.startup_physics_identity, handlers._server_stale, handlers._updated_response, handlers._load_result)),
     ])
