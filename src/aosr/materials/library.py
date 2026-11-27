@@ -476,12 +476,16 @@ def _catalog_entry(surface: CatalogSurface, axis: tuple[float, ...], rho_c: floa
     low, high = surface.band_center_hz[0], surface.band_center_hz[-1]
     kept = (axis[0], *(f for f in axis if low <= f <= high), axis[-1])
     converted = impedance_on_axis(CatalogAbsorption(surface.id, surface.band_center_hz, surface.absorption), kept, rho_c)
+    if any(converted.clamped):
+        # 夾到 Paris 頂點的值不是手冊那一格；硬面不該走到這裡，寧可整筆拒收也不默默換掉。
+        raise ValueError(f"catalog surface {surface.id!r} has absorption above the Paris peak; it would be clamped")
     # 存檔與材料頁清單要讀得動：頻率留到 0.001 Hz、阻抗留到 0.1 Pa·s/m，遠小於表內內插的差。
     points = [{"frequency_hz": round(frequency, 3), "real_pa_s_m": round(value, 1)}
               for frequency, value in zip(converted.frequencies_hz, converted.impedance_pa_s_per_m, strict=True)]
     bands = "、".join(f"{band:g} Hz {alpha:g}" for band, alpha in zip(surface.band_center_hz, surface.absorption, strict=True))
     conditions = (f"手冊無規入射頻帶吸音率（{bands}），以 Paris 公式反推的實數阻抗；不是阻抗管量測，沒有虛部。"
-                  f"表外當硬面。出處：{surface.source}")
+                  f"{low:g} Hz 以下、{high:g} Hz 以上平延伸最近一帶的值（估計，不是量的）；"
+                  f"頻帶之間在表點上反推、表點之間阻抗內插，跟逐點反推最多差約 2%。表外當硬面。出處：{surface.source}")
     return FixedEntry.model_validate({
         "kind": "fixed", "id": surface.id, "label": surface.label, "provenance": "literature",
         "source": surface.source, "links": surface.links, "notes": surface.notes,

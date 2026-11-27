@@ -50,13 +50,13 @@ REFUSAL = "材料「鋼板 VPR（自編）」（steel_vpr）是可調 VPR：還�
 # 主線 aff9e22e 的產品程式上 artifacts(…, with_vpr=False) 每一樣的（SHA-256, 位元組數）；樹外
 # baseline/ 存的是同一批位元組。
 PINNED: dict[str, tuple[str, int]] = {
-    "builtin.json": ("b7de97094246945d3eba8b83015b595192f04e2cf7c7bbce0239b0808bbab4aa", 118332),
+    "builtin.json": ("cbb101fb6bd246d43ae1b917e976baf091c88d932d9b9d8f6ecad0df9c26de81", 120491),
     "user_library.json": ("dfdbb6d69d52d79dd1a35fba1fe62c7644e5554c713c4ab27ed5f7f7cc99f9d5", 3181),
     "snapshot_v1.json": ("cbb87d20d9335d04fdb1ca08f78cc054b44109ad28faaa5210fcb955e8ed9477", 1014),
     "snapshot_v2.json": ("a8711bcf8dc5580f4eef70b9bcf86b776077d82d7a689bc8235359c6306595a2", 2461),
     "search_materials.json": ("e779070cfddb3dd095b23eccd93655df06388c0126cbdd516be17038fd76916c", 10428),
     "plan.json": ("6a743d091e87f5d333f25931f2f7cf106ee90a99dc49ccc1e4d490b253adb831", 2442),
-    "api_materials_rows.json": ("4dec81f122e1319b075705e1d1ae99def3c55ab1606e8ae202eaabc33e726664", 138226),
+    "api_materials_rows.json": ("ec195188b52381ba79c391ffa107eda946c366a3a5645e85b253094f1ef6885e", 140385),
     "api_materials_old_kind_labels.json": ("3bcd2f32eaaaca4e02ca9633ab80d1fefabdabb428e044fb335d78b9c32bdf8c", 69),
     "api_materials_rest.json": ("f39da21a44d281354d0469e793177a77a8bbfab3f07550becfa307983d10391d", 14634),
     "api_zone_limits.json": ("c481a05b047016e09044d100b8b184b0eade65002be412f7b7c596cefb0081ff", 3446),

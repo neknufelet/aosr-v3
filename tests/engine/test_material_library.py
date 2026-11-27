@@ -307,13 +307,30 @@ def test_fixed_surface_distinguishes_standalone_material_from_a_family() -> None
     assert library.fixed_surface(_ENTRY.validate_python(_optimizable())) is None
 
 
+# 手冊原表（pyroomacoustics 材料資料庫，與 PTB 同源），125 Hz 起逐八度；另抄一份釘在這裡，設定檔抄錯一格就紅。
+HANDBOOK_ALPHA = {
+    "door_wood_solid": (0.14, 0.10, 0.06, 0.08, 0.10, 0.10, 0.10),
+    "glass_single_3mm": (0.08, 0.04, 0.03, 0.03, 0.02, 0.02, 0.02),
+    "glass_double_gap30": (0.15, 0.05, 0.03, 0.03, 0.02, 0.02, 0.02),
+    "wood_floor_on_joists": (0.18, 0.12, 0.10, 0.09, 0.08, 0.07, 0.07),
+    "wood_floor_on_sleepers": (0.09, 0.06, 0.05, 0.05, 0.05, 0.04),
+    "gypsum_double_13mm_stud": (0.15, 0.10, 0.06, 0.04, 0.04, 0.05, 0.05),
+    "plasterboard_ceiling": (0.20, 0.15, 0.10, 0.08, 0.04, 0.02),
+    "brick_rendered": (0.01, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04),
+    "brick_painted": (0.01, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02),
+    "concrete_smooth": (0.01, 0.01, 0.02, 0.02, 0.02, 0.05, 0.05),
+    "concrete_floor": (0.01, 0.03, 0.05, 0.02, 0.02, 0.02, 0.02),
+    "hard_surface_average": (0.02, 0.02, 0.03, 0.03, 0.04, 0.05, 0.05),
+}
+
+
 def test_catalog_surfaces_reproduce_their_handbook_absorption_at_each_band() -> None:
     """文獻硬面（門、窗、木地板、石膏板、磚、混凝土）：換成阻抗表後，在每個頻帶中心用 Paris 公式正算回去，
     等於手冊那一格；頻帶外平坦延伸，最低頻帶以下各點都等於最低頻帶那一格。"""
     table, surfaces = load_catalog_surfaces(config_path("catalog_surfaces.toml"))
     entries = {e.id: e for e in library.catalog_entries()}
     rho_c = load_physics_constants(config_path("physics_constants.toml")).rho_c
-    assert list(entries) == [s.id for s in surfaces] and len(surfaces) >= 6
+    assert list(entries) == [s.id for s in surfaces] == list(HANDBOOK_ALPHA)
     for surface in surfaces:
         entry = entries[surface.id]
         assert (entry.label, entry.provenance, entry.source) == (surface.label, "literature", surface.source)
@@ -323,7 +340,19 @@ def test_catalog_surfaces_reproduce_their_handbook_absorption_at_each_band() -> 
         rows = {round(point.frequency_hz, 3): point.real_pa_s_m for point in material.points}
         assert material.points[0].frequency_hz <= table.lowest_hz * 2 ** (1 / table.points_per_octave)
         assert material.points[-1].frequency_hz >= table.highest_hz / 2 ** (1 / table.points_per_octave)
-        for band, alpha in zip(surface.band_center_hz, surface.absorption, strict=True):
+        alphas = HANDBOOK_ALPHA[surface.id]
+        assert surface.absorption == alphas, surface.id
+        assert surface.band_center_hz == tuple(125.0 * 2.0**k for k in range(len(alphas))), surface.id
+        assert "Hz 以下" in material.source_and_conditions and "平延伸" in material.source_and_conditions
+        for band, alpha in zip(surface.band_center_hz, alphas, strict=True):
             back = random_incidence_absorption(rows[band] / rho_c)
             assert back == pytest.approx(alpha, abs=1e-4), (surface.id, band)
         assert material.points[0].real_pa_s_m == rows[surface.band_center_hz[0]]
+
+
+def test_catalog_surface_above_the_paris_peak_is_refused_not_clamped() -> None:
+    """手冊值超過 Paris 頂點會被夾掉、不再是那一格；整筆拒收，不默默換值。"""
+    table, surfaces = load_catalog_surfaces(config_path("catalog_surfaces.toml"))
+    loud = surfaces[0].model_copy(update={"absorption": (0.99, *surfaces[0].absorption[1:])})
+    with pytest.raises(ValueError, match="clamped"):
+        library._catalog_entry(loud, library._catalog_axis(table), load_physics_constants(config_path("physics_constants.toml")).rho_c)
