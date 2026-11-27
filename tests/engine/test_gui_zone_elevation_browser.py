@@ -29,7 +29,9 @@ def _write(tmp_path: Path, document: dict[str, object]) -> None:
 def _open_scheme(page: Page, name: str) -> None:
     open_scheme(page, name)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
-    page.wait_for_function("!document.querySelector('main').inert")
+    # 跟共用的開範例那一步同一個「開好了」：整頁沒鎖、忙碌旗也落下（打開後的圖面檢查回來會重畫立面圖；
+    # 11-27 雲端一次在重畫途中量喇叭記號，量到已拆掉的舊圖、回 None）。
+    page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
     # 以前這裡接著展開舊做法表（#1176 第 C 支）；#1265 單元 3 之二第二趟舊做法表拆了，打開方案就是全部。
 
 
@@ -38,12 +40,14 @@ def _zones(page: Page, wall: str) -> list[dict[str, object]]:
 
 
 def _centre_x(page: Page, selector: str) -> float:
+    expect(page.locator(selector)).to_be_visible()
     box = page.locator(selector).bounding_box()
     assert box is not None
     return box["x"] + box["width"] / 2
 
 
 def _centre_y(page: Page, selector: str) -> float:
+    expect(page.locator(selector)).to_be_visible()
     box = page.locator(selector).bounding_box()
     assert box is not None
     return box["y"] + box["height"] / 2
