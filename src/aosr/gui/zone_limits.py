@@ -137,6 +137,13 @@ class DepthCap:
     # 背後換成材料庫一筆時那一筆的總深（#1330）：``value_m`` 已經扣掉它，是前面那幾層能用的深度；沒換是 0。
     backing_m: float = 0.0
 
+    def to_json(self) -> dict[str, object]:
+        """分區檢查回給畫面的那一格；背後換過才多一格 ``backing_m``（沒換的逐位同舊版）。"""
+        found: dict[str, object] = {"value_m": self.value_m, "level": self.level, "words": self.words()}
+        if self.backing_m > 0:
+            found["backing_m"] = self.backing_m
+        return found
+
     def words(self) -> str:
         if self.backing_m > 0:
             return f"{self.value_m:g} 公尺（{LEVEL_WORDS[self.level]}的上限扣掉背後 {self.backing_m:g} 公尺）"
@@ -593,8 +600,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             material = _material(entry.get("material"))
             cap = front_cap(design, wall, key, material)
             if cap is not None and mode != "keep_original":
-                caps.setdefault(wall, {})[key] = {"value_m": cap.value_m, "level": cap.level, "words": cap.words(),
-                                                  **({"backing_m": cap.backing_m} if cap.backing_m > 0 else {})}
+                caps.setdefault(wall, {})[key] = cap.to_json()
             current = folded if folded is not None else material
             lines = found.setdefault(key, [])
             construction = catalog.construction(room, wall, key, entry, current, setting, lines)

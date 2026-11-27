@@ -52,7 +52,7 @@ def _vpr() -> Doc:
 
 
 def _room() -> Doc:
-    document = cast(Doc, zone_document())
+    document = zone_document()
     document["scheme_id"] = "room"
     scene = cast(Doc, document["scene"])
     scene.update(room_m={"Lx": 6.4, "Ly": 4.3, "Lz": 2.85}, low_frequency_axis=LowFrequencyAxis.SEARCH.value)
@@ -71,7 +71,7 @@ class _Gui:
         self.client = TestClient(create_app(settings), base_url="http://127.0.0.1")
 
     def call(self, method: str, url: str, body: object = None, code: int = 200) -> Doc:
-        response = self.client.request(method, url, **({"json": body} if body is not None else {}))
+        response = self.client.request(method, url, json=body)
         assert response.status_code == code, (url, response.status_code, response.json())
         return cast(Doc, response.json())
 
