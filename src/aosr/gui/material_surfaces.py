@@ -80,8 +80,8 @@ def _location(entry: LibraryEntry) -> tuple[SurfaceGroup, tuple[str, ...], str]:
         what = "固定阻抗" if isinstance(material, ConstantImpedance) else "實測表"
         floor = any(term in text.lower() for text in (entry.id, entry.label) for term in ("carpet", "floor", "地板", "地毯"))
         # 名字同時講牆與地板（例如「一般硬牆面（磚、粉刷、硬地板平均）」）：六面都能用。
-        surfaces = (*WALLS, "ceiling", "floor") if floor and "牆" in entry.label else ("floor",) if floor else (*WALLS, "ceiling")
-        return ("surface_itself", surfaces, f"它本身就是一整面的表面阻抗（{what}），只能整面換掉，不是貼上去的")
+        faces = (*WALLS, "ceiling", "floor") if floor and "牆" in entry.label else ("floor",) if floor else (*WALLS, "ceiling")
+        return ("surface_itself", faces, f"它本身就是一整面的表面阻抗（{what}），只能整面換掉，不是貼上去的")
     backing = material.backing if material is not None else None  # 可最佳化材料沒有背後這一格
     if backing == "air":
         return ("door_window", WALLS, "背後是空氣（兩邊都是空氣），是門、窗這類東西，不是貼在牆上的")
