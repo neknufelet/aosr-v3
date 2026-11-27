@@ -87,7 +87,10 @@ def _rows(values: Mapping[str, LayerImpedance] | Mapping[str, LayerScattering], 
     rows: list[list[complex]] = []
     for layer in layers:
         value = values.get(layer, default)
-        row = [complex(value)] * count if isinstance(value, (int, float, complex)) else [complex(v) for v in value or ()]
+        if value is None:
+            raise ValueError(f"圖層「{layer}」的{what}是空的")
+        cells = np.ravel(np.asarray(value))
+        row = [complex(cells[0])] * count if np.ndim(value) == 0 else [complex(v) for v in cells]
         if len(row) != count:
             raise ValueError(f"圖層「{layer}」的{what}有 {len(row)} 格，頻點有 {count} 個")
         rows.append(row)

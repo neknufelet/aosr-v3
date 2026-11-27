@@ -239,3 +239,51 @@ def test_owner_test_room_path_table(settings: RoomShellImportSettings) -> None:
         assert np.all(table.dist_m[1:] > table.dist_m[0])
         assert np.all((table.bounce_cos[table.bounce_layer >= 0] > 0) & (table.bounce_cos[table.bounce_layer >= 0] <= 1))
     assert counts == [([1, 6, 18, 34], 86), ([1, 6, 17, 32], 119)]
+
+
+def _l_shaped_room() -> RoomShell:
+    """6×4×3 公尺扣掉 x≥3、y≥2 那一角的 L 形外殼（不是凸的），法線朝內。"""
+    outline = [(0.0, 0.0), (6.0, 0.0), (6.0, 2.0), (3.0, 2.0), (3.0, 4.0), (0.0, 4.0)]
+    fan = [(outline[0], outline[i], outline[i + 1]) for i in range(1, len(outline) - 1)]
+    triangles = []
+    for a, b, c in fan:
+        triangles.append(LayerTriangle("floor", (a[0], a[1], 0.0), (b[0], b[1], 0.0), (c[0], c[1], 0.0)))
+        triangles.append(LayerTriangle("ceiling", (a[0], a[1], H), (c[0], c[1], H), (b[0], b[1], H)))
+    for index, (p, q) in enumerate(zip(outline, outline[1:] + outline[:1], strict=True)):
+        low_p, low_q, high_q, high_p = (p[0], p[1], 0.0), (q[0], q[1], 0.0), (q[0], q[1], H), (p[0], p[1], H)
+        triangles.extend((LayerTriangle(f"w{index}", low_p, high_q, low_q),
+                          LayerTriangle(f"w{index}", low_p, high_p, high_q)))
+    return RoomShell("m", tuple(triangles), (), (), ())
+
+
+def test_points_outside_a_non_convex_room_are_refused(settings: RoomShellImportSettings) -> None:
+    """審查抓到的：L 形房的聲源放在牆外、貼在牆上、或放進缺掉的那一角，都要擋下，不能默默算。"""
+    faces = _faces(_l_shaped_room(), settings)
+    assert not faces.shell_convex
+    table = shell_path_table(faces, (1.0, 1.0, 1.2), (4.5, 1.0, 1.1), max_order=2, tol_m=TOL)
+    assert table.path_count > 1
+    for outside in ((-0.2, 1.0, 1.2), (0.0, 1.0, 1.2), (4.5, 3.0, 1.2)):
+        with pytest.raises(ValueError, match="不在房間裡面"):
+            shell_path_table(faces, outside, (1.0, 1.0, 1.1), max_order=1, tol_m=TOL)
+
+
+def test_thin_panel_on_a_wall_keeps_its_own_reflection(settings: RoomShellImportSettings) -> None:
+    """審查抓到的：4 毫米薄板貼在 y=0 牆上，在共平面界線（5 毫米）以內也不准跟牆併成一面，板子正面的反射要在。"""
+    panel = Solid("薄板", tuple(_box((1.0, 0.0, 0.5), (5.0, 0.004, 2.5), 1, inward=False,
+                                     names={wall: "Panel" for wall in IMPEDANCE})))
+    faces = _faces(_shoebox_shell(2, (panel,)), settings)
+    table = shell_path_table(faces, SOURCE, RECEIVER, max_order=1, tol_m=TOL)
+    first = [faces.layers[int(layer)] for layer in table.bounce_layer[table.order == 1, 0]]
+    assert "Panel" in first
+
+
+def test_floor_to_ceiling_pillar_hides_the_floor_and_ceiling_under_it(settings: RoomShellImportSettings) -> None:
+    """審查抓到的：落地頂天的柱子，柱底下的地板與柱頂上的天花板彼此看得到是漏能量；它們要整片看不到任何一格。"""
+    pillar = _cloud((2.0, 1.0, 0.0), (4.0, 3.0, H), "柱子")
+    faces = _faces(_shoebox_shell(1, (pillar,)), settings)
+    geometry = shell_late_geometry(faces)
+    under = ((geometry.centroids[:, 0] > 2.0) & (geometry.centroids[:, 0] < 4.0) & (geometry.centroids[:, 1] > 1.0)
+             & (geometry.centroids[:, 1] < 3.0) & ((geometry.centroids[:, 2] < 1e-9) | (geometry.centroids[:, 2] > H - 1e-9)))
+    leaked = geometry.form_factors[np.ix_(under, under)].sum() if under.any() else 0.0
+    assert leaked == pytest.approx(0.0, abs=1e-12)
+    assert geometry.hidden_area_m2 >= 8.0 - 1e-9

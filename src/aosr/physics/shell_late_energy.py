@@ -91,24 +91,25 @@ def _midpoint_samples(corners: FloatArray, splits: int) -> FloatArray:
 
 
 def _blocked_samples(points: FloatArray, a: IntArray, b: IntArray, live: IntArray, pair_box: FloatArray,
-                     per_pair: int, occluders: Occluders, tol_m: float) -> BoolArray:
+                     per_pair: int, planes: tuple[IntArray, IntArray], occluders: Occluders, tol_m: float) -> BoolArray:
     """``live`` 那幾對取樣點的連線被不被擋。
 
     先用「兩格合起來的外接盒」跟每一組擋的三角形的外接盒比：兩格之間的連線全都在這個盒子裡，
-    盒子碰不到的那一組一定擋不到，就不必一條一條比（答案不變、只是快）。
+    盒子碰不到的那一組一定擋不到，就不必一條一條比（答案不變、只是快）。兩格自己所在的平面不拿來擋。
     """
     blocked = np.zeros(len(live), dtype=np.bool_)
     pair_of = live // per_pair
-    for group, box in zip(occluders.groups, occluders.boxes, strict=True):
+    first, second = planes
+    for group, box, plane in zip(occluders.groups, occluders.boxes, occluders.planes, strict=True):
         overlap = ((pair_box[:, 0] <= box[1] + tol_m) & (pair_box[:, 1] >= box[0] - tol_m)).all(axis=1)
-        test = np.flatnonzero(overlap[pair_of] & ~blocked)
+        test = np.flatnonzero(overlap[pair_of] & ~blocked & (first[pair_of] != plane) & (second[pair_of] != plane))
         if len(test):
             blocked[test] = segments_hit_triangles(points[a[live[test]]], points[b[live[test]]], group, tol_m)
     return blocked
 
 
 def _raw_form_factors(corners: FloatArray, samples: FloatArray, normals: FloatArray, areas: FloatArray,
-                      occluders: Occluders, tol_m: float) -> FloatArray:
+                      patch_planes: IntArray, occluders: Occluders, tol_m: float) -> FloatArray:
     """多點積分的原始形狀因子：``F_ij ≈ Σ_a Σ_b (1/n)·(A_j/n)·cosθ_a·cosθ_b/(π r²)``，被擋的那一對不算。"""
     count, per_patch, _ = samples.shape
     points = samples.reshape(-1, 3)
@@ -134,7 +135,9 @@ def _raw_form_factors(corners: FloatArray, samples: FloatArray, normals: FloatAr
         if occluders.groups and len(live):
             pair_box = np.stack((np.minimum(patch_box[pi, 0], patch_box[pj, 0]),
                                  np.maximum(patch_box[pi, 1], patch_box[pj, 1])), axis=1)
-            kernel[live[_blocked_samples(points, a, b, live, pair_box, per_patch * per_patch, occluders, tol_m)]] = 0.0
+            hidden = _blocked_samples(points, a, b, live, pair_box, per_patch * per_patch,
+                                      (patch_planes[pi], patch_planes[pj]), occluders, tol_m)
+            kernel[live[hidden]] = 0.0
         contribution = (kernel * weight[b] / np.pi).reshape(len(pi), -1).sum(axis=1)
         np.add.at(raw, (pi, pj), contribution)
     return raw
@@ -158,7 +161,7 @@ def shell_late_geometry(
     corners, owners = split_longest_edge(faces.corners, np.arange(len(faces.corners), dtype=np.int64), patch_edge_m)
     areas = triangle_areas(corners)
     raw = _raw_form_factors(corners, _midpoint_samples(corners, splits), _patch_normals(corners), areas,
-                            faces.occluders, tol_m)
+                            faces.plane_of[owners], faces.occluders, tol_m)
     seen = raw.sum(axis=1) > 0.0
     hidden = float(areas[~seen].sum())
     raw = raw[np.ix_(seen, seen)]
