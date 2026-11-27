@@ -374,6 +374,8 @@ def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -
             result = f"{frame.names[wall]}切成 {len(cuts[wall]['zones'])} 區，{frame.names[other]}仍是{remaining}"
         return {**reply, "reason": result, "message": result, "single_wall": True, "source_edit": editing}
     if not _follow_mirror(change, frame, shape, partner):
+        if change.before is None and partner and not preview:
+            return {**source_only(), "paired": partner, "left_wall": axis.left}
         return source_only()
     destination, u, v = frame.mirrored(shape)
     target = cast(WallName, destination)
@@ -384,7 +386,10 @@ def _try_mirror(body: ZoneCut, change: MirrorChange, *, preview: bool = False) -
         return {**reply, "centred": True}
     if change.after and (refused := frame.mirror_refusal(shape)):
         return {**source_only(refused[1]), "reason": refused[1], "refusal": refused[0]}
-    return _cut_partner(body, change, source, partners, partner, target, u, v, preview=preview)
+    reply = _cut_partner(body, change, source, partners, partner, target, u, v, preview=preview)
+    if not preview and (reply.get("paired") or reply.get("completed")):
+        reply["left_wall"] = axis.left
+    return reply
 
 
 def _cut_partner(body: ZoneCut, change: MirrorChange, source: list[CutBox], partners: dict[str, str],

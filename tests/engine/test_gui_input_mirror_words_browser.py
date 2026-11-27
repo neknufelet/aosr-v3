@@ -59,7 +59,7 @@ def test_the_mirror_sentence_says_where_the_mirror_is(tmp_path: Path, browser: B
     document = _mirror_room(middle)
     axis = _axis(document)
     assert axis.front == "x0" and axis.left == "y0" and axis.centred is (middle == WIDTH / 2)
-    where = "" if axis.centred else "；不在正中，左右牆不跟著畫"  # #1265 說明字瘦身：在正中不多講
+    where = "" if axis.centred else "；不在正中"  # #1265 說明字瘦身：在正中不多講
     _write(tmp_path, document)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
@@ -250,6 +250,56 @@ def _complete_window_frame(page: Page) -> None:
     assert (mirror["u_m"], mirror["v_m"]) == (source["u_m"], source["v_m"])
 
 
+@pytest.mark.parametrize("undo", [False, True], ids=["cut", "undo-clear"])
+def test_delete_pair_before_limits_reply(tmp_path: Path, browser: Browser, undo: bool) -> None:
+    frame = ("z1", (1.35, 2.7), (0.45, 1.55))
+    _write(tmp_path, symmetry_document({"y0": [frame], "yL": [frame]} if undo else {}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, NAME)
+        page.locator("#elevation-wall-y0").click()
+        _settled(page)
+        if undo:
+            # 清掉左牆後，先收下「右框落單」的完整配對表。復原切法時這張表就過期了。
+            with page.expect_response("**/api/zone-limits"):
+                page.locator("#elevation-clear").click()
+            _settled(page)
+            assert _zones(page, "y0")[0]["area"] == "whole_wall"
+        held: list[Route] = []
+        page.route("**/api/zone-limits", lambda route: held.append(route))
+        with page.expect_request("**/api/zone-limits"):
+            if undo:
+                page.locator("#elevation-undo-clear").click()
+                page.locator("#elevation [data-zone-id=z1] > rect").click()
+            else:
+                with page.expect_response("**/api/zone-cut") as cut:
+                    _drag(page, LENGTH, HEIGHT, (1.15, 0.45), (2.45, 1.55))
+                assert cut.value.json()["paired"] == "yL@z1"
+        opposite = _drawn(page, "yL")
+        assert set(opposite) == {"z1"}
+        field = reveal(page, "#speaker-left-x")
+        with page.expect_response("**/api/plan") as invalid:
+            field.fill("")
+            field.press("Tab")
+        assert invalid.value.status == 422
+        assert held
+        with page.expect_response("**/api/zone-cut") as deleted:
+            page.locator("#elevation-delete").click()
+        try:
+            edit = "只改了選取的框，另一邊沒跟著改" if undo else "只改了左牆，右牆沒跟著改"
+            warning = edit + "：先改左聲道喇叭 x 座標：空著沒填"
+            assert deleted.value.json()["message"] == warning
+            expect(page.locator("#elevation-banner")).to_have_text(warning)
+            payload = deleted.value.request.post_data_json
+            assert isinstance(payload, dict)
+            assert payload["mirror"].get("previous_pair") == (None if undo else "left")
+            assert _zones(page, "y0")[0]["area"] == "whole_wall"
+            assert _drawn(page, "yL") == opposite
+        finally:
+            page.unroute("**/api/zone-limits")
+            _release(held)
+
+
 @pytest.mark.parametrize("delete", [False, True], ids=["move", "delete"])
 def test_invalid_draft_reports_side_edit(tmp_path: Path, browser: Browser, delete: bool) -> None:
     frame = ("paired", (1.25, 2.65), (0.4, 1.6))
@@ -294,7 +344,7 @@ def test_changing_placement_expires_centring_in_both_views(tmp_path: Path, brows
             field = reveal(page, "#" + name)
             field.fill(value)
             field.press("Tab")
-        expect(page.locator("#elevation-axis-words")).to_have_text("鏡子：喇叭中線，離左牆 1.85 公尺；不在正中，左右牆不跟著畫")
+        expect(page.locator("#elevation-axis-words")).to_have_text("鏡子：喇叭中線，離左牆 1.85 公尺；不在正中")
         expect(page.locator("body")).not_to_contain_text("已置中", use_inner_text=True)
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-symmetry").get_by_text("鏡子不在正中，左牆 4 區、右牆 1 區，各自切區。", exact=True)).to_be_visible()

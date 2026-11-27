@@ -278,6 +278,7 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
       remapZoneDesign(face, cut.inherited);
       resizeProblems.delete(face);
     }
+    if (Object.keys(changes).length) rememberCutPair(wall, payload.mirror, data);
     // 修法的「改前」要用套用切牆之後牆上的那一塊（新畫的框這時才在清單裡）。
     const repair = mirror ? data.repairs?.[0] : null;
     if (repair) {
@@ -375,13 +376,29 @@ function trackDrag(svg, event, move, complete, cancelled = () => {}) {
 function symmetryResult() {
   return window.zoneSymmetry.isOn() && zoneLimitsFresh() ? zoneLimits.symmetry : null;
 }
+function mirrorLayout() {
+  return JSON.stringify(Object.keys(views).map(drawnBoxes));
+}
+function rememberCutPair(wall, change, data) {
+  if (!change?.after) return;
+  const source = wall + "@" + change.after.id, partner = data.paired || data.completed;
+  if (!partner) {
+    if (change.previous_pair !== "unpaired") return;
+    // 已確認落單的框單面改尺寸後，只有現場確實沒有第二個候選框，才能繼續記它落單。
+    // 地板與天花只映回同面，直牆則可能映回同面或同軸的另一面。
+    const parallel = Object.keys(views).filter(face => face[0] === wall[0]);
+    if (parallel.some(face => drawnBoxes(face).some(box => face !== wall || box.id !== change.after.id))) return;
+  }
+  const partners = partner ? {[source]: partner, [partner]: source} : {[source]: null};
+  lastMirror.set(scheme, {layout: mirrorLayout(), partners, left: data.left_wall, complete: false});
+}
 function previousPair(wall, id) {
   const last = lastMirror.get(scheme);
-  if (!last) return;
-  const other = last.partners?.[`${wall}@${id}`]?.split("@")[0];
-  if (!other) return "unpaired";
+  if (!last || last.layout !== mirrorLayout()) return;
+  const key = wall + "@" + id, other = last.partners[key]?.split("@")[0];
   if (other === wall) return "same_wall";
-  return wall === last.axis.left ? "left" : "right";
+  if (other) return wall === last.left ? "left" : "right";
+  if (last.complete || Object.hasOwn(last.partners, key)) return "unpaired";
 }
 function mirrorBox(wall, box) {
   const result = symmetryResult();
@@ -714,12 +731,14 @@ function inputAxisWords(result) {
   // 不寫「正在確認」，講尺寸沒填好（#1265 單元 3 之二收尾第二趟 B4 之二；用語同上面那一行「先把房間的長、寬、高都填好正數」）。
   const distance = distanceFromLeft(axis);
   if (!distance) return "先把房間的長、寬、高都填好正數，才算得出鏡子在哪";
-  return `鏡子：喇叭中線，離左牆 ${distance} 公尺` + (axis.centred ? "" : "；不在正中，左右牆不跟著畫");
+  return `鏡子：喇叭中線，離左牆 ${distance} 公尺` + (axis.centred ? "" : "；不在正中");
 }
 // 開關底下那一句（renderElevation 畫；限制檢查失敗之後又問一次時 zone_limits.js 只重寫這一句，見 window.refreshAxisWords）。
 function refreshAxisControl() {
   const on = window.zoneSymmetry.isOn(), result = symmetryResult();
-  if (result?.axis) lastMirror.set(scheme, result);
+  if (result?.axis && lastMirror.get(scheme)?.partners !== result.partners) {
+    lastMirror.set(scheme, {layout: mirrorLayout(), partners: result.partners, left: result.axis.left, complete: true});
+  }
   const sideOnly = elevationWall && result?.axis && !result.axis.centred && result.projections[elevationWall][0] !== elevationWall;
   const title = $("elevation-panel").closest("#zone-page") ? "左右對稱" : "兩邊一起畫";
   $("elevation-symmetry-title").textContent = sideOnly ? `${title}（只切${wallNames[elevationWall]}）` : title;

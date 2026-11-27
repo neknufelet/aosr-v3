@@ -422,7 +422,7 @@ def test_side_wall_offers_one_centring_action(tmp_path: Path, browser: Browser) 
     with _room(tmp_path, browser, wall="x0") as page:
         _drag(page, 5.5, H, START, END)
         _settled(page)
-        expect(page.locator("#elevation-axis-words")).to_have_text("鏡子：喇叭中線，離左牆 2.45 公尺；不在正中，左右牆不跟著畫")
+        expect(page.locator("#elevation-axis-words")).to_have_text("鏡子：喇叭中線，離左牆 2.45 公尺；不在正中")
         page.get_by_role("button", name="將喇叭與座位一起置中").click()
         _settled(page)
         expect(page.locator("#elevation-axis-words")).to_contain_text("2.60")
