@@ -192,6 +192,53 @@ def test_panel_back_against_the_wall_is_hidden(settings: RoomShellImportSettings
     assert np.allclose(geometry.form_factors.sum(axis=1), 1.0, rtol=0, atol=1e-9)
 
 
+def test_flush_panel_also_hides_the_wall_it_covers(settings: RoomShellImportSettings) -> None:
+    """1×1 公尺貼牆板：背面 1 m² 加上被蓋住的牆 1 m² 都不算（只要有一個取樣點看得到就算整格的舊寫法只扣 1.375）。"""
+    panel = _cloud((0.0, 1.0, 1.0), (0.1, 2.0, 2.0), "板子")
+    geometry = shell_late_geometry(_faces(_shoebox_shell(1, (panel,)), settings))
+    assert geometry.hidden_area_m2 == pytest.approx(2.0, abs=0.1)
+
+
+def _panel_with_back(back: str) -> Solid:
+    names = {wall: "Panel" for wall in IMPEDANCE} | {"x0": back}
+    return Solid("板子", tuple(_box((0.0, 1.0, 1.0), (0.1, 2.0, 2.0), 1, inward=False, names=names)))
+
+
+def test_scattering_of_a_layer_nobody_sees_does_not_move_the_room_average(settings: RoomShellImportSettings) -> None:
+    """板子背面（整片貼牆、晚期已剔掉）換散射係數，全房平均散射與晚期能量都不動。"""
+    prepared = prepare_shell_acoustics(_shoebox_shell(2, (_panel_with_back("Back"),)), SOURCE, RECEIVER, settings,
+                                       reflection_order_k=1)
+    impedance = IMPEDANCE | {"Panel": 3000.0 + 0j, "Back": 3000.0 + 0j}
+    lanes = [solve_shell_geometric_lane(prepared=prepared, source_model=OMNI, sound_speed_m_s=C,
+                                        rho_c_pa_s_per_m=RHO_C, frequencies_hz=FREQUENCIES,
+                                        impedance_by_layer=impedance,
+                                        scattering_by_layer={layer: 0.0 for layer in impedance} | {"Back": value})
+             for value in (0.0, 1.0)]
+    assert lanes[0].scattering == lanes[1].scattering == (0.0,) * len(FREQUENCIES)
+    assert lanes[0].late_energy == lanes[1].late_energy
+
+
+def test_fully_absorbing_room_scattering_is_zero_like_the_box_lane(settings: RoomShellImportSettings) -> None:
+    """每一面阻抗都等於 ρc（完全不反射）：權重和為 0，跟長方體那一路一樣回 0，不是那個共同的散射值。"""
+    prepared = prepare_shell_acoustics(_shoebox_shell(), SOURCE, RECEIVER, settings, reflection_order_k=1)
+    lane = solve_shell_geometric_lane(prepared=prepared, source_model=OMNI, sound_speed_m_s=C, rho_c_pa_s_per_m=RHO_C,
+                                      frequencies_hz=FREQUENCIES, impedance_by_layer={k: RHO_C for k in IMPEDANCE},
+                                      scattering_by_layer={k: 0.7 for k in IMPEDANCE})
+    old = solve_geometric_lane(source_model=OMNI, room=Room(L, W, H), source=Point(*SOURCE),
+                               receiver=Point(*RECEIVER), sound_speed_m_s=C, rho_c_pa_s_per_m=RHO_C,
+                               frequencies_hz=FREQUENCIES, impedance_by_wall={k: RHO_C for k in IMPEDANCE},
+                               scattering_by_wall={k: 0.7 for k in IMPEDANCE}, reflection_order_k=1)
+    assert lane.scattering == old.scattering == (0.0,) * len(FREQUENCIES)
+
+
+def test_nan_scattering_is_refused(settings: RoomShellImportSettings) -> None:
+    prepared = prepare_shell_acoustics(_shoebox_shell(), SOURCE, RECEIVER, settings, reflection_order_k=1)
+    with pytest.raises(ValueError, match="散射係數"):
+        solve_shell_geometric_lane(prepared=prepared, source_model=OMNI, sound_speed_m_s=C, rho_c_pa_s_per_m=RHO_C,
+                                   frequencies_hz=FREQUENCIES, impedance_by_layer=IMPEDANCE,
+                                   scattering_by_layer={k: 0.1 for k in IMPEDANCE} | {"floor": math.nan})
+
+
 def test_scattering_follows_each_bounce_material(settings: RoomShellImportSettings) -> None:
     """只有天花板散射 0.5、其他 0：鏡面那一路每條路徑留下 √0.5 的天花板次數次方。"""
     prepared = prepare_shell_acoustics(_shoebox_shell(), SOURCE, RECEIVER, settings, reflection_order_k=2)
