@@ -31,7 +31,7 @@ from aosr.geometry.room_shell import MAIN_SEAT, check_room_shell
 from aosr.geometry.room_shell_mesh import ShellMesh, generate_room_shell_mesh
 from aosr.materials.library import LibraryEntry, preview_material
 from aosr.physics.fem_shell import assemble_shell_operators, rigid_mode_frequencies, solve_shell_responses
-from aosr.physics.wall_surfaces import normal_impedance
+from aosr.physics.layer_impedance import normal_impedance
 from aosr.reporting.room_shell_picture import cutaway_svg
 from pydantic import TypeAdapter
 

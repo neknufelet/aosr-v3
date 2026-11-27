@@ -158,36 +158,29 @@ def wall_normal_impedances(
     if any(not math.isfinite(v) or v <= 0 for v in (density_kg_m3, sound_speed_m_s)):
         raise ValueError("場景密度與聲速必須是有限正數")
     result: dict[Wall, float | None | tuple[complex, ...]] = {}
+    environment = None
     for wall in Wall.all():
-        try:
-            result[wall], notes = normal_impedance(materials_by_wall[wall], frequencies_hz, density_kg_m3=density_kg_m3,
-                                                   sound_speed_m_s=sound_speed_m_s)
-        except ValueError as exc:
-            raise ValueError(f"{wall.wall_name()}：{exc}") from exc
-        if notes is not None:
+        material = materials_by_wall[wall]
+        if material is None:
+            result[wall] = None
+        elif isinstance(material, ConstantImpedance):
+            result[wall] = material.impedance_pa_s_m
+        else:
+            import jax.numpy as jnp
+            from aosr.materials.construction import surface_impedance
+
+            if environment is None:
+                environment = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+            air, ranges = environment
+            try:
+                values, notes = surface_impedance(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
+                                                   air=air, ranges=ranges)
+            except ValueError as exc:
+                raise ValueError(f"{wall.wall_name()}：{exc}") from exc
             merge_construction_notes(notes_by_wall, wall, notes)
+            # 先整排轉成 numpy 再交出 Python 複數：位元相同，免得一格一格向 JAX 取值。
+            result[wall] = tuple(np.asarray(values, dtype=np.complex128).tolist())
     return result
-
-
-def normal_impedance(
-    material: SurfaceMaterial | None, frequencies_hz: tuple[float, ...], *, density_kg_m3: float, sound_speed_m_s: float,
-) -> tuple[float | None | tuple[complex, ...], tuple[ConstructionNote, ...] | None]:
-    """一面的垂直入射 Z(f,0°)：固定值保留原 float，None 表整軸剛性；構造另回物理的提醒（固定值與剛性回 None）。
-
-    六面牆與自訂房間的每個圖層共用這一支；構造直接在此軸雙精度求值、不內插。
-    """
-    if material is None:
-        return None, None
-    if isinstance(material, ConstantImpedance):
-        return material.impedance_pa_s_m, None
-    import jax.numpy as jnp
-    from aosr.materials.construction import surface_impedance
-
-    air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
-    values, notes = surface_impedance(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
-                                      air=air, ranges=ranges)
-    # 先整排轉成 numpy 再交出 Python 複數：位元相同，免得一格一格向 JAX 取值。
-    return tuple(np.asarray(values, dtype=np.complex128).tolist()), notes
 
 
 def wall_path_impedances(

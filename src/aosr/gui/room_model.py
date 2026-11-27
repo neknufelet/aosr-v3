@@ -5,7 +5,7 @@
 
 上傳走 JSON（整站 POST 只收 JSON）：檔案內容放 base64。同一份檔用內容雜湊當代號，重傳不重存。
 每個圖層從材料庫（內建＋使用者）選一筆，或選硬牆；起算時把選到的那一筆材料原樣封進快照，
-子行程照同一份材料算垂直入射阻抗（:func:`aosr.physics.wall_surfaces.normal_impedance`）。
+子行程照同一份材料算垂直入射阻抗（:func:`aosr.physics.layer_impedance.normal_impedance`）。
 """
 from __future__ import annotations
 
