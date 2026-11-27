@@ -22,6 +22,7 @@
 
   function showModel(data) {
     model = data;
+    Object.assign($("model").dataset, {id: data.id, ok: String(data.ok)});  // 高音那一支（room_model_high.js）讀這兩格
     $("model").hidden = false;
     $("result").hidden = true;
     $("problems").replaceChildren(...data.problems.map((p) => {

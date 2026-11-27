@@ -150,6 +150,25 @@ def _directivity(prepared: ShellAcoustics, source_model: SourceModelSpec,
     return np.asarray(factors, dtype=np.float64), np.asarray(two_parameter_power_ratio(frequencies_hz, curve))
 
 
+def scattered_path_pressures(
+    *,
+    prepared: ShellAcoustics,
+    sound_speed_m_s: float,
+    rho_c_pa_s_per_m: float,
+    frequencies_hz: tuple[float, ...],
+    impedance_by_layer: Mapping[str, LayerImpedance],
+    scattering_by_layer: Mapping[str, LayerScattering] | None = None,
+) -> ComplexArray:
+    """每條路徑每個頻點留在鏡面的聲壓（全向聲源）：路徑聲壓乘 ``Π_b √(1−s_b)``。第 0 列是直達。"""
+    if not frequencies_hz:
+        raise ValueError("frequencies_hz 不可為空")
+    count = len(frequencies_hz)
+    impedance = _impedance_table(prepared, impedance_by_layer, count)
+    scattering = _scattering_table(prepared, scattering_by_layer, count)
+    pressure = path_pressures(prepared.paths, impedance, rho_c_pa_s_per_m, sound_speed_m_s, np.asarray(frequencies_hz))
+    return np.asarray(pressure * _retained_by_path(prepared.paths, scattering), dtype=np.complex128)
+
+
 def solve_shell_geometric_lane(
     *,
     prepared: ShellAcoustics,

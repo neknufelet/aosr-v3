@@ -118,7 +118,8 @@ class RoomModels:
                 "speakers": len(room.speakers), "choices": absorption_choices(),
                 "preview_svg": _preview(room, names)}
 
-    def start(self, model_id: str, document: object) -> dict[str, object]:
+    def snapshot_text(self, model_id: str, document: object) -> str:
+        """驗過的計算快照（模型檔路徑、每個圖層的阻抗倍數）；低頻與高音兩種計算共用同一份。"""
         if _MODEL_ID.fullmatch(model_id) is None:
             raise ValueError("模型代號無效")
         summary_path = self.models / model_id / "summary.json"
@@ -136,7 +137,10 @@ class RoomModels:
             raise ValueError("吸音選項無效：每個圖層給一個選項代號（字串）")
         snapshot = {"model_path": str(self.models / model_id / "model.3dm"),
                     "impedance_ratio_by_layer": {name: ratios[chosen[name]] for name in layers}}
-        text = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+        return json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+
+    def start(self, model_id: str, document: object) -> dict[str, object]:
+        text = self.snapshot_text(model_id, document)
         earlier = self.started.get(text)
         if earlier is not None:
             try:
