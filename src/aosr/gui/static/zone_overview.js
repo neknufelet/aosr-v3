@@ -491,7 +491,7 @@ function chosenItems() { return selected.map(id => view.byId.get(id)).filter(Boo
 // depthText：「最深」那一格打的字（公分；沒動過是 null）；depthBad：打的不成數字；
 // ranges：範圍格子打的字（材料代號 → {porous: [從, 到], cavity: [從, 到]}，棉厚是下拉的值、空腔是公分，沒動過的那一格是 null）；
 // rangeRefused：套用前伺服器判範圍紅的那幾句（改了任何一格就清掉）。
-function untouched() { return {materialChanged: false, ticks: {}, history: [], expanded: [], query: null, notice: "", order: null, depthText: null, depthBad: false, ranges: {}, rangeRefused: ""}; }
+function untouched() { return {modeChanged: false, materialChanged: false, ticks: {}, history: [], expanded: [], query: null, notice: "", order: null, depthText: null, depthBad: false, ranges: {}, rangeRefused: ""}; }
 // 面板一打開先點在哪一項：選到的區是同一種做法就點那一項（指定貼的：貼的都是同一筆才帶出那一筆），不一樣就都不點。
 function startingDraft() {
   const items = chosenItems();
@@ -545,7 +545,10 @@ async function pick(next, toggled = null) {
     selected = next; followed = followers;
     const message = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區";
     const discarded = draft.notice === message || Object.keys(draft.ticks).length || Object.keys(draft.ranges).length;
-    draft = {...untouched(), mode: draft.mode, materialChanged: draft.materialChanged, materialId: draft.materialId, depthText: draft.depthText, depthBad: draft.depthBad};
+    const inheritDepth = draft.depthText !== null && !draft.modeChanged && !discarded;
+    const common = inheritDepth ? startingDraft() : draft;
+    draft = {...untouched(), mode: common?.mode ?? null, modeChanged: draft.modeChanged, materialChanged: draft.materialChanged,
+             materialId: common?.materialId ?? "", depthText: draft.depthText, depthBad: draft.depthBad};
     if (discarded) draft.notice = message;
     renderZoneOverview(); return;
   }
@@ -715,7 +718,8 @@ async function applyMethod(items, method, written = () => {}) {
   const generation = zoneDesignGeneration;
   const drafted = items.find(item => measuredDrafts[item.wall]);
   if (drafted) { zoneNote(`${wallNames[drafted.wall]}有還沒套用的實測阻抗草稿：先套用或取消`, "notice"); return false; }
-  const changes = items.filter(() => method.mode !== "fixed" || method.materialId).map(item => method.mode === "fixed"
+  const preserve = method.mode === null;
+  const changes = items.filter(() => !preserve && (method.mode !== "fixed" || method.materialId)).map(item => method.mode === "fixed"
     ? {wall: item.wall, zone: item.key, choice: "fixed", material_id: method.materialId} : {wall: item.wall, zone: item.key, choice: "original"});
   let results = [];
   if (changes.length) {
@@ -754,6 +758,14 @@ async function applyMethod(items, method, written = () => {}) {
   // 「選的跟原本一樣」那一區自己寫為什麼（第 2 段右欄那一區底下，#1265 單元 3 之二第二趟）：這一次選到一樣的記下選的那一筆，
   // 其餘這一次改到的區拿掉（再改做法、選別的就不寫）。
   items.forEach((item, index) => {
+    if (preserve) {
+      if (zoneMethodMode(item.method) !== "keep_original" && method.depth !== undefined) {
+        const next = {...item.setting};
+        if (method.depth === null) delete next.max_depth_m; else next.max_depth_m = method.depth;
+        setZoneSetting(item.wall, item.key, next);
+      }
+      return;
+    }
     if (method.mode === "keep_original" && results[index]?.origin === "unknown") return;
     setZoneSetting(item.wall, item.key, settingAfter(item, method, results[index]));
     if (same.includes(item)) rememberSameAsOriginal(item.wall, item.key, libraryEntry(method.materialId).label);
@@ -761,15 +773,16 @@ async function applyMethod(items, method, written = () => {}) {
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
   const pickedNotes = new Set(results.filter(change => change.picked_entry ||
-    (method.mode === "keep_original" && ["unknown", "original_scheme"].includes(change.origin))).map(change => change.note));
-  const unknown = method.mode === "keep_original" ? results.filter(change => change.origin === "unknown").length : 0;
-  const changed = items.length - same.length - unknown;
-  zoneNote([...(changed ? [`${changed} 區改成「${what}」`] : []), ...same.map(item => sameAsOriginalWords(item.wall, item.key)), ...pickedNotes].join(" "), unknown ? "notice" : "ok");
+    (method.mode === "keep_original" && change.origin === "original_scheme")).map(change => change.note));
+  const unrestored = results.flatMap((change, index) => changes[index].choice === "original" && change.origin === "unknown"
+    ? [`${zoneWhereText(items[index])}：${change.note}`] : []);
+  const changed = items.length - same.length - unrestored.length;
+  zoneNote([...(preserve ? ["已套用最深設定，各區保留目前的做法"] : changed ? [`${changed} 區改成「${what}」`] : []), ...same.map(item => sameAsOriginalWords(item.wall, item.key)), ...pickedNotes, ...unrestored].join(" "), unrestored.length ? "notice" : "ok");
   unsaved = true;
   written();
   changing += 1; showChanging();
   try { await afterZoneChange(); } finally { changing -= 1; showChanging(); }
-  return true;
+  return !unrestored.length;
 }
 // 一區照 method 改過之後的那一份（寫進去之前還要過 setZoneSetting 的收法）；套用與套用前的範圍檢查都用這一支。
 // change.same_as_original：指定貼的那一筆跟這一區原本的面一模一樣（伺服器放回原樣），做法跟著記成不貼。
@@ -987,7 +1000,7 @@ async function applyDraft() {
   const items = chosenItems();
   if (draft.mode !== "search") {
     const method = {mode: draft.mode, materialId: draft.materialChanged ? draft.materialId : ""};
-    if (method.mode === "fixed") method.depth = draftDepth(items);
+    if (method.mode === "fixed" || method.mode === null) method.depth = draftDepth(items);
     return applyMethod(items, method, () => select([]));
   }
   // 由程式最佳化：只寫選中的區。每一區寫它自己的清單照動過的勾加減之後的那一份；勾都沒動、那一區本來就是由程式最佳化，
@@ -1095,12 +1108,12 @@ function caseDepth(item, edited) {
 // 逐區原勾選留在設計檔。顯示與開跑取同一支伺服器判斷；晚到的回覆不能蓋過新草稿。
 let candidatePreview = null;
 function previewCandidates(items, raw) {
-  if (!raw.ids.some(id => libraryEntry(id)?.preset_members?.length)) {
+  const edited = draftDepth(items);
+  if (!raw.ids.some(id => libraryEntry(id)?.preset_members?.length) && items.every(item => !Number.isFinite(caseDepth(item, edited)))) {
     candidatePreview = null;
     return {rows: raw.lists.map(allowed => ({allowed, covered: {}}))};
   }
   const ranges = plannedRanges(items, raw.lists, rangeEdits(items, raw).edits ?? new Map());
-  const edited = draftDepth(items);
   const selections = items.map((item, index) => ({
     allowed: raw.lists[index], ranges: ranges ? ranges.get(item.id) : item.ranges,
     cap: caseDepth(item, edited)
@@ -1339,11 +1352,13 @@ function describeRange(line, items, ticks, entry) {
   const edited = draftDepth(items);
   const selecting = items.filter((item, i) => ticks.lists[i].includes(entry.id));
   const applicable = selecting.length ? selecting : items.filter(item => fitsHere(entry.id, item.wall));
-  const zoneLimit = Math.min(...applicable.map(item => caseDepth(item, edited)));
+  const zoneCaps = applicable.map(item => caseDepth(item, edited));
+  const mixed = new Set(zoneCaps).size > 1;
+  const zoneLimit = Math.min(...zoneCaps);
   if (!selecting.length) Object.assign(pairs, page);
   const limit = Math.min(zoneLimit, entry.max_total_depth_m ?? Infinity);
   let cap = "";
-  if (applicable.length && applicable.every(item => {
+  if (!mixed && applicable.length && applicable.every(item => {
     const own = ownRange(item, entry);
     const thick = parts.porous ? (pairs.porous ?? own.porous)[1] : entry.porous.thickness_m;
     const cavity = parts.cavity ? (pairs.cavity ?? own.cavity)[1] : (entry.cavity?.initial_m ?? 0);
@@ -1357,7 +1372,11 @@ function describeRange(line, items, ticks, entry) {
   line.replaceChildren(...parameterRows(entry, pairs));
   if (cap) line.append(el("div", null, cap));
   if (narrowed) line.append(el("strong", "zv-narrow", "改窄了"));
-  const axis = depthAxis(thicknessBounds(entry, pairs), limit);
+  const axis = mixed ? el("div", "zv-depth-axis", "最深各區不同") : depthAxis(thicknessBounds(entry, pairs), limit);
+  if (mixed) axis.classList.add("zv-zone-caps");
+  if (mixed) applicable.forEach((item, i) => {
+    axis.append(el("span", null, `${zoneWhereText(item)}：${Number.isFinite(zoneCaps[i]) ? centimetres(zoneCaps[i]) + " cm" : "不限"}`));
+  });
   if (line.nextElementSibling?.matches(".zv-depth-axis")) line.nextElementSibling.remove();
   if (axis) line.after(axis);
 }
@@ -1714,7 +1733,7 @@ function searchForm(items, walls, sync) {
   // 已勾選的全都不可能是家族成員時，候選數和清單已經確定。可先操作這些列，
   // 其餘可能被家族涵蓋的款式等逐區判決回來再列，避免讀取舊方案時短暫顯示成空清單。
   const pendingMembers = new Set(preview.rows ? [] : raw.ids.flatMap(id => libraryEntry(id)?.preset_members ?? []));
-  const independent = raw.lists.every(list => list.every(id => !pendingMembers.has(id)));
+  const independent = items.every(item => !Number.isFinite(caseDepth(item, draftDepth(items)))) && raw.lists.every(list => list.every(id => !pendingMembers.has(id)));
   if (!preview.rows && (!independent || preview.problem)) {
     form.append(deepestRow(items, walls, sync), el("p", "zv-list-hint", preview.problem ?? "正在核對候選"));
     if (preview.problem) form.append(button("zv-link", "重試", "zone-candidates-retry", () => { candidatePreview = null; renderZoneOverview(); }));
@@ -1723,8 +1742,12 @@ function searchForm(items, walls, sync) {
   form.id = "zone-panel-form";
   if (!preview.rows) preview.displayedPending = true;
   const selections = preview.rows ?? raw.lists.map(allowed => ({allowed, covered: {}}));
+  form.candidateRows = selections;
   const perZone = selections.map(row => row.covered);
   const ticks = ticksForLists(items, selections.map(row => row.allowed), perZone);
+  // 完整材料表仍可編輯原勾選（包括超深項的範圍），只看候選才照可搜尋的清單列。
+  const editable = ticksForLists(items, raw.lists.map((list, i) => list.filter(id => !perZone[i][id])), perZone);
+  const rowTicks = draft.candidatesOnly ? ticks : editable;
   const covered = new Map();
   for (const row of selections) for (const [id, family] of Object.entries(row.covered)) {
     if (items.every((item, i) => (!fitsHere(id, item.wall) && !raw.lists[i].includes(id)) || perZone[i][id]))
@@ -1749,7 +1772,7 @@ function searchForm(items, walls, sync) {
   for (const entry of catalog) {
     if (pendingMembers.has(entry.id) || covered.has(entry.id) || (!ticks.count(entry.id) && (draft.candidatesOnly || !pickerFits(entry, walls, ticks)))) continue;
     const members = ticks.count(entry.id) ? (entry.preset_members ?? []).filter(id => perZone.some(row => row[id] === entry.id)).map(libraryEntry).filter(Boolean) : [];
-    rows.push([entry, candidateRow(entry.id, items, ticks, members, sync)]);
+    rows.push([entry, candidateRow(entry.id, items, rowTicks, members, sync)]);
   }
   materialFamilies(others, walls, rows);
   if (!draft.candidatesOnly || ticks.count(ZONE_NONE)) list.append(candidateRow(ZONE_NONE, items, ticks, [], sync));
@@ -1817,7 +1840,7 @@ function openMaterialBuilder() {
         candidateAction(currentItems, panelTicks(currentItems), savedId, "add");
       } else {
         if (!assignableEntries().includes(entry)) throw new Error("這筆材料只能由程式最佳化");
-        draft.materialChanged = true; draft.materialId = savedId; draft.query = ""; markDraftEdited();
+        draft.modeChanged = true; draft.materialChanged = true; draft.materialId = savedId; draft.query = ""; markDraftEdited();
         renderZoneOverview();
       }
       if (dialog.open) dialog.close();
@@ -1921,14 +1944,19 @@ function panelCard() {
   const ruled = new Set(ruleZones(view.faces, view.roles).map(item => item.id));
   const sameAs = rule && items.every(item => ruled.has(item.id)) ? rule.mode : null;
   const allPasted = items.every(item => item.pasted);
-  const choose = (mode, materialId = "") => { draft = {...untouched(), ...draft, query: draft?.mode === mode ? draft.query : "", mode, materialId, materialChanged: Boolean(materialId), rangeRefused: ""}; markDraftEdited(); renderZoneOverview(); };
+  const choose = (mode, materialId = "") => { draft = {...untouched(), ...draft, query: draft?.mode === mode ? draft.query : "", mode, materialId, modeChanged: true, materialChanged: Boolean(materialId), rangeRefused: ""}; markDraftEdited(); renderZoneOverview(); };
   // 套用鈕與它上面那一句「為什麼不能套用」：在小框裡打字（最深那一格）時就地更新這兩樣，不重畫整頁（重畫會換掉正在打的那一格）。
   const apply = button("zv-btn zv-main-btn", `套用到 ${items.length} 區`, "zone-panel-apply", () => action(applyDraft));
   const problem = el("p", "zv-problem zv-panel-problem"); problem.id = "zone-panel-problem"; problem.setAttribute("role", "alert");
   const sync = () => {
     const why = draftProblem(items);
     const ticks = draft?.mode === "search" && panelTicks(items);
-    if (ticks && card.isConnected && !why) previewCandidates(items, ticks);
+    if (ticks && card.isConnected && !why) {
+      const preview = previewCandidates(items, ticks);
+      if (preview.rows && JSON.stringify(preview.rows) !== JSON.stringify(card.querySelector("#zone-panel-form")?.candidateRows)) {
+        renderZoneOverview(); return;
+      }
+    }
     if (ticks) for (const line of card.querySelectorAll("[data-range-entry]")) {
       describeRange(line, items, ticks, libraryEntry(line.dataset.rangeEntry));
     }
@@ -1986,6 +2014,7 @@ function panelCard() {
     }
     if (mode === "search" && draft?.mode === "search") content.append(...searchForm(items, walls, sync));
   }
+  if (draft && draft.mode === null) content.append(deepestRow(items, walls, sync));
   const foot = el("div", "zv-editfoot");
   sync();
   if (["search", "fixed"].includes(draft?.mode)) {
@@ -2361,7 +2390,7 @@ function resultBar(cannotApply) {
     } finally { document.body.inert = false; }
   }));
   // 按不下去時旁邊一句講為什麼（細節在上面那一行紅字）。
-  const remaining = all.some(item => pending && selected.includes(item.id) ? draft.mode === "search" : item.shown === "search");
+  const remaining = all.some(item => pending && draft.mode !== null && selected.includes(item.id) ? draft.mode === "search" : item.shown === "search");
   const why = pending && cannotApply ? "先完成這幾區的設定" : !remaining ? "還沒有由程式最佳化的區" : pending ? "" : stuckZoneNames().length || referenceRefusals().length ? "清單有紅框要先處理" : limitsRedCount() > 0 ? "有超過限制的區要先改" : "";
   go.disabled = Boolean(why);
   // 原因那一句收在按鈕正下方（小字一行），不跟前面三項搶同一行的寬度。

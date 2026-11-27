@@ -472,6 +472,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-only-candidates[aria-pressed=true]{color:white;background:#195b70}
 #zone-page .zv-parameter,#zone-page .zv-member,#zone-page .zv-depth-axis{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 #zone-page .zv-depth-axis{align-items:center;color:#495c66;font-size:13px;margin:4px 0}
+#zone-page .zv-zone-caps{flex-direction:column;align-items:flex-start;gap:2px}
 #zone-page .zv-depth-track{position:relative;flex:1;height:3px;background:#cbd8dc}
 #zone-page .zv-depth-track i{position:absolute;min-width:2px;height:5px;top:-1px;background:#15617b}
 #zone-page .zv-form .zv-members{margin:0;padding:0 8px 3px 30px;border:0}

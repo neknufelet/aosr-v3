@@ -120,7 +120,12 @@ def effective_candidates(selection: CandidateSelection, targets: DepthTargets) -
             cavity = bounds.cavity_range_m if bounds.initial_cavity_m is not None else (0.0, 0.0)
             if wool in bounds.thicknesses_m and cavity[0] <= air <= cavity[1] and wool + air <= cap + 1e-12:
                 covered[member] = family.id
-    return EffectiveCandidates(allowed=tuple(code for code in selection.allowed if code not in covered), covered=covered)
+    excluded = set(covered)
+    if selection.cap is not None:
+        _, valid = zone_range_problems(selection.ranges, targets)
+        fits = target_fits(selection.allowed, selection.cap, targets, valid)
+        excluded.update(fit.target.removeprefix("fixed:") for fit in fits or () if not fit.usable)
+    return EffectiveCandidates(allowed=tuple(code for code in selection.allowed if code not in excluded), covered=covered)
 
 
 @dataclass(frozen=True)
@@ -549,7 +554,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             construction = catalog.construction(room, wall, key, entry, current, setting, lines)
             lines.extend(_depth_problems(current, mode, cap, catalog.required, construction=construction))
             if mode == "search":
-                setting = catalog.search_setting(wall, key, setting, cap)
+                catalog.record_candidates(wall, key, setting, cap)
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
                 lines.extend(problems)
                 if lines_by_group:
@@ -583,15 +588,13 @@ class _ZoneCatalog:
     candidates: dict[str, dict[str, dict[str, object]]] = field(default_factory=dict)
     load_error: Problem | None = None
 
-    def search_setting(self, wall: str, key: str, setting: ZoneDesign | None, cap: DepthCap | None) -> ZoneDesign | None:
+    def record_candidates(self, wall: str, key: str, setting: ZoneDesign | None, cap: DepthCap | None) -> None:
         if setting is None or not setting.allowed or self.targets is None:
-            return setting
+            return
         selection = CandidateSelection(allowed=setting.allowed, ranges=setting.ranges, cap=cap.value_m if cap else None)
         effective = effective_candidates(selection, self.targets)
         if effective.allowed != setting.allowed:
             self.candidates.setdefault(wall, {})[key] = effective.model_dump()
-            return setting.model_copy(update={"allowed": effective.allowed})
-        return setting
 
     @cached_property
     def targets(self) -> DepthTargets | None:

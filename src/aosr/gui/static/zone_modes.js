@@ -341,7 +341,7 @@ function appendFixedCandidateNote(container, details, allowed) {
     + "之後只要清單、深度上限、裝法或方案有改，就要重建替身。"
     + "存檔後，開跑前到第三階段搜尋頁按「預覽轉好的參數」，就能看到是否需要重建及原因。";
   const summary = document.createElement("p");
-  summary.textContent = "這次搜尋需要重新訓練";
+  summary.textContent = "固定款會多花訓練時間";
   container.append(summary);
   details.append(note);
 }

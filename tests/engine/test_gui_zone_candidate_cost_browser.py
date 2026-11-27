@@ -65,7 +65,8 @@ def _expect_candidate_cost(surface: Locator, present: bool) -> None:
     if not present:
         expect(note).to_have_count(0)
         return
-    expect(surface.get_by_text("這次搜尋需要重新訓練", exact=True)).to_be_visible()
+    expect(surface.get_by_text("這次搜尋需要重新訓練", exact=True)).to_have_count(0)
+    expect(surface.get_by_text("固定款會多花訓練時間", exact=True)).to_be_visible()
     details = surface.locator("#zone-panel-candidate-info")
     if details.get_attribute("open") is None:
         expect(note).to_be_hidden()

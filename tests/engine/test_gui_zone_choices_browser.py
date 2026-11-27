@@ -22,6 +22,7 @@ from tests.engine._surface_zone_cases import room109_document
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
+from tests.engine.test_gui_zone_overview_tasks_browser import _click_zone
 from tests.engine.test_gui_zone_modes_browser import _modes, _save
 
 HIDDEN_ON_WALLS = ("ceiling_gypsum9mm_gap300",
@@ -633,3 +634,74 @@ def test_old_mounted_door_changes_only_depth_after_save(tmp_path: Path, browser:
     assert json.loads(path.read_bytes())["scene"]["surface_zones_by_wall"]["x0"][0]["material"] == before
     setting = json.loads((tmp_path / "designs" / "room109.json").read_bytes())["zones"]["x0"]["whole_wall"]
     assert setting == {"mode": "fixed", "max_depth_m": 0.22}
+
+
+def test_expanding_door_depth_edit_preserves_methods_until_a_material_is_chosen(tmp_path: Path, browser: Browser) -> None:
+    document = room109_document()
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)["material"]
+    old = {"kind": "mounted_on_wall", "layers": cast(dict[str, object], door)["layers"], "wall": walls["x0"][0]["material"]}
+    walls["x0"][0]["material"] = old
+    bare = walls["xL"][0]["material"]
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    path = tmp_path / "designs" / "room109.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"scheme_id": "room109", "zones": {"xL": {"whole_wall": {"mode": "keep_original"}}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        for replace in (False, True):
+            page.locator("#zone-page-open").click()
+            _click_zone(page, "x0/whole_wall")
+            expect(page.locator(f"#zone-panel-material-{DOOR}")).to_be_checked()
+            page.locator("#zone-panel-depth").fill("24" if replace else "22")
+            _click_zone(page, "xL/whole_wall")
+            expect(page.locator("#zone-panel [role=radio][aria-checked=true]")).to_have_count(0)
+            if replace:
+                pick_fixed_row(page, DOOR)
+            apply_and_return(page)
+            _save(page, "room109")
+            saved = json.loads((tmp_path / "schemes" / "room109.json").read_bytes())["scene"]["surface_zones_by_wall"]
+            settings = json.loads(path.read_bytes())["zones"]
+            if replace:
+                for wall in ("x0", "xL"):
+                    assert saved[wall][0]["material"] == door
+                    assert settings[wall]["whole_wall"]["mode"] == "fixed"
+            else:
+                assert saved["x0"][0]["material"] == old and saved["xL"][0]["material"] == bare
+                assert settings["x0"]["whole_wall"] == {"mode": "fixed", "max_depth_m": 0.22}
+                assert settings["xL"]["whole_wall"] == {"mode": "keep_original"}
+
+
+def test_apply_and_search_stops_on_one_unrestored_zone(tmp_path: Path, browser: Browser) -> None:
+    document = room109_document()
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)["material"]
+    walls["x0"][0]["material"] = door
+    original = walls["xL"][0]["material"]
+    walls["xL"][0]["material"] = {"kind": "mounted_on_wall", "layers": cast(dict[str, object], door)["layers"], "wall": original}
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    path = tmp_path / "designs" / "room109.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"scheme_id": "room109", "zones": {"x0": {"whole_wall": {"mode": "fixed", "picked_entry": DOOR}},
+        "y0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#zone-page-open").click()
+        for zone in ("x0/whole_wall", "xL/whole_wall"):
+            _click_zone(page, zone)
+        page.locator("#zone-panel-mode-keep_original").check()
+        go = page.locator("#zone-page-search")
+        expect(go).to_have_text("套用並拿去搜尋")
+        sent = []
+        page.on("request", lambda req: sent.append(req.url) if req.method == "PUT" or "/gradient?" in req.url else None)
+        go.click()
+        page.wait_for_function("!document.body.inert")
+        expect(page.locator("#zone-page-note")).to_contain_text("看不出原牆")
+        expect(page.locator("#zone-map")).to_be_visible()
+        assert page.evaluate("zoneList('x0')[0].material") == door
+        assert page.evaluate("zoneList('xL')[0].material") == original
+        assert sent == []

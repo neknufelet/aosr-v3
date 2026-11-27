@@ -141,3 +141,9 @@ def test_any_plate_layer_makes_a_rigid_product_resonant(plate: dict[str, object]
     own["material"]["layers"].insert(1, plate)
     (entry,) = _ENTRIES.validate_python([own])
     assert placement(entry).family == "resonant"
+
+
+def test_floor_only_label_mentioning_wall_stays_on_floor() -> None:
+    entry = next(item for item in legacy_entries() if item.id == "pin_impedance")
+    floor = entry.model_copy(update={"id": "exam_finish", "label": "地板專用（不可上牆）"})
+    assert placement(floor).surfaces == ("floor",)

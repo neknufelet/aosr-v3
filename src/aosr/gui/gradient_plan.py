@@ -270,7 +270,7 @@ _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設"
 
 def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], per_surface: tuple[ZoneMode, ...],
                    depths: Mapping[str, float], sources: Mapping[str, str], targets: DepthTargets,
-                   names: Mapping[str, str], choices: Mapping[tuple[str, str], tuple[str, ...]]) -> dict[str, tuple[TargetLine, ...]]:
+                   names: Mapping[str, str]) -> dict[str, tuple[TargetLine, ...]]:
     """交給搜尋、有上限的每一區，准用的每一組在生效上限下的判決（開跑預覽那一格；准用清單照它拿掉放不下的組）。
 
     寫了可調範圍的組照收窄後的判（#1199，同分區頁 ``zone_limits._target_problems`` 與命令列 ``check_depth_targets``）：
@@ -284,7 +284,7 @@ def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], 
             continue
         item = design.zones.get(wall, {}).get(zone) if design is not None else None
         given = None if item is None else item.ranges
-        fits = target_fits(choices.get((wall, zone)), depths[surface], targets, given)
+        fits = target_fits(item.allowed if item else None, depths[surface], targets, given)
         if not fits:
             continue
         source = sources.get(surface, "request")
@@ -451,12 +451,8 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
     depths, sources = _depths(request, modes, design)
     choices = _allowed(design, targets_for_depth, depths)
     allowed = {pair: _targets(*pair, ids, settings, fixed_ids) for pair, ids in choices.items()}
-    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names, choices)
+    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names)
     unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}
-    for pair, chosen in list(allowed.items()):
-        dropped = unusable.get(surface_of(*pair), frozenset())
-        if dropped:
-            allowed[pair] = tuple(target for target in chosen if target not in dropped)
     presets = tuple(_start_preset(*pair, allowed.get(pair), family, settings, unusable.get(surface_of(*pair), frozenset()), names)
                     if mode == "search" else None for pair, mode in zip(pairs, per_surface, strict=True))
     return SearchPlan(

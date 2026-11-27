@@ -205,11 +205,11 @@ def test_glass_windows_and_group_search_in_both_modes(panel: Page, tmp_path: Pat
         expect(floor.locator(".zv-material:visible")).to_have_count(total)
 
 
-def _assert_start_arguments(page: Page, choices: list[str]) -> None:
+def _assert_start_arguments(page: Page, choices: list[str], fixed: tuple[str, ...] = ()) -> None:
     scheme = Scheme.model_validate(page.evaluate("wallDocument()"))
     design = DesignSettings.model_validate(page.evaluate("zoneDesign"))
     settings = load_material_gradient_settings(config_path("material_gradient.toml"))
-    plan = plan_search(scheme, design, GradientRequest(), settings, frozenset(MEMBERS), pair=False)
+    plan = plan_search(scheme, design, GradientRequest(), settings, frozenset([*MEMBERS, *fixed]), pair=False)
     args = start_arguments(plan)
     actual = [value for flag, value in zip(args, args[1:]) if flag == "--allowed" and value.startswith("yL@z3=")]
     assert actual == ["yL@z3=" + ",".join(choices)]
@@ -245,7 +245,7 @@ def test_narrowed_family_keeps_five_centimetre_member_in_search(panel: Page) -> 
 
 def test_training_notice_uses_effective_candidates(panel: Page) -> None:
     expect(panel.locator(f"#zone-panel-pick-{WOOL}")).to_be_checked()
-    hint = panel.get_by_text("這次搜尋需要重新訓練", exact=True)
+    hint = panel.get_by_text("固定款會多花訓練時間", exact=True)
     expect(hint).to_have_count(0)
     expect(panel.locator(".zone-candidate-cost")).to_have_count(0)
     panel.locator(f"#zone-panel-pick-{WOOL}").click()
@@ -266,3 +266,75 @@ def test_glass_floor_has_no_window_alias(panel: Page) -> None:
     expect(row.locator("strong")).to_have_text("強化玻璃地板")
     search.fill("玻璃窗")
     expect(row).to_be_hidden()
+
+
+DEEP_MEMBER = "glass_wool_48k_50mm_gap100"
+INDEPENDENT = "slotted_wood_typ9_absorber40_gap98"
+
+
+def test_depth_filters_panel_and_start_without_losing_saved_choices(tmp_path: Path, browser: Browser) -> None:
+    allowed = [WOOL, DEEP_MEMBER, "none"]
+    _prepare(tmp_path, _design({"yL": {"z3": {"mode": "search", "allowed": allowed}}}))
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-depth").fill("12")
+        toggle = page.locator("#zone-panel-candidates-only")
+        toggle.click()
+        expect(toggle).to_have_text("只看候選（2）")
+        expect(page.locator("#zone-panel-search-from")).to_contain_text("2 種")
+        expect(page.locator("#zone-panel-list [role=checkbox]:visible")).to_have_count(2)
+        for key in (WOOL, "none"):
+            expect(page.locator(f"#zone-panel-pick-{key}")).to_be_checked()
+        expect(page.locator(".zone-candidate-cost")).to_have_count(0)
+        _apply(page)
+        assert page.evaluate("zoneLimits.red") == 0
+        assert page.evaluate("zoneDesign.zones.yL.z3.allowed") == allowed
+        _assert_start_arguments(page, [WOOL, "none"], (DEEP_MEMBER,))
+        _click_zone(page, "yL/z3")
+        page.locator("#zone-panel-depth").fill("20")
+        page.locator(f"#zone-panel-pick-{WOOL}").click()
+        expect(page.locator(f"#zone-panel-pick-{DEEP_MEMBER}")).to_be_checked()
+
+
+def test_return_to_saved_depth_repaints_rows_count_and_cost(tmp_path: Path, browser: Browser) -> None:
+    allowed = [WOOL, DEEP_MEMBER, INDEPENDENT, "none"]
+    _prepare(tmp_path, _design({"yL": {"z3": {"mode": "search", "allowed": allowed, "max_depth_m": 0.2}}}))
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z3")
+        toggle = page.locator("#zone-panel-candidates-only")
+        toggle.click()
+        depth = page.locator("#zone-panel-depth")
+        expect(depth).to_have_value("20")
+        for cm, count in (("20", 3), ("12", 2), ("20", 3)):
+            if depth.input_value() != cm:
+                depth.fill(cm)
+            expect(toggle).to_have_text(f"只看候選（{count}）")
+            expect(page.locator("#zone-panel-search-from")).to_contain_text(f"{count} 種")
+            expect(page.locator("#zone-panel-list [role=checkbox]:visible")).to_have_count(count)
+            expect(page.locator(".zone-candidate-cost")).to_have_count(int(cm == "20"))
+            fixed = page.locator(f"#zone-panel-pick-{INDEPENDENT}")
+            if cm == "20":
+                expect(fixed).to_be_checked()
+            else:
+                expect(fixed).to_have_count(0)
+
+
+def test_mixed_depth_axis_names_each_zone_and_limit(tmp_path: Path, browser: Browser) -> None:
+    zones: dict[str, object] = {key: {"mode": "search", "allowed": [WOOL, "none"], "max_depth_m": cap}
+                                for key, cap in (("z1", 0.12), ("z3", 0.25))}
+    _prepare(tmp_path, _design({"yL": zones}))
+    with real_server(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        for key in zones:
+            _click_zone(page, f"yL/{key}")
+        options = page.locator(f"#zone-panel-options-{WOOL}")
+        options.locator("summary").press("Enter")
+        axis = options.locator(".zv-depth-axis")
+        expect(axis).to_contain_text("各區不同")
+        expect(axis).to_contain_text("前牆 ① 左聲道喇叭後面那塊：12 cm")
+        expect(axis).to_contain_text("前牆 ③ 主位正前方那塊：25 cm")
