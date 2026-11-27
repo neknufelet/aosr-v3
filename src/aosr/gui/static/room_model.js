@@ -119,7 +119,7 @@
   });
 
   $("run").addEventListener("click", async () => {
-    const materials = {};
+    const materials = Object.create(null);  // 圖層名剛好叫 __proto__ 也照樣送
     document.querySelectorAll("#layers select").forEach((select) => { materials[select.dataset.layer] = select.value; });
     $("run").disabled = true;
     try {
