@@ -12,6 +12,7 @@ from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.material_surfaces import GROUP_SHORT_WORDS, GROUP_WORDS, WALLS, placement
 from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 
 _ENTRIES: TypeAdapter[tuple[LibraryEntry, ...]] = TypeAdapter(tuple[LibraryEntry, ...])
@@ -25,6 +26,7 @@ BUILTIN_GROUPS = {
     "perforated_gypsum_8_18r_backed_gw30_ceiling": "ceiling_build",
     "perforated_0p8mm_d10_gw24k_50mm": "wall", "mpp_t1mm_d0p5_gap50": "wall", "mpp_t0p5mm_d0p5_gap50": "wall",
     "slotted_gypsum_b6_backed_gap65": "wall", "slotted_wood_typ9_absorber40_gap98": "wall",
+    **dict.fromkeys(FITTED_VPR_IDS, "wall"),
     "carpet_on_concrete": "floor",
     # 文獻硬面是整面的表面阻抗（阻抗表），只能整面換掉，歸「牆面、地面本身」。
     "door_wood_solid": "surface_itself", "glass_single_3mm": "surface_itself", "glass_double_gap30": "surface_itself",
@@ -59,9 +61,9 @@ def test_every_current_material_lands_in_its_pinned_group() -> None:
     for key, item in found.items():
         assert item.surfaces == SURFACES[item.group], key
         assert item.reason and item.group in GROUP_WORDS, key
-    # 牆上看得到的（樣稿那一面）：19 筆；不列的 23 筆（含 12 筆文獻硬面），門窗、地板、天花構造、示範房、硬面一筆都不混進來。
+    # 牆上看得到的（樣稿那一面）：19 筆加擬合 VPR；不列的 23 筆（含 12 筆文獻硬面），門窗、地板、天花構造、示範房、硬面一筆都不混進來。
     wall = sorted(key for key, item in found.items() if "x0" in item.surfaces)
-    assert len(wall) == 19 and len([key for key, item in found.items() if "x0" not in item.surfaces]) == 23
+    assert len(wall) == 19 + len(FITTED_VPR_IDS) and len([key for key, item in found.items() if "x0" not in item.surfaces]) == 23
     assert not any(word in key for key in wall
                    for word in ("door", "window", "floor", "carpet", "ceiling", "demo109", "glass_single", "brick", "concrete"))
     # 地板只有地毯；天花跟牆一樣（貼在吊頂下面），整片吊頂不列。

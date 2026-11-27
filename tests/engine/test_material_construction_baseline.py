@@ -17,7 +17,9 @@ from aosr.gui.material_editor import material_routes, user_library_path
 from aosr.gui.material_surfaces import placement
 from aosr.gui.zone_modes import Origin, zone_material
 from aosr.materials import library, search_library
-from aosr.materials.construction_models import ConstantImpedance
+from aosr.materials.construction_models import Assembly, ConstantImpedance, MountedOnWall
+
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 
 ANSWER = Path(__file__).parent / "data" / "material_construction_baseline.json"
 
@@ -101,6 +103,20 @@ def test_legacy_materials_match_pre_construction_main(tmp_path: Path) -> None:
     listing = actual.pop("listing")
     catalog = {entry.id for entry in library.catalog_entries()}
     assert isinstance(listing, dict) and isinstance(listing["materials"], list)
-    listing["materials"] = [row for row in listing["materials"] if row["entry"]["id"] not in catalog]
+    listing["materials"] = [row for row in listing["materials"] if row["entry"]["id"] not in catalog | set(FITTED_VPR_IDS)]
     assert_old_fields(listing, expected.pop("listing"))
     assert actual == expected
+
+
+def test_fitted_vpr_library_rows_apply_as_fixed_materials(tmp_path: Path) -> None:
+    with TestClient(Starlette(routes=material_routes(tmp_path))) as client:
+        response = client.get("/api/materials")
+    assert response.status_code == 200
+    rows = {row["entry"]["id"]: row["entry"] for row in response.json()["materials"]}
+    wall = ConstantImpedance(impedance_pa_s_m=7654.)
+    for key in FITTED_VPR_IDS:
+        entry = library.FixedEntry.model_validate(rows[key])
+        assert isinstance(entry.material, Assembly)
+        applied = zone_material(wall, Origin(wall, "current"), entry)
+        assert isinstance(applied.material, MountedOnWall)
+        assert applied.material.layers == entry.material.layers and applied.material.wall == wall

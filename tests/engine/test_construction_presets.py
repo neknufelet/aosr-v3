@@ -17,6 +17,7 @@ from aosr.reporting.validation import validate_scheme
 from aosr.reporting.scheme import Scheme
 from tests.engine._construction_preset_answers import NEW_ROWS
 from aosr.runtime import child_process_env
+from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
 from tests.engine._surface_zone_cases import NEW, zone_document
@@ -125,6 +126,14 @@ def test_every_preset_runs_through_late_surface_core(tmp_path: Path) -> None:
     child = subprocess.run([sys.executable, "-B", "-m", "tests.engine._construction_presets_probe"],
         cwd=Path(__file__).resolve().parents[2], env=env, text=True, capture_output=True, timeout=120)
     assert child.returncode == 0, child.stderr
+
+
+def test_fitted_vpr_five_points_match_written_notes(tmp_path: Path) -> None:
+    env = forward_cpu_pins(child_process_env(threads=1))
+    env["TMPDIR"] = str(tmp_path)
+    run = subprocess.run([sys.executable, "-B", "-m", "tests.engine._construction_presets_probe", "fitted_vpr"],
+                         env=env, capture_output=True, text=True, timeout=120)
+    assert run.returncode == 0, run.stderr
 
 
 @pytest.mark.parametrize("case", ("blank-label", "blank-source", "bad-link", "duplicate-id", "duplicate-label", "extra", "non-ascii-id"))

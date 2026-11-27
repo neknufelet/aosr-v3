@@ -36,6 +36,7 @@ from aosr.gui.material_editor import user_library_path
 from aosr.gui.zone_design import DesignSettings, ZoneDesign
 from aosr.materials import library, search_library
 from aosr.materials.construction_models import Assembly
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 from tests.engine.test_gui_gradient_jobs import FakeLauncher, _scheme
 from tests.engine.test_gui_zone_limits import PRESET, _cut
 from tests.engine.test_gui_zone_limits import _design as _limits_design
@@ -161,7 +162,7 @@ def artifacts(data_dir: Path, *, with_vpr: bool) -> dict[str, bytes]:
     _write_library(path, with_vpr)
     found: dict[str, bytes] = {}
     # 內建材料：dump_user_library 不收內建（代號會撞自己），照它同一套 JSON 寫法直接寫。
-    found["builtin.json"] = _canonical([entry.model_dump(mode="json") for entry in library.builtin_entries()])
+    found["builtin.json"] = _canonical([entry.model_dump(mode="json") for entry in library.builtin_entries() if entry.id not in FITTED_VPR_IDS])
     entries = library.load_user_library(path)
     found["user_library.json"] = _canonical(_without_vpr(json.loads(library.dump_user_library(entries))))
     presets = load_construction_presets(config_path("construction_presets.toml"))
@@ -173,7 +174,7 @@ def artifacts(data_dir: Path, *, with_vpr: bool) -> dict[str, bytes]:
     found["search_materials.json"] = _canonical({
         "settings": materials.settings.model_dump(mode="json"), "fingerprint": materials.settings.fingerprint,
         "full_fingerprint": materials.settings.full_fingerprint,
-        "presets": [{"id": preset.id, "material": preset.material} for preset in materials.presets],
+        "presets": [{"id": preset.id, "material": preset.material} for preset in materials.presets if preset.id not in FITTED_VPR_IDS],
         "entries": [entry.id for entry in materials.entries]})
     plan, planned, _ = _jobs(data_dir).plan(_scheme(), _plan_design(), GradientRequest())
     found["plan.json"] = _canonical({"plan": plan.model_dump(mode="json"), "families": [f.id for f in planned.settings.family],
@@ -184,8 +185,9 @@ def artifacts(data_dir: Path, *, with_vpr: bool) -> dict[str, bytes]:
     body = _without_vpr(cast(Doc, listing.json()))
     # #1208 起材料庫裡有「鋼板直接貼在棉上」的固定材料時這一支多回一格 reference_only（命中的代號與字，另有考卷）；
     # 這份材料庫那一筆固定 VPR 就是。拿掉那一格，剩下的要跟主線那一份逐位相同。
-    assert cast(Doc, body.pop("reference_only"))["ids"] == [_fixed_vpr()["id"]]
-    found["api_materials_rows.json"] = _canonical(body.pop("materials"))
+    assert cast(Doc, body.pop("reference_only"))["ids"] == [*FITTED_VPR_IDS, _fixed_vpr()["id"]]
+    found["api_materials_rows.json"] = _canonical([row for row in cast(list[Doc], body.pop("materials"))
+                                                  if cast(Doc, row["entry"])["id"] not in FITTED_VPR_IDS])
     labels = cast(dict[str, str], body.pop("entry_kind_labels"))
     found["api_materials_old_kind_labels.json"] = _canonical({kind: labels[kind] for kind in ("optimizable", "fixed")})
     found["api_materials_rest.json"] = _canonical(body)
