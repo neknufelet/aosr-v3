@@ -49,8 +49,7 @@ from aosr.materials.library import (
     basis_label,
     fixed_surface,
     impedance_basis,
-    initial_assembly,
-    template_assembly,
+    preview_material,
 )
 from aosr.physics.wall_surfaces import extrapolated_frequency_text
 
@@ -73,21 +72,20 @@ def _plain(message: str) -> str:
 
 
 def _physics_material(entry: LibraryEntry) -> tuple[SurfaceMaterial, str | None]:
-    """要算的牆面材料；可最佳化材料與可調 VPR 取初值排法，另回一句寫明是哪一種排法。"""
+    """要算的牆面材料（跟自訂房間那一頁同一支 ``preview_material``），另回一句寫明是哪一種排法。"""
+    material = preview_material(entry)
     if isinstance(entry, TunableLayersEntry):
         tuned = "、".join(f"{item.words()} {item.initial:g}（可調 {item.range[0]:g}～{item.range[1]:g}）" for item in entry.variables)
-        return initial_assembly(entry), (f"這條是初值排法：{tuned}，背後是硬牆。{entry.structure_label()}是一族，"
-                                         "程式最佳化這種材料還沒接上，這條只供對照。")
+        return material, (f"這條是初值排法：{tuned}，背後是硬牆。{entry.structure_label()}是一族，"
+                          "程式最佳化這種材料還沒接上，這條只供對照。")
     if isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall":
-        return entry.preview_assembly(), "預覽背後當硬牆；指定給分區時用該區原本的牆。"
+        return material, "預覽背後當硬牆；指定給分區時用該區原本的牆。"
     if not isinstance(entry, OptimizableEntry):
-        material = fixed_surface(entry)
-        assert material is not None
         return material, None
     cavity = None if entry.cavity is None else entry.cavity.initial_m
     layers = f"多孔層 {entry.porous.thickness_m:g} m" + (f"＋空腔 {cavity:g} m" if cavity else "、沒有空腔")
-    return template_assembly(entry), (f"這條是初值排法：{layers}，背後是硬牆。可最佳化材料是一族，"
-                                      "搜尋會在產品厚度與空腔範圍裡調，這條只是搜尋的起點。")
+    return material, (f"這條是初值排法：{layers}，背後是硬牆。可最佳化材料是一族，"
+                      "搜尋會在產品厚度與空腔範圍裡調，這條只是搜尋的起點。")
 
 
 def _axis(material: SurfaceMaterial) -> tuple[float, ...]:
