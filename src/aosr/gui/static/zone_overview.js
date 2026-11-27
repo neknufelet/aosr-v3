@@ -601,7 +601,6 @@ function cutFace(wall) {
   map.replaceWith(panel);
   toolbar.prepend(title);
   toolbar.append($("elevation-clear-slot"), done);
-  $("elevation-symmetry-title").textContent = SYMMETRY_TITLE;
   // 舊選取顯示到切完，再按新座標核對；這段時間不能把草稿套到已重編的代號。
   for (const region of page.querySelectorAll(".zv-side, .zv-foot")) {
     region.inert = true;
@@ -618,7 +617,6 @@ function restoreElevation() {
   panel.replaceWith(map);
   home.replaceWith(panel);
   $("elevation-wall-line").append($("elevation-clear-slot"));
-  $("elevation-symmetry-title").textContent = "兩邊一起畫";
   title.remove(); done.remove();
   if (revision !== editRevision) unsaved = true;
   renderElevation();
@@ -2077,6 +2075,10 @@ function symmetryBox() {
       body.append(missed);
     }
 
+  }
+  if (pairing.axis && !pairing.axis.centred) {
+    const left = pairing.axis.left, right = zoneLimits.symmetry.projections[left][0];
+    body.prepend(el("div", null, `鏡子不在正中，左牆 ${zoneList(left).length} 區、右牆 ${zoneList(right).length} 區，各自切區。`));
   }
   box.append(head, body);
   return box;
