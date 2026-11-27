@@ -436,7 +436,7 @@ def test_opening_another_scheme_never_pairs_its_zones_with_the_last_schemes_verd
         page.evaluate(_RECORD_PAIR_MARKS)
         held: list[Route] = []
         page.route("**/api/zone-limits", lambda route: held.append(route))
-        _open_scheme(page, "plain109")
+        _open_scheme(page, "plain109", checks_held=True)
         page.wait_for_function("name => document.getElementById('save-id').value === name", arg="plain109")
         _settled(page)
         seen = cast(list[dict[str, object]], page.evaluate("window.pairMarksSeen"))
