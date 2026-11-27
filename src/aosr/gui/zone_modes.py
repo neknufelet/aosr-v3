@@ -28,7 +28,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, NamedTuple
+from typing import Final, Literal, NamedTuple, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -42,7 +42,7 @@ from aosr.gui.material_editor import plain_error, user_library_path
 from aosr.gui.material_surfaces import legacy_replacement
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.wall_words import draft_wall_words
-from aosr.gui.zone_construction import OriginalProblem, construction_pick, mismatch_words, read_original
+from aosr.gui.zone_construction import ConstructionPick, OriginalProblem, construction_pick, mismatch_words, read_original
 from aosr.gui.zone_design import WHOLE_WALL_KEY
 from aosr.gui.zone_limits import zone_words
 from aosr.gui.zone_result import BaselineRefused, OriginalWalls, original_material, original_walls
@@ -76,14 +76,19 @@ def unknown_origin(wall: str | None = None) -> str:
 
 
 class ZoneChoice(BaseModel):
-    """一區選了什麼：哪一面、哪一區、放原牆（``original``）或指定材料庫的哪一筆（``fixed``＋代號）。"""
+    """一區選了什麼：哪一面、哪一區、放原牆（``original``）、指定材料庫的哪一筆（``fixed``＋代號），或由程式最佳化時
+    背後換成材料庫的哪一筆（``backing``＋代號，#1330：整塊當牆放進方案，程式只調前面的層）。
+
+    ``backing_wall``：這一區現在背後已換過時，設計設定記的換之前原牆（網頁照存的送）；原牆照它找
+    （沒指原方案時，方案裡那一區已經是換上去的那一筆，只剩這一格記得原牆）。"""
 
     model_config = ConfigDict(extra="forbid")
     wall: WallName
     zone: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
-    choice: Literal["original", "fixed"]
+    choice: Literal["original", "fixed", "backing"]
     picked_entry: str | None = None
     material_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
+    backing_wall: SurfaceMaterial | None = None
 
 
 class ZoneMaterialRequest(ZoneChoice):
@@ -288,12 +293,50 @@ class ZoneMaterialHandlers:
         return ZoneScene(scheme, walls, entries, replacements, standalone, legacy, prior, draft_wall_words(document))
 
     def _one(self, scene: ZoneScene, choice: ZoneChoice) -> dict[str, object]:
-        """一區選了之後放什麼（單筆與一批同一套）：原牆照 ``origin`` 的先後取，再照 ``zone_material`` 組。"""
-        if choice.choice == "fixed" and choice.material_id is None:
+        """一區選了之後放什麼（單筆與一批同一套）：原牆照 ``origin`` 的先後取，再照 ``zone_material`` 組。
+
+        原牆的先後（#1330）：指了原方案照原方案；沒指時背後換過的照設計設定記的那一份（``backing_wall``）；
+        再來才是拆貼在原牆上的、或當現在的材料是原牆。"""
+        if choice.choice in ("fixed", "backing") and choice.material_id is None:
             raise ZoneMaterialError("選固定材料要給材料代號")
         item, box = _zone_index(scene.walls, scene.scheme.scene.room_m, choice.wall, choice.zone, scene.names)
         current = item.material
+        if choice.backing_wall is not None and scene.original_walls is None:
+            base = Origin(choice.backing_wall, "unwrapped")
+            pick = None
+        else:
+            base, pick = self._base(scene, choice, current, box)
+        if choice.choice == "backing":
+            return self._backing(scene, choice, base)
         entry = self._entry(scene.entries, choice.material_id) if choice.choice == "fixed" and choice.material_id else None
+        change = zone_material(current, base, entry, choice.wall)
+        note = change.note
+        if pick and pick.mismatch:
+            label = next((item.label for item in scene.entries if item.id == pick.mismatch), pick.mismatch)
+            note += "；" + mismatch_words(label)
+        result = {"material": _MATERIAL.dump_python(change.material, mode="json"), "note": note, "origin": base.source,
+                  "same_as_original": change.same_as_original}
+        # 新頁面每次帶這一區記的代號（可為 null）。舊呼叫端只用舊材料庫時保留原回覆的每個位元組。
+        if "picked_entry" in choice.model_fields_set or any(isinstance(item, ConstructionEntry) for item in scene.entries):
+            result["picked_entry"] = entry.id if entry and (entry.id in scene.standalone or entry.id in scene.legacy) and not change.same_as_original else None
+        return result
+
+    def _backing(self, scene: ZoneScene, choice: ZoneChoice, base: Origin) -> dict[str, object]:
+        """背後換成材料庫的一筆（#1330）：那一筆整塊放進方案那一區（程式只調它前面的層），原牆另外回給網頁記進設計設定。"""
+        entry = self._entry(scene.entries, cast(str, choice.material_id))
+        chosen = fixed_surface(entry)
+        if chosen is None or isinstance(chosen, MountedOnWall) or (isinstance(entry, ConstructionEntry) and entry.backing == "zone_wall"):
+            raise ZoneMaterialError(f"「{entry.label}」要貼在牆上才成立，不能整塊當背後的牆")
+        face = original_face(choice.wall)
+        wall = base.material
+        if isinstance(wall, MountedOnWall):
+            raise ZoneMaterialError(f"原方案這一區本身就是貼在{face}上的構造，認不出{face}；原方案請選貼之前的那一份")
+        return {"material": _MATERIAL.dump_python(chosen, mode="json"), "origin": base.source, "same_as_original": False,
+                "note": f"背後換成「{entry.label}」（整塊當{face_itself(choice.wall)}，固定不調），程式只調前面的層；換回{face}會放回原來那一面",
+                "backing_entry": entry.id, "backing_wall": _MATERIAL.dump_python(wall, mode="json")}
+
+    def _base(self, scene: ZoneScene, choice: ZoneChoice, current: SurfaceMaterial,
+              box: tuple[tuple[float, float], tuple[float, float]]) -> tuple[Origin, ConstructionPick | None]:
         standalone = dict(scene.standalone)
         if choice.picked_entry in scene.legacy and choice.picked_entry is not None:
             standalone[choice.picked_entry] = scene.legacy[choice.picked_entry]
@@ -307,17 +350,7 @@ class ZoneMaterialHandlers:
             base = Origin(current, "unknown") if comparison.original is None else Origin(comparison.original, "original_scheme")
         else:
             base = origin(current, scene.original_walls, choice.wall, choice.zone, box, scene.replacements)
-        change = zone_material(current, base, entry, choice.wall)
-        note = change.note
-        if pick and pick.mismatch:
-            label = next((item.label for item in scene.entries if item.id == pick.mismatch), pick.mismatch)
-            note += "；" + mismatch_words(label)
-        result = {"material": _MATERIAL.dump_python(change.material, mode="json"), "note": note, "origin": base.source,
-                  "same_as_original": change.same_as_original}
-        # 新頁面每次帶這一區記的代號（可為 null）。舊呼叫端只用舊材料庫時保留原回覆的每個位元組。
-        if "picked_entry" in choice.model_fields_set or any(isinstance(item, ConstructionEntry) for item in scene.entries):
-            result["picked_entry"] = entry.id if entry and (entry.id in scene.standalone or entry.id in scene.legacy) and not change.same_as_original else None
-        return result
+        return base, pick
 
     def change(self, body: ZoneMaterialRequest) -> dict[str, object]:
         return self._one(self._scene(body.scheme, body.original_scheme_id), body)

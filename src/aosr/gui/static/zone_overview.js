@@ -717,8 +717,13 @@ async function applyMethod(items, method, written = () => {}) {
   const drafted = items.find(item => measuredDrafts[item.wall]);
   if (drafted) { zoneNote(`${wallNames[drafted.wall]}有還沒套用的實測阻抗草稿：先套用或取消`, "notice"); return false; }
   const preserve = method.mode === null;
-  const changes = items.filter(() => !preserve && (method.mode !== "fixed" || method.materialId)).map(item => method.mode === "fixed"
-    ? {wall: item.wall, zone: item.key, choice: "fixed", material_id: method.materialId} : {wall: item.wall, zone: item.key, choice: "original"});
+  // 背後（#1330）：由程式最佳化的區背後要換成材料庫一筆就送 backing（method.backing 沒給＝各區照存的）；背後換過的區不管改成什麼，
+  // 原牆都照設計設定記的那一份找（backing_wall）。
+  const behind = item => method.mode === "search" ? (method.backing !== undefined ? method.backing : zoneSetting(item.wall, item.key).backing_entry ?? "") : "";
+  const changes = items.filter(() => !preserve && (method.mode !== "fixed" || method.materialId)).map(item => ({...(method.mode === "fixed"
+    ? {wall: item.wall, zone: item.key, choice: "fixed", material_id: method.materialId}
+    : behind(item) ? {wall: item.wall, zone: item.key, choice: "backing", material_id: behind(item)} : {wall: item.wall, zone: item.key, choice: "original"}),
+  ...(zoneSetting(item.wall, item.key).backing_wall ? {backing_wall: zoneSetting(item.wall, item.key).backing_wall} : {})}));
   let results = [];
   if (changes.length) {
     const document_ = wallDocument();
@@ -770,7 +775,7 @@ async function applyMethod(items, method, written = () => {}) {
     else zoneSameAsOriginal.delete(item.id);
   });
   const what = method.mode === "fixed" && method.materialId ? vprWords(`${ZONE_MODE_WORDS.fixed}：${libraryEntry(method.materialId).label}`) : ZONE_MODE_WORDS[method.mode];
-  const pickedNotes = new Set(results.filter(change => change.picked_entry ||
+  const pickedNotes = new Set(results.filter(change => change.picked_entry || change.backing_entry ||
     (method.mode === "keep_original" && change.origin === "original_scheme")).map(change => change.note));
   const unrestored = results.flatMap((change, index) => {
     if (changes[index].choice !== "original" || change.origin !== "unknown") return [];
@@ -796,8 +801,12 @@ function settingAfter(item, method, change) {
   delete next.allowed;
   if (change) {
     if (change.picked_entry) next.picked_entry = change.picked_entry; else delete next.picked_entry;
+    // 背後（#1330）：伺服器回了就照記（哪一筆、換之前的原牆），沒回就是背後放原牆了，兩格一起拿掉。
+    if (change.backing_entry) { next.backing_entry = change.backing_entry; next.backing_wall = change.backing_wall; }
+    else { delete next.backing_entry; delete next.backing_wall; }
   }
   if (method.mode === "fixed" && change?.same_as_original) next.mode = "keep_original";
+  if (next.mode !== "search") { delete next.backing_entry; delete next.backing_wall; }  // 背後只給由程式最佳化的區
   if (method.mode === "search" && !method.lists) next.allowed = listForWall(item.wall, method.allowed);
   if (method.mode === "search" && method.lists) {
     const list = method.lists.get(item.id);
@@ -998,6 +1007,10 @@ function draftProblem(items) {
     if (ranged.problem) return ranged.problem;
   }
   if (Number.isNaN(draftDepth(items))) return depthRefusedWords("「最深」", `＝${blankDepthWords(items)}`);
+  if (draft.mode === "search") {
+    const shallow = items.find(item => backingDepth(item) > totalDepth(item, draftDepth(items)) + 1e-9);
+    if (shallow) return `${items.length > 1 ? zoneWhereText(shallow) + "：" : ""}最深比背後的${backingName(libraryEntry(zoneBacking(shallow)))}還淺，放不下；把最深加大，或背後換回${originalFace(shallow.wall)}`;
+  }
   return draft.mode === "search" ? draft.rangeRefused : "";
 }
 async function applyDraft() {
@@ -1017,7 +1030,7 @@ async function applyDraft() {
   // 可調範圍（#1199）：改了才寫、只寫選中的區；先交伺服器判一次，紅就不套用（rangesPass）。
   const ticked = panelTicks(items);
   const ranges = ticked ? plannedRanges(items, ticked.lists, rangeEdits(items, ticked).edits ?? new Map()) : undefined;
-  const method = {mode: "search", lists, depth: draftDepth(items), ranges};
+  const method = {mode: "search", lists, depth: draftDepth(items), ranges, backing: draft.backing};
   if (ranges && !await rangesPass(items, method)) return false;
   return applyMethod(items, method, () => {
     if (ruled) keptRuleZone = ruled;
@@ -1106,8 +1119,62 @@ function materialShow(entry, wall) {
   return show;
 }
 function caseDepth(item, edited) {
+  const total = totalDepth(item, edited);
+  return Number.isFinite(total) ? Math.max(total - backingDepth(item), 0) : total;
+}
+// 「最深」三層取最小（從原牆往房間量，含背後換上去的那一筆）；caseDepth 是扣掉背後之後前面能用的。
+function totalDepth(item, edited) {
   const local = edited === undefined ? item.setting.max_depth_m : edited;
   return Math.min(local ?? Infinity, zoneDesign?.room_max_depth_m ?? Infinity, zoneDesign?.wall_max_depth_m?.[item.wall] ?? Infinity);
+}
+/* ───── 背後換成材料庫一筆（#1330：例如 VPR 固定當背牆，程式只調前面的層） ───── */
+// 背後下拉列哪幾筆：能整塊當牆的固定材料、選中的每一面都用得到；多孔吸音不列（前面的棉本來就由程式調）。
+function backingEntries(walls) {
+  return assignableEntries().filter(entry => fixedSurface(entry) && entry.placement.family !== "porous" && walls.every(wall => usableHere(entry, wall)));
+}
+// 一區背後是哪一筆（"" 是原牆）：小框動過照小框，沒動照存的。
+function zoneBacking(item) { return draft?.mode === "search" && draft.backing !== undefined ? draft.backing : zoneSetting(item.wall, item.key).backing_entry ?? ""; }
+// 選中的幾區背後都一樣就回那一筆（"" 是原牆），不一樣回 undefined。
+function panelBacking(items) {
+  const ids = new Set(items.map(zoneBacking));
+  return ids.size === 1 ? [...ids][0] : undefined;
+}
+function backingDepth(item) {
+  const entry = zoneBacking(item) ? libraryEntry(zoneBacking(item)) : null;
+  return entry ? fixedLayers(entry).reduce((sum, layer) => sum + (typeof layer.thickness_m === "number" ? layer.thickness_m : 0), 0) : 0;
+}
+// 背後那一筆在標籤、剖面條裡的短名：名字第一段（「VPR 鋼板 1 mm＋…」叫 VPR）；完整名字在下拉裡。
+function backingName(entry) { return entry.label.split(/[ ＋（]/)[0] || entry.label; }
+function backingRow(items, walls) {
+  const box = el("div", "zv-backing"); box.id = "zone-panel-backing";
+  const chosen = panelBacking(items), entry = chosen ? libraryEntry(chosen) : null;
+  const label = el("label", "zv-extra-name", entry ? "背後（固定，不調）" : "背後"); label.htmlFor = "zone-panel-backing-pick";
+  const pick = el("select", "zv-backing-pick"); pick.id = "zone-panel-backing-pick";
+  if (chosen === undefined) { const mixed = el("option", null, "各區不同（不改）"); mixed.value = "*"; pick.append(mixed); }
+  const own = el("option", null, walls.length === 1 ? originalFace(walls[0]) : "原本的面"); own.value = ""; pick.append(own);
+  const listed = backingEntries(walls);
+  if (entry && !listed.includes(entry)) listed.push(entry);
+  const labels = {resonant: "共振吸音", custom: "我組的", surface: "門窗與牆面"};
+  for (const family of ["custom", "resonant", "surface"]) {
+    const members = listed.filter(item => (labels[item.placement.family] ? item.placement.family : "surface") === family);
+    if (!members.length) continue;
+    const group = el("optgroup"); group.label = labels[family];
+    for (const item of members) { const option = el("option", null, vprWords(item.label)); option.value = item.id; group.append(option); }
+    pick.append(group);
+  }
+  pick.value = chosen === undefined ? "*" : chosen;
+  pick.onchange = () => { draft.backing = pick.value === "*" ? undefined : pick.value; markDraftEdited(); renderZoneOverview(); };
+  box.append(label, pick);
+  if (entry) {
+    const strip = el("div", "zv-layers zv-backing-strip"); strip.id = "zone-panel-backing-strip";
+    const tuned = el("div", "zv-l-air"); tuned.append(el("span", null, "程式調"));
+    const depth = fixedDepthWords(entry).replace("總厚約 ", "").replace("（不含薄板）", "");
+    const fixed = el("div", "zv-l-foam"); fixed.append(el("span", null, `${backingName(entry)}${depth ? " " + depth : ""}`));
+    const wall = el("div", "zv-l-wall"); wall.append(el("span", null, "牆"));
+    strip.append(tuned, fixed, wall);
+    box.append(strip);
+  }
+  return box;
 }
 // 逐區原勾選留在設計檔。顯示與開跑取同一支伺服器判斷；晚到的回覆不能蓋過新草稿。
 let candidatePreview = null;
@@ -1211,7 +1278,9 @@ function awayLines(items) {
 }
 function deepestRow(items, walls, sync) {
   const row = el("div", "zv-extra zv-deepest"); row.id = "zone-panel-deepest";
-  const name = el("label", "zv-extra-name", "最深（含空腔）"); name.htmlFor = "zone-panel-depth";
+  const behind = draft.mode === "search" ? panelBacking(items) : "";
+  const backing = behind ? libraryEntry(behind) : null;
+  const name = el("label", "zv-extra-name", backing ? `最深（含 ${backingName(backing)}）` : "最深（含空腔）"); name.htmlFor = "zone-panel-depth";
   const input = el("input", "zv-depth"); input.type = "number"; input.min = "0"; input.step = "any"; input.id = "zone-panel-depth";
   input.value = draft.depthText ?? shownDepth(items);
   if (draft.depthText !== null) input.dataset.typed = "1";  // 畫的是打到一半的字：重畫後放回焦點時不整格反白（renderZoneOverview）
@@ -1238,6 +1307,16 @@ function deepestRow(items, walls, sync) {
   const from = walls.length === 1 ? originalFace(walls[0]) : "原本的面";
   input.title = `從${from}往房間算，空白＝${blankDepthWords(items)}`;
   row.append(name, input, el("span", "zv-unit", "cm"));
+  // 背後換過：旁邊一小字講前面那幾層最多能用多深（最深扣掉背後那一筆），打字時跟著改；最深不限就不寫。
+  if (backing) {
+    const room = el("span", "zv-front-room"); room.id = "zone-panel-front-room";
+    const front = () => {
+      const value = Math.min(...items.map(item => caseDepth(item, draftDepth(items))));
+      room.textContent = Number.isFinite(value) ? `前面最多 ${centimetres(value)} cm` : "";
+    };
+    front(); row.append(room);
+    input.addEventListener("input", front);
+  }
   input.placeholder = `空白＝${blankDepthWords(items)}`;
   input.style.width = `${input.placeholder.length + 2.5}em`;
   if (lost) row.append(lost);
@@ -1248,7 +1327,11 @@ function candidateIds(ticks) {
   const order = new Set([...(draft.order ?? []), ...ticks.ids]);
   return [...order].filter(id => id !== ZONE_NONE && ticks.count(id));
 }
-function candidateName(id) { return id === ZONE_NONE ? "也可以不貼" : vprWords(choiceName(id)); }
+function candidateName(id) {
+  if (id !== ZONE_NONE) return vprWords(choiceName(id));
+  const behind = draft?.mode === "search" ? panelBacking(chosenItems()) : "";
+  return behind && libraryEntry(behind) ? `也可以不貼（只有 ${backingName(libraryEntry(behind))}）` : "也可以不貼";
+}
 function zoneNumbers(items) {
   const walls = [...new Set(items.map(item => item.wall))];
   return walls.map(wall => (walls.length > 1 ? wallNames[wall] : "") +
@@ -1730,7 +1813,7 @@ function searchForm(items, walls, sync) {
   if (!raw) {
     const unknown = el("p", "zv-list-hint", "程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）");
     unknown.id = "zone-panel-search-from";
-    return [deepestRow(items, walls, sync), unknown];
+    return [backingRow(items, walls), deepestRow(items, walls, sync), unknown];
   }
   const form = el("section", "zv-form");
   const preview = previewCandidates(items, raw);
@@ -1739,7 +1822,7 @@ function searchForm(items, walls, sync) {
   const pendingMembers = new Set(preview.rows ? [] : raw.ids.flatMap(id => libraryEntry(id)?.preset_members ?? []));
   const independent = items.every(item => !Number.isFinite(caseDepth(item, draftDepth(items)))) && raw.lists.every(list => list.every(id => !pendingMembers.has(id)));
   if (!preview.rows && (!independent || preview.problem)) {
-    form.append(deepestRow(items, walls, sync), el("p", "zv-list-hint", preview.problem ?? "正在核對候選"));
+    form.append(backingRow(items, walls), deepestRow(items, walls, sync), el("p", "zv-list-hint", preview.problem ?? "正在核對候選"));
     if (preview.problem) form.append(button("zv-link", "重試", "zone-candidates-retry", () => { candidatePreview = null; renderZoneOverview(); }));
     return [form];
   }
@@ -1762,7 +1845,7 @@ function searchForm(items, walls, sync) {
   const list = el("div"); list.id = "zone-panel-list";
   const ids = candidateIds(ticks);
   const count = ids.length + Number(Boolean(ticks.count(ZONE_NONE)));
-  form.append(deepestRow(items, walls, sync));
+  form.append(backingRow(items, walls), deepestRow(items, walls, sync));
   const rows = [];
   const unavailable = ids.filter(id => !libraryEntry(id)).map(id => candidateRow(id, items, ticks, [], sync));
   if (!libraryEntries("optimizable").some(entry => pickerFits(entry, walls, ticks))) {

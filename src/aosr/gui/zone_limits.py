@@ -50,7 +50,7 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import NONE_TARGET, SCHEME_MATERIAL, MaterialGradientSettings, centimeters, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, narrowed_family, range_problem, ranged_misfits, target_fit
+from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, fixed_material_depth_m, narrowed_family, range_problem, ranged_misfits, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
@@ -134,8 +134,12 @@ class DepthCap:
 
     value_m: float
     level: DepthLevel
+    # 背後換成材料庫一筆時那一筆的總深（#1330）：``value_m`` 已經扣掉它，是前面那幾層能用的深度；沒換是 0。
+    backing_m: float = 0.0
 
     def words(self) -> str:
+        if self.backing_m > 0:
+            return f"{self.value_m:g} 公尺（{LEVEL_WORDS[self.level]}的上限扣掉背後 {self.backing_m:g} 公尺）"
         return f"{self.value_m:g} 公尺（{LEVEL_WORDS[self.level]}的上限）"
 
 
@@ -164,6 +168,43 @@ def depth_cap(design: DesignSettings | None, wall: str, zone: str) -> DepthCap |
         return None
     value, level = min(given, key=lambda pair: pair[0])
     return DepthCap(value, level)
+
+
+def backing_depth_m(design: DesignSettings | None, wall: str, zone: str, material: object) -> float | None:
+    """這一區背後換成材料庫一筆時（#1330，設計設定有 ``backing_entry``）那一筆的總深；沒換回 None。
+    量的是方案那一區現在的材料（換上去的就是它，搜尋也照它當背材），量法同固定材料（``fixed_material_depth_m``，
+    沒有厚度欄的層計零；量不出來當 0）。"""
+    item = design.zones.get(wall, {}).get(zone) if design is not None else None
+    if item is None or item.mode != "search" or item.backing_entry is None:
+        return None
+    return fixed_material_depth_m(material) or 0.0
+
+
+def front_cap(design: DesignSettings | None, wall: str, zone: str, material: object) -> DepthCap | None:
+    """搜尋那幾層實際能用的上限：「最深」從原牆往房間量、含背後換上去的那一筆，所以扣掉它（#1330）；
+    最深比背後那一筆還淺時回 None：前面那幾層不必再判，那一區由 :func:`backing_problems` 那一條紅字擋、只講那一句。
+    沒換背後就是 :func:`depth_cap`。"""
+    cap = depth_cap(design, wall, zone)
+    backing = backing_depth_m(design, wall, zone, material)
+    if cap is None or backing is None or backing <= 0:
+        return cap
+    if backing > cap.value_m + EDGE_MERGE_TOL:
+        return None
+    return DepthCap(max(cap.value_m - backing, 0.0), cap.level, backing)
+
+
+def backing_problems(design: DesignSettings | None, wall: str, zone: str, material: object,
+                     label: Callable[[str], str]) -> list[Problem]:
+    """最深放不下背後那一筆就擋（#1330）：前面一層都還沒放，最深已經比背後那一筆淺。"""
+    cap = depth_cap(design, wall, zone)
+    backing = backing_depth_m(design, wall, zone, material)
+    if cap is None or backing is None or backing <= cap.value_m + EDGE_MERGE_TOL:
+        return []
+    item = design.zones[wall][zone] if design is not None else None
+    name = label(item.backing_entry) if item is not None and item.backing_entry is not None else "背後那一筆"
+    return [Problem(code="depth_backing", level="red",
+                    text=f"最深 {cap.value_m:g} 公尺（{LEVEL_WORDS[cap.level]}的上限）比背後的「{name}」{backing:g} 公尺還淺，放不下；"
+                         "把最深加大，或背後換回原牆")]
 
 
 def added_depth(material: SurfaceMaterial) -> float | None:
@@ -549,10 +590,11 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
                 continue
             setting = design.zones.get(wall, {}).get(key) if design else None
             mode = setting.mode if setting else DEFAULT_MODE
-            cap = depth_cap(design, wall, key)
-            if cap is not None and mode != "keep_original":
-                caps.setdefault(wall, {})[key] = {"value_m": cap.value_m, "level": cap.level, "words": cap.words()}
             material = _material(entry.get("material"))
+            cap = front_cap(design, wall, key, material)
+            if cap is not None and mode != "keep_original":
+                caps.setdefault(wall, {})[key] = {"value_m": cap.value_m, "level": cap.level, "words": cap.words(),
+                                                  **({"backing_m": cap.backing_m} if cap.backing_m > 0 else {})}
             current = folded if folded is not None else material
             lines = found.setdefault(key, [])
             construction = catalog.construction(room, wall, key, entry, current, setting, lines)
@@ -560,7 +602,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             if mode == "search":
                 catalog.record_candidates(wall, key, setting, cap, include_candidate_rows)
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
-                lines.extend(problems)
+                lines.extend([*backing_problems(design, wall, key, material, catalog.label), *problems])
                 if lines_by_group:
                     caps[wall][key]["targets"] = lines_by_group
             if range_check is not None and mode == "fixed" and material is not None:
@@ -609,6 +651,10 @@ class _ZoneCatalog:
             self.load_error = Problem(code="materials_unreadable", level="red",
                                       text=f"查不了由程式最佳化的區放不放得下清單裡的材料、也認不出指定貼一種的區是不是選了材料庫的材料：{error}")
             return None
+
+    def label(self, identifier: str) -> str:
+        """材料庫那一筆的名字；材料庫讀不進來就寫代號。"""
+        return self.targets.label(identifier) if self.targets is not None else identifier
 
     def required(self) -> DepthTargets | None:
         targets = self.targets

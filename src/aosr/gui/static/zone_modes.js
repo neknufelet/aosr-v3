@@ -118,6 +118,10 @@ function settledSetting(setting, kept) {
     setting = {...setting};
     delete setting.picked_entry;
   }
+  if (setting.mode !== "search" && ("backing_entry" in setting || "backing_wall" in setting)) {  // 背後只給由程式最佳化的區（#1330）
+    setting = {...setting};
+    delete setting.backing_entry; delete setting.backing_wall;
+  }
   if (setting.allowed) {
     const allowed = keepReferenceOut(setting.allowed, kept);
     if (allowed.length !== setting.allowed.length) setting = {...setting, allowed: allowed.length ? allowed : [ZONE_NONE]};
