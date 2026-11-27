@@ -296,8 +296,8 @@ def test_delete_pair_before_limits_reply(tmp_path: Path, browser: Browser, undo:
             assert _zones(page, "y0")[0]["area"] == "whole_wall"
             assert _drawn(page, "yL") == opposite
         finally:
-            page.unroute("**/api/zone-limits")
             _release(held)
+            page.unroute("**/api/zone-limits")
 
 
 @pytest.mark.parametrize("delete", [False, True], ids=["move", "delete"])
