@@ -185,6 +185,11 @@ def _weld(triangles: Sequence[LayerTriangle], weld_m: float) -> tuple[NDArray[np
     return ids, layers
 
 
+def welded_vertex_ids(triangles: Sequence[LayerTriangle], weld_m: float) -> NDArray[np.int64]:
+    """(N, 3) 焊點後的頂點編號：編號是該群代表點在「全部角點攤平」裡的位置，切網格那一支要共用頂點。"""
+    return _weld(triangles, weld_m)[0]
+
+
 def _edges(ids: NDArray[np.int64]) -> list[tuple[int, int, int]]:
     """每個三角形的三條有向邊 (三角形序號, 起點, 終點)。"""
     return [(index, int(row[i]), int(row[(i + 1) % 3])) for index, row in enumerate(ids) for i in range(3)]
