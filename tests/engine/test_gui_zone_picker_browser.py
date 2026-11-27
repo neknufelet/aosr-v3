@@ -867,6 +867,8 @@ def test_clicking_a_visible_map_zone_keeps_the_scroll_position(tmp_path: Path, b
         _open_overview(page)
         open_groups(page)
         pane = page.locator(".zv-mapwrap")
+        # 等平面圖那一欄真的捲得動才捲：還沒捲得動時 scrollTo 不動、讀回 0（11-27 雲端紅過一次）。
+        page.wait_for_function("() => { const pane = document.querySelector('.zv-mapwrap'); return pane.scrollHeight > pane.clientHeight; }")
         pane.evaluate("node => node.scrollTo(0, 60)")
         before = pane.evaluate("node => node.scrollTop")
         assert before > 0
