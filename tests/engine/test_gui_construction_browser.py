@@ -7,6 +7,7 @@ from playwright.sync_api import Browser, Route
 from aosr.gui.compare_view import scheme_differences
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import scheme_open_button
 from tests.engine._gui_cache import gui_load_result_memo as gui_load_result_memo, gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import mixed_scheme
 from tests.engine._furniture_cases import reference_document
@@ -62,9 +63,9 @@ def test_input_opens_construction_without_rewriting_layers(tmp_path: Path, brows
     (tmp_path / "schemes" / "construction.json").write_text(scheme.model_dump_json())
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("construction")
+        open_button = scheme_open_button(page, "construction")
         with page.expect_response("**/api/input-preview") as response:
-            page.locator("#open-scheme").click()
+            open_button.click()
         assert response.value.status == 200
         page.wait_for_function("!document.querySelector('main').inert")
         assert page.locator("#layer-floor-0-surface_mass_kg_m2").input_value() == "0.15"

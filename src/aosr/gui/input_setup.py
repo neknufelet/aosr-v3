@@ -17,7 +17,8 @@ from aosr.config.construction_presets import load_construction_presets
 from aosr.gui.construction_input import material_field_values, material_open_area_texts, web_scheme_problems
 from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS
-from aosr.gui.wall_words import draft_wall_words
+from aosr.gui.room_facts import metres, room_facts
+from aosr.gui.wall_words import draft_layout, draft_wall_words
 from aosr.gui.zone_edit import zone_cut_defaults
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
@@ -413,6 +414,23 @@ def placement_warnings(document: dict[str, object]) -> list[str]:
     return lines
 
 
+def current_posture(document: dict[str, object]) -> str | None:
+    """主位高度、沙發、桌面剛好是哪一個快捷按出來的樣子（輸入頁主位那一行的「已按下」）；都不是回 None。
+
+    方案沒有存「現在是哪一種姿勢」這一格，只能照資料比：高度比寫出來的字（到公分），沙發、桌面只看本頁能改的那幾件。
+    """
+    layout = draft_layout(document)
+    if layout is None:
+        return None
+    height = metres(layout.receiver_set.primary.position_m[2])
+    roles = {role: str(item["kind"]) for item in _items(document) if (role := editable_role(item)) is not None}
+    for name, preset in SHORTCUTS.items():
+        if (height == metres(cast(float, preset["ear_height_m"])) and ("sofa" in roles) == preset["sofa"]
+                and roles.get("table") == preset["table"]):
+            return name
+    return None
+
+
 def input_preview(document: dict[str, object], capabilities: CapabilityTable,
                   directivity: DirectivityDefaults) -> dict[str, object]:
     """房間座標只呼叫 absolute_furniture；高度訊息直接用原驗證回的中文句。"""
@@ -452,4 +470,6 @@ def input_preview(document: dict[str, object], capabilities: CapabilityTable,
             "field_values": input_field_values(document),
             # 牆名跟著喇叭與主位走（#1134）；別格填錯照樣排得出來，房間、喇叭、座位本身不對才退回座標名。
             "wall_names": draft_wall_words(document),
+            # 輸入頁右卡「這間房現在」的四句與姿勢（#1265），字由這裡排。
+            "room_facts": {**room_facts(document), "posture": current_posture(document)},
             "stand_hint": hint, "mounts": mount_options(document, str(setup["kind"])) if setup else []}

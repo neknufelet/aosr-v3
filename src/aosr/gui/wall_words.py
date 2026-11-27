@@ -68,21 +68,28 @@ def wall_words(scheme: Scheme) -> dict[str, str]:
     return {wall: named.get(wall, word) for wall, word in WALLS.items()}
 
 
-def draft_wall_words(document: object) -> dict[str, str]:
-    """表單草稿的牆名：前後左右只看房間、喇叭、聲道、座位這四格，所以只拿這四格的原值、其餘換成不會錯的佔位值
-    再驗（存檔名稱清空、別格填錯時名字不跟著變回座標名，同一頁的檢查訊息才跟表單同一套叫法）；這四格本身驗不過照座標名。
-    佔位的聲速、密度只為了過驗證，不拿來算任何東西。"""
+def draft_layout(document: object) -> Scheme | None:
+    """表單草稿裡的房間、喇叭、聲道、座位這四格：只拿這四格的原值、其餘換成不會錯的佔位值再驗（存檔名稱清空、
+    別格填錯時照樣排得出來）；這四格本身驗不過回 None。佔位的聲速、密度只為了過驗證，不拿來算任何東西。
+    牆名（下一支）與輸入頁右卡那幾句（``room_facts``）共用這一份。"""
     if not isinstance(document, Mapping):
-        return dict(WALLS)
+        return None
     scene = document.get("scene")
     if not isinstance(scene, Mapping):
-        return dict(WALLS)
+        return None
     probe = {"schema_version": "aosr.scheme.v1", "scheme_id": "wall-words", "purpose": "wall-words",
              "source_model": "omnidirectional",
              **{key: document.get(key) for key in ("speakers", "channel_group", "receiver_set")},
              "scene": {"room_m": scene.get("room_m"), "sound_speed_m_s": 1.0, "density_kg_m3": 1.0,
                        "impedance_pa_s_per_m_by_wall": dict.fromkeys(WALLS, 1.0)}}
     try:
-        return wall_words(Scheme.model_validate(probe))
+        return Scheme.model_validate(probe)
     except ValueError:
-        return dict(WALLS)
+        return None
+
+
+def draft_wall_words(document: object) -> dict[str, str]:
+    """表單草稿的牆名：前後左右只看房間、喇叭、聲道、座位這四格（``draft_layout``），同一頁的檢查訊息才跟表單同一套叫法；
+    這四格本身驗不過照座標名。"""
+    layout = draft_layout(document)
+    return dict(WALLS) if layout is None else wall_words(layout)

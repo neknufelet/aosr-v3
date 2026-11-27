@@ -1,0 +1,165 @@
+# 文獻頻帶吸音率的硬面材料（門、窗、木地板、石膏板、磚、混凝土）。
+# 數字原樣照手冊，不換算；材料層照決策紙 catalog-absorption-random-incidence-paris-inversion 換成阻抗表。
+
+# 換成阻抗表時取點：涵蓋整條產品頻率軸（20 Hz 起、高頻到 2 萬 Hz 上下），每八度 6 點，以 1000 Hz 對齊（頻帶中心落在點上）；表內對數內插跟逐點反推最多差約 2.2%（12 筆實算，阻抗）。
+[table]
+lowest_hz = 10.0
+highest_hz = 24000.0
+points_per_octave = 6
+reference_hz = 1000.0
+
+[[surface]]
+id = "door_wood_solid"
+label = "實心木門"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.14, 0.10, 0.06, 0.08, 0.10, 0.10, 0.10]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 wooden_door：Solid wooden door。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "glass_single_3mm"
+label = "單層玻璃窗 3 mm"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.08, 0.04, 0.03, 0.03, 0.02, 0.02, 0.02]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。", "厚玻璃或大片窗在 125 Hz 常更高（手冊另一列重平板玻璃約 0.18），這筆取薄單層玻璃。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 glass_3mm：Single pane of glass, 3 mm。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "glass_double_gap30"
+label = "雙層玻璃窗（空氣層 30 mm 以上）"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.15, 0.05, 0.03, 0.03, 0.02, 0.02, 0.02]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 double_glazing_30mm：Double glazing, 2–3 mm glass, > 30 mm gap。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "wood_floor_on_joists"
+label = "木地板 16 mm＋40 mm 龍骨"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.18, 0.12, 0.10, 0.09, 0.08, 0.07, 0.07]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。", "原表這一列寫的是牆面木板釘在龍骨上，借來當架高木地板。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 wood_16mm：16 mm wood on 40 mm studs。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "wood_floor_on_sleepers"
+label = "木地板（墊木條鋪在混凝土上）"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.09, 0.06, 0.05, 0.05, 0.05, 0.04]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。", "原表這一列是觀眾席地板：兩層共 33 mm 木板、墊木條鋪在混凝土上。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 audience_floor：Audience floor, 2 layers, 33 mm on sleepers over concrete。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "gypsum_double_13mm_stud"
+label = "石膏板牆（雙層 13 mm、輕鋼架、50 mm 礦棉）"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.15, 0.10, 0.06, 0.04, 0.04, 0.05, 0.05]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 plasterboard：2 * 13 mm plasterboard on steel frame, 50 mm mineral wool in cavity, surface painted。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "plasterboard_ceiling"
+label = "石膏板吊頂（上方空氣層大）"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.20, 0.15, 0.10, 0.08, 0.04, 0.02]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 ceiling_plasterboard：Plasterboard ceiling on battens with large air-space above。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "brick_rendered"
+label = "磚牆（粉刷）"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.01, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 brickwork：Walls, rendered brickwork。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "brick_painted"
+label = "磚牆（勾平縫、油漆）"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.01, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 smooth_brickwork_flush_pointing：Smooth brickwork with flush pointing, painted。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "concrete_smooth"
+label = "平滑混凝土（未上漆）"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.01, 0.01, 0.02, 0.02, 0.02, 0.05, 0.05]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 unpainted_concrete：Smooth unpainted concrete。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "concrete_floor"
+label = "混凝土地板"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.01, 0.03, 0.05, 0.02, 0.02, 0.02, 0.02]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 concrete_floor：Concrete floor。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""
+
+[[surface]]
+id = "hard_surface_average"
+label = "一般硬牆面（磚、粉刷、硬地板平均）"
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.02, 0.02, 0.03, 0.03, 0.04, 0.05, 0.05]
+links = ["https://pyroomacoustics.readthedocs.io/en/stable/pyroomacoustics.materials.database.html", "https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip"]
+notes = ["估計，非本件實測：手冊的無規入射頻帶吸音率，125 Hz 以下用 125 Hz 的值延伸，低頻共振（門板、窗、架高地板）沒有算進去。"]
+source = """
+pyroomacoustics materials database（材料資料庫網頁）列 hard_surface：Walls, hard surfaces average (brick walls, plaster, hard floors, etc.)。
+這份表與 PTB（德國聯邦物理技術研究院）吸音率表 abstab_wf.xls 同源：本 repo furniture_materials.toml 已逐列核過的 3 mm 單層玻璃（PTB 第 207 列）與 16 mm 木板＋40 mm 龍骨（PTB 第 420 列）兩列，數字與這份表逐帶相同；其餘列沒有回 PTB 原表逐列核對（未驗，推測同源）。
+吸音率當無規入射值，依決策紙 catalog-absorption-random-incidence-paris-inversion：log10 頻率內插、兩端延伸、Paris 公式反推硬側實數阻抗。
+"""

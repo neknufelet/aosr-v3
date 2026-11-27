@@ -336,7 +336,7 @@ async function rerun(url, button) {
   const data = await response.json().catch(() => ({}));
   button.disabled = response.ok;
   $("rerun-state").textContent = response.ok ?
-    "已開始重算。算完後回方案輸入頁的結果清單，選新算好的那一份再比較" : rerunProblem(response, data);
+    "已開始重算。算完後回方案輸入頁，打開頂條「算過的結果與比較」，勾新算好的那一筆再比較" : rerunProblem(response, data);
 }
 // 重算沒開始的原因：伺服器寫好的中文照印；結果檔不見了（404，伺服器只回計算代號）寫一句白話；
 // 讀檔、解析出錯的英文原文收進技術細節。

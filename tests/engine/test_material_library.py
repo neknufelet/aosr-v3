@@ -17,10 +17,13 @@ from typing import cast
 import pytest
 from pydantic import TypeAdapter
 
+from aosr.config.catalog_surfaces import load_catalog_surfaces
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
+from aosr.config.physics_constants import load_physics_constants
 from aosr.materials import library
+from aosr.materials.catalog_absorption import random_incidence_absorption
 from aosr.materials.construction_models import Assembly, MeasuredImpedance, MeasuredImpedancePoint, SurfaceMaterial
 from aosr.runtime import child_process_env, configure_jax
 from tests.engine._cpu_pins import forward_cpu_pins
@@ -58,11 +61,12 @@ _ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
 
 
 def test_builtins_are_every_preset_as_fixed_and_every_family_as_optimizable() -> None:
-    """內建材料：構造預設每筆一個固定材料、梯度設定每個家族一個可最佳化材料，代號一一對上。"""
+    """內建材料：構造預設每筆一個固定材料、文獻硬面每筆一個固定材料、梯度設定每個家族一個可最佳化材料，代號一一對上。"""
     entries = library.builtin_entries()
     presets = load_construction_presets(config_path("construction_presets.toml"))
     families = load_material_gradient_settings(config_path("material_gradient.toml")).family
-    assert [e.id for e in entries if e.kind == "fixed"] == [p.id for p in presets]
+    catalog = load_catalog_surfaces(config_path("catalog_surfaces.toml"))[1]
+    assert [e.id for e in entries if e.kind == "fixed"] == [p.id for p in presets] + [c.id for c in catalog]
     assert [e.id for e in entries if e.kind == "optimizable"] == [f.id for f in families]
     assert all(e.provenance == "literature" for e in entries)
     assert len({e.id for e in entries}) == len({e.label for e in entries}) == len(entries)
@@ -84,7 +88,8 @@ def test_builtin_families_rebuild_todays_gradient_settings() -> None:
 def test_builtin_fixed_entries_carry_the_preset_material_unchanged() -> None:
     """內建固定材料的物理材料＝構造預設那份材料原樣驗證出來的。"""
     presets = {p.id: p for p in load_construction_presets(config_path("construction_presets.toml"))}
-    fixed = [e for e in library.builtin_entries() if isinstance(e, library.FixedEntry)]
+    fixed = [e for e in library.builtin_entries() if isinstance(e, library.FixedEntry) and e.id in presets]
+    assert len(fixed) == len(presets)
     for entry in fixed:
         assert entry.surface_material() == TypeAdapter(SurfaceMaterial).validate_python(presets[entry.id].material)
         assert (entry.label, entry.source, entry.links, entry.notes) == (
@@ -300,3 +305,25 @@ def test_fixed_surface_distinguishes_standalone_material_from_a_family() -> None
     entry = library.FixedEntry.model_validate(_fixed())
     assert library.fixed_surface(entry) == entry.surface_material()
     assert library.fixed_surface(_ENTRY.validate_python(_optimizable())) is None
+
+
+def test_catalog_surfaces_reproduce_their_handbook_absorption_at_each_band() -> None:
+    """文獻硬面（門、窗、木地板、石膏板、磚、混凝土）：換成阻抗表後，在每個頻帶中心用 Paris 公式正算回去，
+    等於手冊那一格；頻帶外平坦延伸，最低頻帶以下各點都等於最低頻帶那一格。"""
+    table, surfaces = load_catalog_surfaces(config_path("catalog_surfaces.toml"))
+    entries = {e.id: e for e in library.catalog_entries()}
+    rho_c = load_physics_constants(config_path("physics_constants.toml")).rho_c
+    assert list(entries) == [s.id for s in surfaces] and len(surfaces) >= 6
+    for surface in surfaces:
+        entry = entries[surface.id]
+        assert (entry.label, entry.provenance, entry.source) == (surface.label, "literature", surface.source)
+        assert entry.imaginary_missing and library.basis_label(entry) == library.BASIS_LABELS["approximate"]
+        material = entry.surface_material()
+        assert isinstance(material, MeasuredImpedance)
+        rows = {round(point.frequency_hz, 3): point.real_pa_s_m for point in material.points}
+        assert material.points[0].frequency_hz <= table.lowest_hz * 2 ** (1 / table.points_per_octave)
+        assert material.points[-1].frequency_hz >= table.highest_hz / 2 ** (1 / table.points_per_octave)
+        for band, alpha in zip(surface.band_center_hz, surface.absorption, strict=True):
+            back = random_incidence_absorption(rows[band] / rho_c)
+            assert back == pytest.approx(alpha, abs=1e-4), (surface.id, band)
+        assert material.points[0].real_pa_s_m == rows[surface.band_center_hz[0]]

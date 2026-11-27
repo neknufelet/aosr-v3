@@ -1,18 +1,20 @@
 """真瀏覽器考首頁存檔途中換方案（#1187）：按「儲存」「另存新名字」「計算這個方案」到伺服器回覆之前，
-「打開」「載入範本」換不了表單；存進去的方案與每一區做法是按下那一刻那一份；另存成功後首頁「已存的方案」馬上有新名字。
+「打開」「開一份新的」（從範本開一份新的）換不了表單；存進去的方案與每一區做法是按下那一刻那一份；另存成功後首頁「已存的方案」馬上有新名字。
 兩份方案與做法都是考卷自己編的（房間尺寸、深度上限、清單都不是任何真資料）；只攔網路、伺服器是考卷自己起的。"""
 import json
-import urllib.request
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 
 import pytest
-from playwright.sync_api import Browser, Page, Request, Route, expect
+from playwright.sync_api import Browser, Locator, Page, Request, Route, expect
 
+from tests.engine._input_page_steps import archive_then_recreate, commit_and_settle, open_example_scheme, open_save_as, open_scheme, scheme_open_button
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import zone_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_input_open_last_browser import LATEST as OL_LATEST, MIDDLE as OL_MIDDLE, STAMPS as OL_STAMPS
+from tests.engine.test_gui_input_open_last_browser import _opened as _ol_opened, _template as _ol_template, _write as _ol_write
 from tests.engine.test_gui_input_setup_browser import _filled
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 
@@ -26,6 +28,8 @@ DESIGN_B = {"schema_version": "aosr.zone_design.v1", "scheme_id": B, "room_max_d
             "zones": {"y0": {"whole_wall": {"mode": "keep_original"}},
                       "xL": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_24k", "glass_wool_96k", "none"]}}}}
 UNLOCKED = "!document.querySelector('main').inert"
+# 鎖頁期間由頁面程式按「開一份新的」（#1265 單元 5b，取代「載入範本」）被擋下時，那一塊裡寫的那一句。
+REFUSED_NEW = "上一個動作還沒做完，沒有開新的；等它做完再按一次「開一份新的」"
 
 
 def _prepare(tmp_path: Path) -> None:
@@ -87,9 +91,9 @@ def _press(page: Page, button: str) -> None:
     page.locator(button).evaluate("node => node.click()")
 
 
-def _try_open_b(page: Page) -> None:
+def _try_open_b(page: Page, button: Locator) -> None:
     """存檔卡在半路時去按「打開」B；等到有結果才回：被擋下（旁邊寫了原因）或真的換成 B 了。"""
-    _press(page, "#open-scheme")
+    button.evaluate("node => node.click()")
     page.wait_for_function(
         "name => document.getElementById('open-note').textContent !== '' ||"
         " (document.getElementById('save-id').value === name && !document.querySelector('main').inert)", arg=B)
@@ -112,12 +116,12 @@ def test_opening_another_scheme_while_saving_is_refused_and_the_saved_design_is_
         page = watched.page
         control = _control_save(page, tmp_path)
         b_before = _files(tmp_path, B)
-        page.locator("#scheme-list").select_option(B)
+        open_b = scheme_open_button(page, B)
         held = _hold_first(page, f"**/api/schemes/{A}", "PUT")
         seen = _requests(page)
         with page.expect_request(lambda r: _is_put(r, f"/api/schemes/{A}")):
             page.locator("#save").click()
-        _try_open_b(page)
+        _try_open_b(page, open_b)
         _assert_open_was_refused(page, seen)
         with page.expect_response(lambda r: _is_put(r.request, f"/api/designs/{A}")) as design:
             held[0].continue_()
@@ -135,20 +139,21 @@ def test_opening_another_scheme_while_saving_is_refused_and_the_saved_design_is_
 
 def test_loading_a_template_while_saving_as_is_refused_and_the_copy_is_the_pressed_scheme(
         tmp_path: Path, browser: Browser) -> None:
-    """另存卡在第一步（圖面檢查）時按「載入範本」：被擋下、旁邊照講；放行後新名字那份方案與做法就是按下那一刻的 A。"""
+    """另存卡在第一步（圖面檢查）時按「開一份新的」（從範本開一份新的）：被擋下、旁邊照講；放行後新名字那份方案與做法就是按下那一刻的 A。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         scheme_a, design_a = (json.loads(content) for content in _control_save(page, tmp_path))
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         held = _hold_first(page, "**/api/plan", "POST")
         seen = _requests(page)
         with page.expect_request("**/api/plan"):
             page.locator("#save-as").click()
-        _press(page, "#load-template")
-        page.wait_for_function("document.getElementById('template-note').textContent !== ''")
+        _press(page, "#new-scheme-go")
+        page.wait_for_function("document.getElementById('new-scheme-note').textContent !== ''")
         assert page.evaluate("document.querySelector('main').inert") is True
-        assert page.locator("#template-note").inner_text() == "上一個動作還沒做完，沒有載入範本；等它做完再按一次「載入範本」"
+        assert page.locator("#new-scheme-note").inner_text() == REFUSED_NEW
         assert page.evaluate("[scheme.scheme_id, zoneDesign.scheme_id]") == [A, A]
         assert not any(line.startswith("GET /api/example") for line in seen)
         # 鎖頁擋不到的路在半路改了一格（同最後一題）：另存也是先抄、後等，新名字那份不帶這一格。
@@ -164,7 +169,7 @@ def test_loading_a_template_while_saving_as_is_refused_and_the_copy_is_the_press
         assert stored_design == design_a | {"scheme_id": COPY}
         assert page.evaluate("[scheme.scheme_id, zoneDesign.scheme_id, document.getElementById('save-id').value]") == [COPY, COPY, COPY]
         expect(page.locator("#save-as-note")).to_have_class("ok")
-        expect(page.locator("#template-note")).to_contain_text("沒有載入範本")
+        expect(page.locator("#new-scheme-note")).to_contain_text("沒有開新的")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -175,13 +180,13 @@ def test_calculate_starts_the_scheme_that_was_on_the_form_when_pressed(tmp_path:
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         control = _control_save(page, tmp_path)
-        page.locator("#scheme-list").select_option(B)
+        open_b = scheme_open_button(page, B)
         started = _catch_start(page)
         held = _hold_first(page, f"**/api/schemes/{A}", "PUT")
         seen = _requests(page)
         with page.expect_request(lambda r: _is_put(r, f"/api/schemes/{A}")):
             page.locator("#calculate").click()
-        _try_open_b(page)
+        _try_open_b(page, open_b)
         _assert_open_was_refused(page, seen)
         with page.expect_request(lambda r: r.method == "POST" and urlsplit(r.url).path == "/api/runs"):
             held[0].continue_()
@@ -200,14 +205,15 @@ def test_save_as_shows_the_new_name_on_the_home_screen_without_a_reload(tmp_path
         page = watched.page
         _open_scheme(page, A)
         page.wait_for_load_state("networkidle")
-        expect(page.locator(f"#home-schemes li[data-scheme='{A}']")).to_have_count(1)
-        expect(page.locator(f"#home-schemes li[data-scheme='{COPY}']")).to_have_count(0)
+        expect(page.locator(f"#home-schemes [data-scheme='{A}']")).to_have_count(1)
+        expect(page.locator(f"#home-schemes [data-scheme='{COPY}']")).to_have_count(0)
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         with page.expect_response(lambda r: _is_put(r.request, f"/api/schemes/{COPY}")) as saved:
             page.locator("#save-as").click()
         assert saved.value.ok, saved.value.text()
-        expect(page.locator(f"#home-schemes li[data-scheme='{COPY}']")).to_have_count(1)
-        assert page.locator("#scheme-list").input_value() == COPY
+        expect(page.locator(f"#home-schemes [data-scheme='{COPY}']")).to_have_count(1)
+        expect(page.locator(f'[data-scheme="{COPY}"] .home-open')).to_have_attribute("aria-current", "true")
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -249,12 +255,13 @@ def test_saving_while_another_scheme_is_being_opened_is_refused(tmp_path: Path, 
         _open_scheme(page, A)
         page.wait_for_load_state("networkidle")
         before = (_files(tmp_path, A), _files(tmp_path, B))
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
-        page.locator("#scheme-list").select_option(B)
+        open_b = scheme_open_button(page, B)
         held = _hold_first(page, f"**/api/schemes/{B}", "GET")
         seen = _requests(page)
         with page.expect_request(f"**/api/schemes/{B}"):
-            page.locator("#open-scheme").click()
+            open_b.click()
         _press(page, "#save-as")
         expect(page.locator("#save-as-note")).to_have_text("沒有另存：上一個動作還沒做完，等它做完再按一次「另存新名字」")
         _press(page, "#save")
@@ -331,6 +338,7 @@ def test_a_save_as_reply_does_not_rename_a_page_that_was_swapped_behind_the_lock
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         scheme_a, design_a = (json.loads(content) for content in _control_save(page, tmp_path))
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         held = _hold_first(page, f"**/api/schemes/{COPY}", "PUT")
         with page.expect_request(lambda r: _is_put(r, f"/api/schemes/{COPY}")):
@@ -439,33 +447,37 @@ def test_a_field_changed_during_the_save_gets_its_preview_once_the_page_unlocks(
 
 
 def test_the_refused_words_beside_the_button_outlive_the_preview_asked_after_unlock(tmp_path: Path, browser: Browser) -> None:
-    """#1193：表單有一格收不下（預覽回 400）時按「另存新名字」，卡在圖面檢查那一步去按「載入範本」：被擋下、旁邊照講。
+    """#1193：表單有一格收不下（預覽回 400）時按「另存新名字」，卡在圖面檢查那一步去按「開一份新的」：被擋下、旁邊照講。
     放行後另存被拒、頁面解鎖、替目前這份補問一次預覽（也是 400，訊息列再換一次）：等那一次回覆處理完，
-    「載入範本」旁邊被擋的那一句與「另存新名字」旁邊沒有另存的原因都還在，訊息列講的是表單的問題。"""
+    「開一份新的」那一塊裡被擋的那一句與「另存新名字」旁邊沒有另存的原因都還在，訊息列講的是表單的問題。"""
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         # 開機那一份範例就夠：地板換成材料構造、第一層厚度清空，預覽就回 400（房間尺寸亂填預覽不拒）。
         _filled(page, "#material-kind-floor", "assembly")
         with page.expect_response("**/api/input-preview") as preview:
             page.locator("#layer-floor-0-thickness_m").fill("")
         assert preview.value.status == 400
         expect(page.locator("#messages")).to_have_class("notice")
+        # #1265 單元 6 起離開一格就自動檢查：先離開那一格、等那一次回來，下面攔的才是「另存新名字」自己那一次。
+        commit_and_settle(page, "#layer-floor-0-thickness_m")
+        open_save_as(page)
         page.locator("#save-as-id").fill(COPY)
         held = _hold_first(page, "**/api/plan", "POST")
         asked_again: list[Route] = []
         page.route("**/api/input-preview", lambda route: asked_again.append(route))
         with page.expect_request("**/api/plan"):
             page.locator("#save-as").click()
-        _press(page, "#load-template")
-        page.wait_for_function("document.getElementById('template-note').textContent !== ''")
-        refused = "上一個動作還沒做完，沒有載入範本；等它做完再按一次「載入範本」"
-        assert page.locator("#template-note").inner_text() == refused
+        _press(page, "#new-scheme-go")
+        page.wait_for_function("document.getElementById('new-scheme-note').textContent !== ''")
+        refused = REFUSED_NEW
+        assert page.locator("#new-scheme-note").inner_text() == refused
         # 補問那個請求攔在半路：這時另存自己的話都寫完了，才開始盯訊息列，放行後它一被改寫就是補問的回覆處理完了。
         with page.expect_request("**/api/input-preview"):
             held[0].continue_()
         page.wait_for_function(UNLOCKED)
         not_saved = page.locator("#save-as-note").inner_text()
-        assert not_saved.startswith("沒有另存：") and page.locator("#template-note").inner_text() == refused
+        assert not_saved.startswith("沒有另存：") and page.locator("#new-scheme-note").inner_text() == refused
         page.evaluate("""() => {
             window.saidAfterUnlock = false;
             new MutationObserver(() => { window.saidAfterUnlock = true; }).observe(
@@ -476,8 +488,8 @@ def test_the_refused_words_beside_the_button_outlive_the_preview_asked_after_unl
             asked_again[0].continue_()
         assert reply.value.status == 400
         page.wait_for_function("window.saidAfterUnlock")
-        assert page.locator("#template-note").inner_text() == refused
-        assert page.locator("#template-note").get_attribute("class") == "notice"
+        assert page.locator("#new-scheme-note").inner_text() == refused
+        assert page.locator("#new-scheme-note").get_attribute("class") == "notice"
         assert page.locator("#save-as-note").inner_text() == not_saved
         assert page.locator("#save-as-note").get_attribute("class") == "notice"
         assert page.locator("#messages").get_attribute("class") == "notice"
@@ -498,28 +510,28 @@ def _watch_messages(page: Page) -> None:
 @pytest.mark.parametrize("button", ["#save", "#calculate"])
 def test_the_refused_words_beside_the_button_outlive_a_save_the_server_turns_down(
         tmp_path: Path, browser: Browser, button: str) -> None:
-    """#1188 第 7 條：「儲存」（「計算」先存的那一步同一條路）卡在圖面檢查時按「載入範本」：被擋下、旁邊照講。
-    放行後伺服器不收這一次存檔（開機那一份範本改了一格，資料夾裡已經有同名的方案，照規矩不蓋掉）：訊息列寫伺服器的原因，
-    「載入範本」旁邊被擋的那一句還在——不能因為存檔自己也失敗，那一下就看起來像沒按到。"""
-    with _serve(tmp_path) as base:
-        example = json.loads(urllib.request.urlopen(f"{base}/api/example").read())["scheme"]
-    name = cast(str, example["scheme_id"])
-    _write(tmp_path, example)
-    before = (tmp_path / "schemes" / f"{name}.json").read_bytes()
+    """#1188 第 7 條：「儲存」（「計算」先存的那一步同一條路）卡在圖面檢查時按「開一份新的」：被擋下、那一塊裡照講。
+    放行後伺服器不收這一次存檔（開著的那一份從選單封存了、表單留著，資料夾裡又有了同名的方案，存檔當成新建，照規矩不蓋掉）：
+    訊息列寫伺服器的原因，「開一份新的」那一塊裡被擋的那一句還在——不能因為存檔自己也失敗，那一下就看起來像沒按到。"""
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.wait_for_function("document.body.dataset.inputReady === 'true'")
+        example = open_example_scheme(page, base, tmp_path)
+        name = cast(str, example["scheme_id"])
+        before = archive_then_recreate(page, tmp_path, name)
         with page.expect_response("**/api/input-preview") as preview:
-            page.locator("#room-Lx").fill(str(example["scene"]["room_m"]["Lx"] + 0.5))
+            page.locator("#room-Lx").fill(str(cast(dict[str, dict[str, float]], example["scene"])["room_m"]["Lx"] + 0.5))
         assert preview.value.ok
+        # 先離開那一格、讓自動檢查做完：按鈕按下那一刻不再有延後的那一次，攔住的第一個平面圖檢查就是存檔自己那一次。
+        with page.expect_response("**/api/plan"):
+            page.locator("#room-Lx").blur()
         page.wait_for_load_state("networkidle")
         held = _hold_first(page, "**/api/plan", "POST")
         with page.expect_request("**/api/plan"):
             page.locator(button).click()
-        _press(page, "#load-template")
-        page.wait_for_function("document.getElementById('template-note').textContent !== ''")
-        refused = "上一個動作還沒做完，沒有載入範本；等它做完再按一次「載入範本」"
-        assert page.locator("#template-note").inner_text() == refused
+        _press(page, "#new-scheme-go")
+        page.wait_for_function("document.getElementById('new-scheme-note').textContent !== ''")
+        refused = REFUSED_NEW
+        assert page.locator("#new-scheme-note").inner_text() == refused
         with page.expect_response(lambda r: _is_put(r.request, f"/api/schemes/{name}")) as put:
             held[0].continue_()
         assert not put.value.ok
@@ -528,8 +540,8 @@ def test_the_refused_words_beside_the_button_outlive_a_save_the_server_turns_dow
         _settle(page)
         assert page.locator("#messages").get_attribute("class") == "notice"
         assert page.locator("#messages").inner_text() == turned_down
-        assert page.locator("#template-note").inner_text() == refused
-        assert page.locator("#template-note").get_attribute("class") == "notice"
+        assert page.locator("#new-scheme-note").inner_text() == refused
+        assert page.locator("#new-scheme-note").get_attribute("class") == "notice"
         assert (tmp_path / "schemes" / f"{name}.json").read_bytes() == before
         assert watched.page_errors == []
 
@@ -555,8 +567,7 @@ def test_why_it_was_not_opened_stays_beside_open_when_the_preview_asked_afterwar
         # 存著的那一份讀出來就檢查不過，「打開」自己不問預覽：之後唯一的一次預覽就是補問的那一次，攔在半路。
         asked: list[Route] = []
         page.route("**/api/input-preview", lambda route: asked.append(route))
-        page.locator("#scheme-list").select_option("race-outside")
-        page.locator("#open-scheme").click()
+        open_scheme(page, "race-outside")
         page.wait_for_function("document.getElementById('open-note').textContent !== ''")
         not_opened = page.locator("#open-note").inner_text()
         assert not_opened.startswith("沒有打開「race-outside」：") and page.locator("#save-id").input_value() == shown
@@ -577,3 +588,114 @@ def test_why_it_was_not_opened_stays_beside_open_when_the_preview_asked_afterwar
         assert "地板材料構造 › 第 1 層" in page.locator("#messages").inner_text()
         assert page.locator("#save-id").input_value() == shown
         assert watched.page_errors == []
+
+
+_RUN_ID = "a" * 32
+
+
+def _held(page: Page, held: list[Route], what: str) -> None:
+    """等攔下的請求出現（最多約 10 秒）。"""
+    for _ in range(500):
+        if held:
+            return
+        page.wait_for_timeout(20)
+    raise AssertionError(f"{what}沒有出去")
+
+
+def _hold_follow_and_save_plan(page: Page, mode: str, attack: dict[str, bool]) -> tuple[list[Route], list[Route]]:
+    """接進度那一步（儲存：/api/runs；另存：/api/runs/<代號>）與 ``attack`` 打開後的第一次圖面檢查都攔下來。"""
+    held_follow: list[Route] = []
+    held_save_plan: list[Route] = []
+
+    def on_runs(route: Route) -> None:
+        if mode == "save" and attack["on"]:
+            held_follow.append(route)
+        else:
+            route.continue_()
+
+    def on_run_item(route: Route) -> None:
+        if mode == "save":
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(
+                {"run_id": _RUN_ID, "scheme_id": "s-other", "status": "stopped", "display_text": "已停止", "stderr_tail": []}))
+        else:
+            held_follow.append(route)
+
+    def on_plan(route: Route) -> None:
+        if attack["on"] and not held_save_plan:
+            held_save_plan.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/api/runs", on_runs)
+    page.route(f"**/api/runs/{_RUN_ID}", on_run_item)
+    page.route("**/api/plan", on_plan)
+    return held_follow, held_save_plan
+
+
+def _turned_down_while_another_scheme_finishes_opening(tmp_path: Path, browser: Browser, mode: str) -> dict[str, str]:
+    """#1265 單元 5c 第三趟（複查第 1 條）：開一份有計算在跑的方案、接進度那一步還沒回來時改出一格檢查不過的（房長 -1），
+    按「儲存」或「另存新名字」；存檔那一次圖面檢查攔在半路，等「打開」尾端自己的那一次圖面檢查也送出去了才放行存檔那一次。
+    存檔那一次回來時已經不是最新的一次——帶著送出去那一份的檢查照樣要算數。回訊息列、頂條存檔那一句、另存旁那一句。"""
+    with _serve(tmp_path) as base:
+        doc = _ol_template(base)
+        _ol_write(tmp_path, "s-main", doc, OL_STAMPS[OL_LATEST])
+        _ol_write(tmp_path, "s-other", doc, OL_STAMPS[OL_MIDDLE])
+        with _open(browser, "about:blank", viewport_width=1440) as watched:
+            page = watched.page
+            attack = {"on": False}
+            held_follow, held_save_plan = _hold_follow_and_save_plan(page, mode, attack)
+            page.goto(base)
+            _ol_opened(page, "s-main")
+            page.wait_for_load_state("networkidle")
+            attack["on"] = True
+            page.evaluate(f'() => {{ activeRuns = [{{run_id: "{_RUN_ID}", scheme_id: "s-other", status: "running", display_text: "計算中"}}]; }}')
+            page.locator("#scheme-menu-button").click()
+            page.locator('#home-schemes [data-scheme="s-other"] button.home-open').click()
+            _held(page, held_follow, "接進度那一步的請求")
+            page.locator("#room-Lx").fill("-1")
+            if mode == "save":
+                page.locator("#save").click()
+            else:
+                page.locator("#save-as-toggle").click()
+                page.locator("#save-as-id").fill("copy-one")
+                page.locator("#save-as").click()
+            _held(page, held_save_plan, "存檔那一次圖面檢查")
+            held_open_plan: list[Route] = []
+            page.unroute("**/api/plan")
+            page.route("**/api/plan", lambda route: held_open_plan.append(route))
+            followed = {"running": []} if mode == "save" else {
+                "run_id": _RUN_ID, "scheme_id": "s-other", "status": "running", "display_text": "計算中", "stderr_tail": []}
+            held_follow[0].fulfill(status=200, content_type="application/json", body=json.dumps(followed))
+            _held(page, held_open_plan, "「打開」尾端那一次圖面檢查")
+            with page.expect_response("**/api/plan") as checked:
+                held_save_plan[0].continue_()
+            assert checked.value.status == 422, checked.value.status
+            # 存檔那一支做完（解鎖、頂條或另存旁邊寫好）才讀；「打開」那一次還攔著，蓋不到這幾處。
+            done = "#save-feedback" if mode == "save" else "#save-as-note"
+            page.wait_for_function("id => !inputBusy && document.querySelector(id).textContent !== ''", arg=done)
+            said = cast(dict[str, str], page.evaluate("""() => Object.fromEntries(
+                ['save-feedback', 'save-as-note', 'messages'].flatMap(id => [[id, document.getElementById(id).textContent],
+                    [id + '-class', document.getElementById(id).className]]))"""))
+            held_open_plan[0].continue_()
+            page.wait_for_load_state("networkidle")
+            assert not (tmp_path / "schemes" / "copy-one.json").exists()
+            assert watched.page_errors == []
+            return said
+
+
+def test_a_save_turned_down_by_the_plan_check_says_why_even_when_a_newer_check_is_on_its_way(
+        tmp_path: Path, browser: Browser) -> None:
+    """複查第 1 條（儲存）：頂條存檔那一句是紅字、寫圖面檢查的原因，不是上一次留下的綠字「檢查通過」。"""
+    said = _turned_down_while_another_scheme_finishes_opening(tmp_path, browser, "save")
+    assert said["save-feedback-class"] == "notice", said
+    assert "座標超出房間" in said["save-feedback"] and "檢查通過" not in said["save-feedback"], said
+    assert said["messages"] == said["save-feedback"], said
+
+
+def test_a_save_as_turned_down_by_the_plan_check_says_why_even_when_a_newer_check_is_on_its_way(
+        tmp_path: Path, browser: Browser) -> None:
+    """複查第 1 條（另存新名字）：另存旁邊寫「沒有另存：」加上圖面檢查的原因，不是斷尾；訊息列也是那個原因，不是清空。"""
+    said = _turned_down_while_another_scheme_finishes_opening(tmp_path, browser, "saveAs")
+    assert said["save-as-note-class"] == "notice", said
+    assert said["save-as-note"].startswith("沒有另存：") and "座標超出房間" in said["save-as-note"], said
+    assert "座標超出房間" in said["messages"], said

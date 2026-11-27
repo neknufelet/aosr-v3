@@ -1,10 +1,9 @@
-/* 每一區的做法（#1105，#1082 第 1-3 段）：立面圖下面一張表，這一面每一區（畫的、自動補的、整面一區）選
-   「指定貼一種」「不貼，保留原樣」「由程式最佳化」（設計檔裡叫 fixed／keep_original／search）；由程式最佳化的區一律列出
-   一份明確清單（程式可以從哪幾種裡選，存檔也寫明確的 allowed），改成由程式最佳化時直接帶好一組，不用先全勾再取消。材料選單只列這一面能貼的（#1176，分組由伺服器 /api/materials 的 placement 現算），其餘收在
-   最下面「顯示全部材料」裡分組列出、各一句理由；已經存在某一區的代號不管分到哪一組都照樣顯示。
-   做法存在設計設定（/api/designs，跟方案同名、跟著方案存）；方案那一區的材料由伺服器換（/api/zone-material）：
-   固定材料貼在原牆上、不貼與交給搜尋放回原牆。材料選單讀材料庫（/api/materials），不另做一份。
-   設計設定整份原樣帶著走（原方案、之後的段加的欄位都不丟），只改這張表管的那幾格。 */
+/* 每一區的做法（#1105，#1082 第 1-3 段）：每一區（畫的、自動補的、整面一區）是「指定貼一種」「不貼，保留原樣」「由程式最佳化」
+   （設計檔裡叫 fixed／keep_original／search）；由程式最佳化的區一律存一份明確清單（allowed）。
+   #1265 單元 3 之二第二趟起輸入頁那張舊做法表拆了：做法、材料、候選、最深都在「這間房貼什麼」那一頁的小框改（zone_overview.js，
+   換材料走 /api/zone-material/batch），輸入頁第 2 段右欄只列出來看（wall_section.js）；這一支留著做法的狀態、材料庫、共用的字與「拿去搜尋」。
+   做法存在設計設定（/api/designs，跟方案同名、跟著方案存）。材料選單讀材料庫（/api/materials），不另做一份。
+   設計設定整份原樣帶著走（原方案、之後的段加的欄位都不丟），只改做法管的那幾格。 */
 let zoneDesign = null;
 let zoneDesignStored = false;
 let zoneDesignNote = "";
@@ -12,21 +11,41 @@ let zoneDesignNote = "";
 let zoneDesignBroken = false;
 // 最近一次存方案時每一區的做法有沒有存成（沒設過、不必寫也算存成）；「拿去搜尋」靠它決定跳不跳。
 let zoneDesignSaved = false;
-// 頁面上那一份做法換過幾次（打開方案、載入範本各算一次）：存檔途中使用者換了方案，晚到的回覆不准把舊做法寫回來。
+// 頁面上那一份做法換過幾次（每打開一份方案算一次）：存檔途中使用者換了方案，晚到的回覆不准把舊做法寫回來。
 let zoneDesignGeneration = 0;
 let zoneLibrary = null;
 let zoneLibraryProblem = "";
-// 每一組材料的標題（伺服器 material_surfaces.GROUP_WORDS）；「顯示全部材料」打開才列不是這一面用的那幾組，只記在這一頁。
+// 每一組材料的標題（伺服器 material_surfaces.GROUP_WORDS）；小框「顯示全部材料」打開才列不是這一面用的那幾組。
 let zoneSurfaceGroups = {};
-let zoneSurfaceShort = {};  // 每一組的短名（伺服器 material_surfaces.GROUP_SHORT_WORDS）：「還有 N 筆不列出來」那一句用
-let zoneShowAll = false;
 let zoneNoteText = "";
 let zoneNoteKind = "";
+// 「拿去搜尋」（sendToSearch）沒送出去的那一句：{text, kind, generation}。輸入頁寫在頁底那顆鈕底下（zone-to-search-note，
+// renderSearchAction），「這間房貼什麼」那一頁照舊寫在 zone-page-note（同一句，zoneNote 寫的）；下一次有別的回話（zoneNote）、
+// 換牆、換方案就拿掉。兩種句子收的時機不同（#1265 單元 3 之二收尾第二趟 B1）：
+// - 看著限制判決寫的（沒檢查成、超過限制、只放了固定成品、鋼板貼棉）：寫的時候記下那時問到第幾次限制判決（generation），
+//   之後又問了一次、新的那一份畫上去了，那一句講的是舊的樣子，收掉（收尾追加第 2 條）。按下去那一次存檔自己問的那一份不算之後。
+// - 講存檔結果的（做法沒存成、存檔途中換了方案、搜尋頁沒打開）：generation 是 null，判決再來幾份都不收——解鎖後自動補問的預覽
+//   換了牆名、重問限制，那一份跟存檔沒有關係；做法下一次存成了才收（prepareZoneDesignSave）。
+// 收的時候那一頁的回話一起收（dropSearchSaid，第二趟 D2）：zoneSearchSaid 在，zone-page-note 寫的就是它（別的回話會先把它清掉）。
+let zoneSearchSaid = null;
 // 同一份方案上次套用的候選清單，給新開的區當起點。
 let zoneLastAllowed = null;
-// 選的跟原牆一模一樣、做法自己跳成「不貼，保留原樣」的區（#1175／#1176）：那一列寫為什麼（八區的牆上，底部訊息常在畫面外）。
-// 「牆/區」→ 選的那一筆的名字；只記在這一頁，那一區再改做法、選別的、重切或換方案就拿掉。
+// 選的跟原牆一模一樣、做法自己跳成「不貼，保留原樣」的區（#1175／#1176）：那一區自己寫為什麼（八區的牆上，回話那一行常在畫面外）。
+// #1265 單元 3 之二第二趟起寫在第 2 段右欄那一區底下（wall_section.js），由「這間房貼什麼」小框套用時記（zone_overview.js 的 applyMethod）。
+// 「牆/區」→ {label：選的那一筆的名字, material：記下時那一區原本那一面的材料}。畫的時候只認 sameAsOriginalLabel：那一區原本那一面
+// 跟記下時一樣才寫（#1265 單元 3 之二收尾追加第 5 條：之後「換原本的牆」、換構造預設、套實測阻抗改了原本那一面，
+// 那一句講的就不是現在的樣子；從源頭比，不逐條路去清）。做法不另比（收尾植錯判走不到、拿掉）：改得到一區做法的只有 applyMethod
+// （小框套用、改規則、改回跟其他牆面一樣三個入口 → setZoneSetting），它每套用一次照新的結果重記或拿掉；清掉再復原、重切（自動補的代號重編）、換方案（含從範本開新的）都整面清掉。
 const zoneSameAsOriginal = new Map();
+function rememberSameAsOriginal(wall, key, label) {
+  const zone = zoneList(wall).find(item => zoneKey(item) === key);
+  zoneSameAsOriginal.set(`${wall}/${key}`, {label, material: structuredClone(zone.material)});
+}
+function sameAsOriginalLabel(wall, key) {
+  const said = zoneSameAsOriginal.get(`${wall}/${key}`);
+  const zone = said ? zoneList(wall).find(item => zoneKey(item) === key) : null;
+  return zone && sameMaterial(zone.material, said.material) ? said.label : null;
+}
 const ZONE_NONE = "none";
 const WOOL_48K = "glass_wool_48k";
 // 改成由程式最佳化時一開始放的就是這三種內建玻璃棉＋不貼（#1176，跟老闆講好的起點，不隨材料庫多了幾筆而變）。
@@ -63,6 +82,9 @@ function zoneSetting(wall, key) { return zoneDesign?.zones?.[wall]?.[key] ?? {mo
 // 這一類不進程式最佳化：一區的清單不准「新加」這種代號，本來就存著的照樣留著、可以拿掉（伺服器開跑時會點名拒收）。
 let zoneReference = null;
 function referenceOnly(id) { return Boolean(zoneReference?.ids.includes(id)) && libraryEntry(id)?.kind !== "construction"; }
+// 由程式最佳化的清單裡程式真的會挑的那幾種（#1208：「鋼板直接貼在棉上」那一類不算）；「這間房貼什麼」小框「從 N 種裡選」
+// 與第 2 段右欄「從 N 種裡挑」同一支（#1265 單元 3 審查設計洞 2）。
+function pickableChoices(list) { return list.filter(id => !referenceOnly(id)); }
 // 一份新清單裡這一類的代號，只留那一區本來就存著的（kept）。每一條會寫清單的路都過這一支。
 function keepReferenceOut(next, kept) { return next.filter(id => !referenceOnly(id) || (kept ?? []).includes(id)); }
 // 一區現在的材料是不是這一類：貼上去的那一筆，或原本的面本身（原牆就是材料庫裡那一筆）。材料庫認不到的層管不到。
@@ -115,9 +137,21 @@ function setZoneSetting(wall, key, setting) {
   design.zones[wall][key] = settledSetting(setting, design.zones[wall][key]?.allowed);
 }
 function zoneNote(text, kind) {
-  zoneNoteText = text; zoneNoteKind = kind;
-  // 做法表底下那一行，與六面一起看那一頁（zone_overview.js）結果列上面那一行，寫同一句。
-  for (const id of ["zone-note", "zone-page-note"]) { const line = $(id); if (line) { line.textContent = text; line.className = kind; } }
+  zoneNoteText = text; zoneNoteKind = kind; zoneSearchSaid = null;
+  // 六面一起看那一頁（zone_overview.js）結果列上面那一行。輸入頁舊做法表底下那一行跟著表拆了（#1265 單元 3 之二第二趟）：
+  // 那幾個動作只有舊表按得到；輸入頁還按得到、會回話的是頁底「交給程式最佳化 ▸」，回話走 searchNote。
+  const line = $("zone-page-note");
+  if (line) { line.textContent = text; line.className = kind; }
+}
+// 「拿去搜尋」的回話：那一頁照舊（zoneNote），輸入頁寫在頁底那顆鈕底下（renderSearchAction 讀 zoneSearchSaid）。
+// byVerdict：這一句是看著限制判決寫的（講存檔結果的傳 false，見 zoneSearchSaid 上面）。
+function searchNote(text, kind, byVerdict = true) {
+  zoneNote(text, kind);
+  zoneSearchSaid = {text, kind, generation: byVerdict ? zoneLimitsGeneration : null};
+  renderSearchAction();
+}
+function dropSearchSaid() {
+  zoneNote("", "");  // zoneNote 第一行就把 zoneSearchSaid 清掉
 }
 
 // 開舊方案：讀它的設計設定（沒有就是全部固定）；讀不到照講、不當成沒有。
@@ -136,13 +170,14 @@ async function fetchZoneDesign(name) {
 function applyZoneDesign(state) {
   zoneDesignGeneration += 1;
   zoneDesign = state.design; zoneDesignStored = state.stored; zoneDesignBroken = state.broken;
-  zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null; zoneSameAsOriginal.clear();
+  zoneDesignNote = state.note; zoneNote("", ""); zoneLimits = null; renderCheckState(); zoneSameAsOriginal.clear();
   zoneLastAllowed = null;  // 「上一次的組合」不跨方案（審查 11-15）
 }
-// 載入範本：新的方案，沒有設計設定。
-function resetZoneDesign() {
-  zoneDesignGeneration += 1; zoneDesign = null; zoneDesignStored = false; zoneDesignBroken = false; zoneDesignNote = ""; zoneNote("", "");
-  zoneLimits = null; zoneSameAsOriginal.clear(); zoneLastAllowed = null;
+// 做法這一次算存好了（寫了檔，或沒內容也沒存過、不用寫）：每一條這樣的路都只叫這一支（#1265 單元 3 之二收尾第三趟 E1）。
+function zoneDesignWritten() {
+  zoneDesignSaved = true;
+  window.zonePageSaved?.();  // 「這間房貼什麼」那一頁的「改的還沒存進檔案」那一句（zone_overview.js）
+  if (zoneSearchSaid?.generation === null) dropSearchSaid();  // 講存檔結果的那一句（做法沒存成…）：這一次存成了
 }
 // 存方案之後接著存設計設定（整份換上）；對不上方案的區先拿掉（伺服器會整份拒收），原方案指到自己就清掉。
 // 從來沒設過任何一區、伺服器上也沒有這一份，就不寫（舊方案存檔不多出一個檔）。
@@ -153,7 +188,7 @@ function prepareZoneDesignSave(name) {
   if (zoneDesignBroken) return async () => { throw new Error("原本的設計設定讀不到，這次沒存每一區的做法（免得蓋掉原本存的）"); };
   const touched = zoneDesign && designHasContent(zoneDesign);
   // 沒內容、也沒存過：不寫檔。那一頁要是標過「改的還沒存」（例如左右對稱關了又開回來，#1206），這裡一樣要清掉那一句。
-  if (!touched && !zoneDesignStored) return async () => { zoneDesignSaved = true; window.zonePageSaved?.(); };
+  if (!touched && !zoneDesignStored) return async () => { zoneDesignWritten(); };
   const design = structuredClone(designForEdit());
   design.scheme_id = name;
   for (const wall of Object.keys(design.zones)) {
@@ -173,8 +208,7 @@ function prepareZoneDesignSave(name) {
   const generation = zoneDesignGeneration;
   return async () => {
     await api(`/api/designs/${encodeURIComponent(name)}`, "PUT", design);
-    zoneDesignSaved = true;
-    window.zonePageSaved?.();  // 「這間房貼什麼」那一頁的「改的還沒存進檔案」那一句（zone_overview.js）
+    zoneDesignWritten();
     if (generation === zoneDesignGeneration) { zoneDesign = design; zoneDesignStored = true; zoneDesignNote = ""; }
   };
 }
@@ -203,21 +237,27 @@ function stuckWords(names) { return `先處理${names.join("、")}的紅框（�
 // 鎖（app.js 的 holdInput）從存檔一路拿到離開這一頁（#1188 第 5 條，同「計算」把重讀清單包在鎖裡）：存好之後還要重讀清單、
 // 搜尋頁也要一點時間才回來，那一段要是點得到、改得動，改的東西沒存就被帶去搜尋頁，搜尋頁讀到的比畫面上少。
 async function sendToSearch() {
+  const press = bottomPressed();
   const cut = window.pendingMirrorCut?.();
   if (cut) await cut;
   const stuck = stuckZoneNames();
-  if (stuck.length) { zoneNote(stuckWords(stuck), "notice"); return; }
+  if (stuck.length) { searchNote(stuckWords(stuck), "notice"); return; }
   // 房間尺寸調整還在路上（#1266）：先等它落地，底下等到的限制判決才是照新尺寸重問的那一次。
   const resize = window.pendingRoomResize?.();
   if (resize) await resize;
+  // 按下那一刻延後的那一次自動檢查（bottomPressed）先做完：它重問過限制，底下等到的才不是按下之前就收下的判決。
+  await press.flushed;
   const limits = await settledZoneLimits();
+  // 限制檢查沒過（沒檢查成、有超過的）：不存不跳，頁底照講，並停在問題上（check_state.js：捲到第一個標紅的區、焦點在頂條那一句）。
   if (limits?.status !== "checked") {
-    zoneNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); return;
+    searchNote(`限制沒檢查成（${limits?.message ?? "還沒檢查"}），先處理好再拿去搜尋`, "notice"); await stopAtCheck("limits", press.pressed); return;
   }
-  if (limitsRedCount()) { zoneNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); return; }
+  if (limitsRedCount()) {
+    searchNote(`有 ${limitsRedCount()} 條超過限制（標紅的區），改好之前不能拿去搜尋`, "notice"); await stopAtCheck("limits", press.pressed); return;
+  }
   // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑一定被拒收，不存不跳，照伺服器那一句講。
   const refused = referenceRefusals();
-  if (refused.length) { zoneNote(refused.map(line => line.text).join("；"), "notice"); return; }
+  if (refused.length) { searchNote(refused.map(line => line.text).join("；"), "notice"); return; }
   if (inputBusy) {
     // 等限制檢查的時候又送了一批改動、還在路上：這一次不存不跳。那一批落地後平面圖檢查會換掉訊息列，
     // 「這間房貼什麼」那一頁另外留著這一句（zone_overview.js 的 zonePageKeep，#1188 第 6 條）。
@@ -226,16 +266,14 @@ async function sendToSearch() {
     window.zonePageKeep?.(refused);
     return;
   }
-  await holdInput(async () => {
-    const generation = zoneDesignGeneration, name = $("save-id").value;
-    const stored = await storeScheme();
-    if (!stored) return;
+  // 存之前那一次平面圖檢查沒過（含連不上）：沒存、不跳，storeThen（app.js）在鎖放開之後停在問題上。
+  await storeThen(press, async (stored, {generation, name}) => {
     await refreshAfterSave(stored.message);
     // 鎖著的時候換不了方案；這一條是鎖漏掉時的第二道（同 pressedCopy 的 samePage）。
-    if (generation !== zoneDesignGeneration) { zoneNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice"); return; }
-    if (!zoneDesignSaved) { zoneNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice"); return; }
+    if (generation !== zoneDesignGeneration) { searchNote(`存檔途中換了方案：「${name}」照樣存好，這次不跳搜尋頁`, "notice", false); return; }
+    if (!zoneDesignSaved) { searchNote("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次", "notice", false); return; }
     await leaveForSearch(`/gradient?scheme=${encodeURIComponent(scheme.scheme_id)}`);
-  });
+  }, () => ({generation: zoneDesignGeneration, name: $("save-id").value}));
 }
 // 送出跳頁、等到離開這一頁（呼叫的人拿著鎖）：搜尋頁回來之前舊的這一頁還在畫面上。離開了這個等待就不會回來，鎖跟著頁面一起消失；
 // 兩種情況會回來、把鎖放開：按「上一頁」時瀏覽器把這一頁原樣搬回來（pageshow），或等了一陣子還在這一頁（搜尋頁沒打開成；
@@ -247,24 +285,22 @@ async function leaveForSearch(url) {
     setTimeout(() => resolve(true), LEAVE_WAIT_MS);
     window.location.href = url;
   });
-  if (stayed) zoneNote("方案與每一區的做法都存好了，但等了一陣子搜尋頁還沒打開：再按一次「拿去搜尋」", "notice");
+  if (stayed) searchNote("方案與每一區的做法都存好了，但等了一陣子搜尋頁還沒打開：再按一次「拿去搜尋」", "notice", false);
 }
-function searchButtonRow() {
-  const count = searchZoneCount();
-  if (!count) return null;
-  const row = document.createElement("p"); row.className = "fields";
-  const button = document.createElement("button"); button.type = "button"; button.id = "zone-to-search";
-  button.textContent = `拿去搜尋（${count} 區由程式最佳化）`;
-  button.onclick = () => action(sendToSearch);
-  // 清單裡有「鋼板直接貼在棉上」的構造（#1208）：開跑一定被拒收，這一列跟紅框同一個樣子——按鈕停用、旁邊紅字寫伺服器那幾句。
+function renderSearchAction() {
+  const count = searchZoneCount(), button = $("zone-to-search"), note = $("zone-to-search-note");
   const red = limitsRedCount(), stuck = stuckZoneNames(), refused = referenceRefusals().map(line => line.text);
-  button.disabled = red > 0 || stuck.length > 0 || refused.length > 0;
-  const note = document.createElement("span"); note.id = "zone-to-search-note";
+  const lockedEdit = finishedNames.has(openedId) && formHasEdits();
+  button.disabled = !count || !!formRunning() || lockedEdit || red > 0 || stuck.length > 0 || refused.length > 0;
   const blocked = [...(stuck.length ? [stuckWords(stuck)] : []), ...refused, ...(red ? [`有 ${red} 條超過限制（標紅的區），改好之前不能拿去搜尋`] : [])];
-  note.className = blocked.length ? "limit-red" : "note";
-  note.textContent = blocked.length ? blocked.join("；") : "會先照畫面儲存，再打開第三階段搜尋頁";
-  row.append(button, " ", note);
-  return row;
+  // 按了沒送出去的那一句（zoneSearchSaid）排在擋住的理由後面：擋住時那一句就是其中一條，照擋住的寫；沒擋才寫它，不被下一次重畫換掉。
+  if (zoneSearchSaid?.generation != null && zoneLimitsShown > zoneSearchSaid.generation) dropSearchSaid();
+  // 沒有要交的區（!count）鈕停用了：「…再按一次」那類話不寫在灰掉的鈕底下（審查設計洞 1）。
+  const said = !count || formRunning() || lockedEdit || blocked.length ? null : zoneSearchSaid;
+  note.className = blocked.length ? "limit-red" : said ? said.kind : "note";
+  note.textContent = formRunning() ? "等這一次算完" : lockedEdit ? "先另存新名字" : blocked.length ? blocked.join("；") : said ? said.text :
+    count ? `交出黃色的 ${count} 區；下一頁按「開始搜尋」才開始算` : "先到「這間房貼什麼」選區";
+
 }
 // 切完一面：自動補的代號每次重編，做法跟著 /api/zone-cut 回的 inherited（每一塊沿用了切之前哪一區的材料）走。
 function remapZoneDesign(wall, inherited) {
@@ -283,14 +319,14 @@ async function fetchZoneLibrary() {
     // 可調多層構造（現在只有可調 VPR，#1200 第 1 支）先不進分區頁：電腦挑它還沒接上，選單、勾選表、不列的那幾組都不出現。
     return {library: data.materials.filter(row => row.entry.kind !== "tunable_layers")
               .map(row => ({...row.entry, basis: row.basis, placement: row.placement})),
-            groups: data.surface_groups, short: data.surface_group_short, reference: data.reference_only ?? null,
+            groups: data.surface_groups, reference: data.reference_only ?? null,
             problem: data.user_file_problem ? `使用者材料庫讀不進來，選單只列內建材料：${data.user_file_problem}` : ""};
   } catch (error) {
-    return {library: [], groups: {}, short: {}, reference: null, problem: `材料庫讀不到：${errorText(error)}`};
+    return {library: [], groups: {}, reference: null, problem: `材料庫讀不到：${errorText(error)}`};
   }
 }
 function applyZoneLibrary(state) {
-  zoneLibrary = state.library; zoneSurfaceGroups = state.groups; zoneSurfaceShort = state.short; zoneLibraryProblem = state.problem;
+  zoneLibrary = state.library; zoneSurfaceGroups = state.groups; zoneLibraryProblem = state.problem;
   zoneReference = state.reference ?? null;
 }
 async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
@@ -316,12 +352,12 @@ function fixedLayers(entry) { return entry.kind === "construction" ? entry.layer
 function libraryEntry(id) { return (zoneLibrary || []).find(entry => entry.id === id) ?? null; }
 // 這一筆列不列在這一面（伺服器每一筆都帶分組，跟網頁一起出貨）。
 function usableHere(entry, wall) { return entry.placement.surfaces.includes(wall); }
-// 寫在括號裡的組名用短名（不套括號，審查 11-15）。
-function groupWords(entry) { return zoneSurfaceShort[entry.placement.group]; }
-// 不列在這一面的，照組排（組的順序同伺服器標題表）：[[組的代號, [材料…]]…]。
-function hiddenGroups(wall, entries) {
+// 不列在這一面的，照組排（組的順序同伺服器標題表）：[[組的代號, [材料…]]…]。walls 是一面或幾面（「這間房貼什麼」小框一次選
+// 好幾面，#1265）：小框只列每一面都能貼的，所以有任何一面不能貼就算不列的（照 usableHere 反過來列）。
+function hiddenGroups(walls, entries) {
+  const faces = [walls].flat();
   const groups = new Map(Object.keys(zoneSurfaceGroups).map(group => [group, []]));
-  for (const entry of entries) if (!usableHere(entry, wall)) groups.get(entry.placement.group).push(entry);
+  for (const entry of entries) if (!faces.every(wall => usableHere(entry, wall))) groups.get(entry.placement.group).push(entry);
   return [...groups].filter(([, items]) => items.length);
 }
 // 可調材料的顯示名拿掉尾巴的「（可調厚度與空腔）」：能調什麼另外照條目寫（24K、96K 空腔其實不調）。
@@ -344,12 +380,11 @@ function adjustWords(entry) {
   const depth = cap && cap < deepest - 1e-9 ? `，加起來最深 ${centimetres(cap)} cm` : "";
   return `可調：${thickText}、${cavityText}${depth}`;
 }
-const FIXED_WORDS = "固定成品：整塊貼或不貼，不能調";
-function choiceWords(entry) { return entry.kind === "optimizable" ? adjustWords(entry) : FIXED_WORDS; }
 // 這一區現在的材料是材料庫哪一筆：多層構造比貼上去的那幾層，固定阻抗與實測表比整份。
-// 裸構造只讀這一面、這一區的伺服器判決。上一份草稿的判決不能套到新位置。
+// 裸構造只讀這一面、這一區的伺服器判決。上一份草稿的判決不能套到新位置；判決在路上（剛改做法、剛切牆，zoneLimitsFresh）
+// 也不讀上一版的（#1265 單元 3 之二收尾追加第 3 條：改回由程式最佳化、材料放回原樣之後，上一版還認得是那一筆構造）。
 function constructionAt(wall, key) {
-  return zoneLimitsReceived === zoneLimitsGeneration ? zoneLimits?.picked_constructions?.[wall]?.[key] : null;
+  return zoneLimitsFresh() ? zoneLimits.picked_constructions?.[wall]?.[key] : null;
 }
 function uncertainWords(verdict) { return `看不出：跟材料庫「${verdict.label}」一樣`; }
 function libraryLabel(material, wall, key) {
@@ -410,14 +445,6 @@ function plainNow(material, wall, key) {
   if (verdict?.state === "picked") return materialWords(material, wall, key);
   return material.kind === "mounted_on_wall" ? `已貼 ${nowWords(material, wall, key)}` : `沒貼東西（${originalWords(material, wall, key)}）`;
 }
-function numbersDetail(material, id, wall) {
-  const details = document.createElement("details"); details.className = "zone-numbers"; details.id = id;
-  const summary = document.createElement("summary"); summary.textContent = "數字（給要核對的人）";
-  const line = document.createElement("p"); line.className = "note";
-  line.textContent = `${originalFace(wall)}：${wallText(originalMaterial(material))}`;
-  details.append(summary, line);
-  return details;
-}
 // 固定成品的總厚（每層有厚度的加起來，所以寫「約」）：薄板只給面密度、沒有厚度，有薄板就註明不含（不然跟顯示名裡
 // 「總厚約 14 cm」這種把鋼板算進去的數字打架）；不是多層構造的（固定阻抗、實測表）沒有厚度可寫，回空字串。
 function fixedDepthWords(entry) {
@@ -427,34 +454,8 @@ function fixedDepthWords(entry) {
   return `總厚約 ${centimetres(depth)} cm${layers.some(layer => layer.kind === "board") ? "（不含薄板）" : ""}`;
 }
 
-// 交伺服器換這一區的材料；成功才原地換進方案（同切牆面：等回覆時整頁鎖住）。回伺服器的回覆，沒換成回 null。
-async function changeZoneMaterial(wall, key, choice) {
-  if (inputBusy) { zoneNote("上一個改動還在處理，請稍等再選", "notice"); return null; }
-  if (measuredDrafts[wall]) { zoneNote(`${wallNames[wall]}有還沒套用的實測阻抗草稿：先套用或取消`, "notice"); return null; }
-  const draft = wallDocument();
-  inputBusy = true;
-  document.querySelector("main").inert = true;
-  let data;
-  try {
-    let response;
-    ({response, data} = await reply(fetch("/api/zone-material", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({scheme: draft, wall, zone: key, ...choice, picked_entry: zoneSetting(wall, key).picked_entry ?? null,
-        original_scheme_id: zoneDesign?.original_scheme_id ?? null})})));
-    if (!response.ok) { zoneNote(`沒有換：${data.error}`, "notice"); return null; }
-    if (!scheme.scene.surface_zones_by_wall) {
-      scheme.scene.surface_zones_by_wall = draft.scene.surface_zones_by_wall;
-      delete scheme.scene.impedance_pa_s_per_m_by_wall;
-    }
-    const zone = scheme.scene.surface_zones_by_wall[wall].find(item => zoneKey(item) === key);
-    zone.material = data.material;
-  } finally {
-    document.querySelector("main").inert = false;
-    inputBusy = false;
-  }
-  zoneNote(`${zoneCalled(wall, key)}：${data.note}`, data.origin === "unknown" ? "notice" : "ok");
-  return data;
-}
 async function afterZoneChange() {
+  staleZoneLimits();  // 先畫後問：上一版判決對的是改之前的做法（#1265 單元 3 之二第二趟追加第 1、3、4 條）
   renderWalls();
   markStale();
   action(updateMultiples);
@@ -468,45 +469,8 @@ function zoneCalled(wall, key) {
   return `${wallNames[wall]} ${label.numberText}「${label.name}」`;
 }
 
-// 換材料連不上或回覆讀不出來：照講、把選單畫回原樣（方案與做法都沒動），不留在新選項上。
-async function zoneMaterialChanged(wall, key, choice) {
-  try { return await changeZoneMaterial(wall, key, choice); } catch (error) {
-    zoneNote(`沒有換：${errorText(error)}`, "notice");
-    return null;
-  }
-}
-async function changeZoneMode(wall, key, mode) {
-  const before = zoneSetting(wall, key);
-  if (mode !== "fixed" && !await zoneMaterialChanged(wall, key, {choice: "original"})) { renderZoneTable(wall); return; }
-  zoneSameAsOriginal.delete(`${wall}/${key}`);
-  const next = {...before, mode};
-  if (mode !== "search") delete next.allowed;
-  else if (!next.allowed) {
-    const start = startingAllowed(wall);
-    if (start) next.allowed = start;
-  }
-  setZoneSetting(wall, key, next);
-  if (mode === "fixed") zoneNote(`${zoneCalled(wall, key)}：指定貼一種，在右邊選要貼哪一種；不選就照方案現在的材料`, "ok");
-  if (mode === "search" && next.allowed) {
-    zoneNote(`${zoneCalled(wall, key)}：由程式最佳化，先放了 ${next.allowed.map(choiceName).join("、")}；要改就按這一列的「改這一區 ▸」`, "ok");
-  }
-  await afterZoneChange();
-}
-async function chooseFixed(wall, key, materialId) {
-  const data = await zoneMaterialChanged(wall, key, {choice: "fixed", material_id: materialId});
-  if (!data) { renderZoneTable(wall); return; }
-  // 清單只給由程式最佳化的區，改成指定貼一種就拿掉（伺服器不收固定區帶清單）。
-  // 選的跟這一區原牆一模一樣（#1175）：伺服器放回原牆，這裡做法跟著改成「不貼，保留原樣」並說明。
-  const next = {...zoneSetting(wall, key), mode: data.same_as_original ? "keep_original" : "fixed"};
-  delete next.allowed;
-  if (data.picked_entry) next.picked_entry = data.picked_entry; else delete next.picked_entry;
-  setZoneSetting(wall, key, next);
-  if (data.same_as_original) {
-    zoneSameAsOriginal.set(`${wall}/${key}`, libraryEntry(materialId).label);
-    zoneNote(`${zoneCalled(wall, key)}：選的跟原本一樣，當成不貼（做法改成「${KEEP_WORDS}」）`, "ok");
-  } else zoneSameAsOriginal.delete(`${wall}/${key}`);
-  await afterZoneChange();
-}
+// 選的跟這一區原牆一模一樣（#1175）那一句：「這間房貼什麼」小框套用的回話（#1265 單元 3 之二第 E 條）。
+function sameAsOriginalWords(wall, key) { return `${zoneCalled(wall, key)}：選的跟原本一樣，當成不貼（做法改成「${KEEP_WORDS}」）`; }
 // 伺服器沒寫清單（null）的意思：材料庫全部可調材料＋不貼。材料庫沒讀全（讀不到或使用者檔壞了）就回 null，不替伺服器縮小範圍。
 function serverDefaultAllowed() {
   if (!zoneLibrary?.length || zoneLibraryProblem) return null;
@@ -543,117 +507,21 @@ function allowedProblem(allowed) {
   if (!allowed?.length) return "";
   return allowed.every(id => fixedCandidate(libraryEntry(id))) ? "只放了固定成品，程式沒得選。" : "";
 }
-function problemBox(wall, key, allowed) {
-  const box = document.createElement("div"); box.className = "zone-problem"; box.id = `zone-allowed-problem-${wall}-${key}`;
-  box.setAttribute("role", "alert");
-  const head = document.createElement("p"); head.className = "limit-red"; head.textContent = allowedProblem(allowed);
-  const why = document.createElement("p");
-  why.textContent = "程式要從一個能調的東西開始：加一種可調的材料（例如玻璃棉），或加上「也可以不貼」；要的就是這一筆、不必讓程式選，就把做法改成「指定貼一種」。要改清單就按這一列的「改這一區 ▸」。";
-  box.append(head, why);
-  return box;
-}
 
-function modeSelect(wall, key, setting) {
-  const select = document.createElement("select"); select.id = `zone-mode-${wall}-${key}`;
-  select.setAttribute("aria-label", `${zoneCalled(wall, key)} 的做法`);
-  for (const [value, text] of Object.entries(ZONE_MODE_WORDS)) {
-    const option = document.createElement("option"); option.value = value; option.textContent = text; select.append(option);
-  }
-  select.value = setting.mode;
-  select.onchange = () => action(() => changeZoneMode(wall, key, select.value));
-  return select;
-}
-function fixedOption(entry, text = `${entry.label}（${entry.basis}）`) {
-  const option = document.createElement("option"); option.value = entry.id; option.textContent = text;
-  return option;
-}
-function optionGroup(label, entries) {
-  const group = document.createElement("optgroup"); group.label = label;
-  for (const entry of entries) group.append(fixedOption(entry));
-  return group;
-}
-// 指定貼一種（#1176）：選單只列這一面能貼的固定成品；這一區現在放的那一筆就算不是這一面用的也照樣列（不然選單跟方案對不上）。
-function fixedCell(wall, key, zone, cell) {
-  const select = document.createElement("select"); select.id = `zone-fixed-${wall}-${key}`;
-  select.setAttribute("aria-label", `${zoneCalled(wall, key)} 要貼哪一種`);
-  const current = libraryLabel(zone.material, wall, key);
-  if (!current) {
-    const now = document.createElement("option"); now.value = ""; now.textContent = `現在：${plainNow(zone.material, wall, key)}`;
-    select.append(now);
-  }
-  const fixed = assignableEntries();
-  for (const entry of fixed.filter(item => usableHere(item, wall))) select.append(fixedOption(entry));
-  const away = current && !usableHere(current, wall);
-  // 貼上去的才會「不是這一面用的」；直接取代整面的（例如地板本身就是木地板那一筆固定阻抗）就是這一面本身，照實寫、不標紅。
-  const pasted = zone.material.kind === "mounted_on_wall";
-  if (away && !zoneShowAll) {
-    select.append(fixedOption(current, pasted ? `${current.label}（現在用的；${groupWords(current)}）`
-      : `${current.label}（現在用的：整面就是它，不是貼上去的）`));
-  }
-  if (zoneShowAll) for (const [group, entries] of hiddenGroups(wall, fixed)) select.append(optionGroup(`不列的：${zoneSurfaceGroups[group]}`, entries));
-  select.value = current?.id ?? "";
-  select.onchange = () => { if (select.value) action(() => chooseFixed(wall, key, select.value)); };
-  cell.append(select);
-  if (away && pasted) {
-    const line = document.createElement("p"); line.className = "notice"; line.id = `zone-fixed-away-${wall}-${key}`;
-    line.textContent = `「${current.label}」不是${wallNames[wall]}用的：${current.placement.reason}`;
-    cell.append(line);
-  }
-  if (!current && zone.material.kind !== "mounted_on_wall") cell.append(numbersDetail(zone.material, `zone-numbers-${wall}-${key}`, wall));
-}
+// 「顯示全部材料」那幾組的組標題、開關的字、「不是這一面用的」那一句：「這間房貼什麼」小框（#1265）用。
+function hiddenGroupLabel(group) { return `不列的：${zoneSurfaceGroups[group]}`; }
+const SHOW_ALL_WORDS = "顯示全部材料（門、窗、整片天花構造、另一間示範房的這些平常不列；要選它們才打開）";
+function awayWords(entry, wall) { return `「${entry.label}」不是${wallNames[wall]}用的：${entry.placement.reason}`; }
 function sameList(left, right) { return left.length === right.length && left.every(id => right.includes(id)); }
-function allowedChips(wall, key, allowed, setting) {
-  const row = document.createElement("div"); row.className = "zone-chips"; row.id = `zone-allowed-chips-${wall}-${key}`;
-  const lead = document.createElement("span"); lead.className = "zone-chips-lead"; lead.textContent = "程式從這幾種裡選：";
-  row.append(lead);
-  for (const id of allowed) {
-    const entry = libraryEntry(id);
-    const chip = document.createElement("span"); chip.className = "zone-chip"; chip.id = `zone-chip-${wall}-${key}-${id}`;
-    const name = document.createElement("strong"); name.textContent = choiceName(id);
-    const words = document.createElement("small");
-    if (id === ZONE_NONE) words.textContent = "保留原樣，程式可以決定這裡不貼";
-    else if (!entry) words.textContent = "照原樣留著，開跑時伺服器會點名";
-    else if (referenceOnly(id)) words.textContent = zoneReference.listed_why;
-    else if (entry.kind === "optimizable" && setting.ranges?.[id]) words.textContent = window.zoneRangeDescription(setting, entry);
-    else words.textContent = usableHere(entry, wall) ? choiceWords(entry) : `${choiceWords(entry)}；不是${wallNames[wall]}用的（${groupWords(entry)}）`;
-    chip.append(name, words);
-    row.append(chip);
-  }
-  return row;
-}
-function searchCell(wall, key, zone, setting, cell) {
-  // 寫方案裡這一區現在真的放什麼（#1128）：網頁改成由程式最佳化時放原牆，但搜尋存成的方案（或它的另存）放的是搜尋選的材料。
-  const start = document.createElement("p"); start.className = "note"; start.id = `zone-search-now-${wall}-${key}`;
-  start.textContent = zone.material.kind === "mounted_on_wall"
-    ? `現在：${plainNow(zone.material, wall, key)}`
-    : `現在：${plainNow(zone.material, wall, key)}，程式選了要貼的就貼在它上面`;
-  cell.append(start, numbersDetail(zone.material, `zone-numbers-${wall}-${key}`, wall));
-  // 舊的沒寫清單（null）照伺服器的意思列成明確清單（全部可調材料＋不貼）；材料庫沒讀全就只能照講，不猜。
-  const allowed = setting.allowed ?? serverDefaultAllowed();
-  if (!allowed) {
-    const line = document.createElement("p"); line.className = "notice"; line.id = `zone-allowed-unknown-${wall}-${key}`;
-    line.textContent = "程式從全部可調材料與「不貼」裡選（材料庫沒讀全，列不出是哪幾種）";
-    cell.append(line);
-    return;
-  }
-  cell.append(allowedChips(wall, key, allowed, setting));
-  const missing = allowed.filter(id => id !== ZONE_NONE && !libraryEntry(id));
-  if (missing.length) {
-    const line = document.createElement("p"); line.className = "notice"; line.id = `zone-allowed-missing-${wall}-${key}`;
-    line.textContent = `清單裡有材料庫找不到的：${missing.join("、")}（照原樣留著，開跑時伺服器會點名；要拿掉就按這一列的「改這一區 ▸」）`;
-    cell.append(line);
-  }
-  if (allowedProblem(allowed)) cell.append(problemBox(wall, key, allowed));
-}
 function originalSchemeRow() {
   const row = document.createElement("div"); row.className = "fields";
-  const wrap = document.createElement("label"); wrap.textContent = "原方案（算「改善多少」時每一區原本的樣子；也給拆不出原樣的區用）";
+  const wrap = document.createElement("label"); wrap.textContent = "改造前用哪一份方案（算「改善多少」時每一區原本的樣子；也給拆不出原樣的區用）";
   const select = document.createElement("select"); select.id = "original-scheme";
-  const none = document.createElement("option"); none.value = ""; none.textContent = "未指定（拆掉貼上去的層，當成原本的樣子）"; select.append(none);
+  const none = document.createElement("option"); none.value = ""; none.textContent = "沒指定：每一面都只有原本的牆（拆掉貼上去的層）"; select.append(none);
   const self = $("save-id").value;
-  for (const option of $("scheme-list").options) {
-    if (option.value === self) continue;
-    const item = document.createElement("option"); item.value = option.value; item.textContent = option.value; select.append(item);
+  for (const name of schemeNames) {
+    if (name === self) continue;
+    const item = document.createElement("option"); item.value = name; item.textContent = name; select.append(item);
   }
   const chosen = zoneDesign?.original_scheme_id ?? "";
   if (chosen && ![...select.options].some(option => option.value === chosen)) {
@@ -664,95 +532,45 @@ function originalSchemeRow() {
   wrap.append(select); row.append(wrap);
   return row;
 }
-// 「顯示全部材料」（#1176）：一張表一個開關，打開後指定貼一種的選單分組列出不是這一面用的那幾組；只記在這一頁。
-function showAllRow(wall) {
-  const row = document.createElement("p"); row.className = "fields";
-  const wrap = document.createElement("label");
-  const box = document.createElement("input"); box.type = "checkbox"; box.id = "zone-show-all"; box.checked = zoneShowAll;
-  box.onchange = () => { zoneShowAll = box.checked; renderZoneTable(wall); };
-  wrap.append(box, document.createTextNode("顯示全部材料（門、窗、整片天花構造、另一間示範房的這些平常不列；要選它們才打開）"));
-  row.append(wrap);
-  return row;
-}
-// 表的「區」那一格（#1176）：「① 左聲道喇叭後面那塊」（號碼跟立面圖上同一個），底下灰色小字代號（伺服器的訊息與搜尋頁
-// 還在寫代號，要對得起來；整面一區伺服器也叫「整面」，不另寫）。
-function zoneNameCell(wall, key, label, cell) {
-  const text = document.createElement("span"); text.className = "zone-label"; text.id = `zone-label-${wall}-${key}`;
-  const number = document.createElement("b"); number.className = "zone-num"; number.textContent = label.numberText;
-  text.append(number, ` ${label.name}`);
-  cell.append(text);
-  if (key !== "whole_wall") {
-    const code = document.createElement("small"); code.className = "zone-code"; code.textContent = `代號 ${key}`;
-    cell.append(code);
-  }
-  const go = document.createElement("button"); go.type = "button"; go.id = `zone-goto-${wall}-${key}`;
+// 「改這一區 ▸」（#1258 2b）：回「這間房貼什麼」打開那一區的小框。#1265 單元 3 起住在第 2 段右欄唯讀清單
+// （wall_section.js）；一區一顆、整頁只有一處。
+function zoneGotoButton(wall, key) {
+  const go = document.createElement("button"); go.type = "button"; go.id = `zone-goto-${wall}-${key}`; go.className = "lnk";
   go.textContent = "改這一區 ▸"; go.setAttribute("aria-label", `到「這間房貼什麼」改${zoneCalled(wall, key)}`);
   go.onclick = () => window.openZoneOverview(`${wall}/${key}`);
-  cell.append(go);
+  return go;
 }
+// 保留原樣的區寫什麼（第 2 段右欄清單那一句）：原本的面叫什麼、不貼東西。
+function keepWords(zone, wall, key) {
+  const words = originalWords(originalMaterial(zone.material), wall, key);
+  return words === KEEP_WORDS ? words : `${words}，不貼東西`;
+}
+// 設計設定讀不到、材料庫有問題那兩句：第 2 段右欄清單上方（wall_section.js，#1265 單元 3 之二第 D 條）。
+function zoneProblemLines() {
+  return [zoneDesignNote, zoneLibraryProblem].filter(Boolean).map(text => {
+    const line = document.createElement("p"); line.className = "notice"; line.textContent = text;
+    return line;
+  });
+}
+// 輸入頁跟方案一起重畫的那一條路（名字是舊做法表留下的；#1265 單元 3 之二第二趟起舊做法表拆了，表上每一樣都有新家）：
+// 開檔、切牆、換材料、改做法都會走到這裡。
 function renderZoneTable(wall) {
-  // 六面一起看的那一頁（zone_overview.js）跟這張表同一條路重畫：開檔、切牆、換材料、改做法都會走到這裡。
+  // 六面一起看的那一頁（zone_overview.js）跟著重畫。
   window.renderZoneOverview?.();
-  const area = $("elevation-zones");
-  if (!area) return;
-  area.replaceChildren();
-  if (!wall || !scheme) return;
-  area.append(originalSchemeRow());
-  area.append(depthRow(wall));
-  const hint = document.createElement("p"); hint.className = "note"; hint.id = "zone-table-readonly";
-  hint.textContent = "每一區的候選材料和最深，在「這間房貼什麼」那一頁改（按每一列的「改這一區 ▸」）；這張表只列出來對照。";
-  area.append(limitsSummary(), hint);
-  if (wallLimitLines(wall).length) area.append(limitLinesBlock(wallLimitLines(wall), `limit-wall-${wall}`));
-  for (const text of [zoneDesignNote, zoneLibraryProblem]) {
-    if (!text) continue;
-    const line = document.createElement("p"); line.className = "notice"; line.textContent = text; area.append(line);
-  }
-  const table = document.createElement("table"); table.id = `zone-table-${wall}`; table.className = "zone-table";
-  const head = document.createElement("tr");
-  for (const text of ["區", "大小（公尺）", "做法", "材料", "深度上限（公尺）"]) { const cell = document.createElement("th"); cell.textContent = text; head.append(cell); }
-  table.append(head);
-  // 列照號碼排（跟立面圖上①②③…同一個順序）。
-  const labels = zoneLabels(wall);
-  const ordered = zoneList(wall).toSorted((left, right) => labels.get(zoneKey(left)).number - labels.get(zoneKey(right)).number);
-  for (const zone of ordered) {
-    const key = zoneKey(zone), setting = zoneSetting(wall, key);
-    const row = document.createElement("tr"); row.id = `zone-row-${wall}-${key}`;
-    row.className = `zone-mode-${setting.mode}${zoneIsRed(wall, key) ? " zone-red" : ""}`;
-    const name = document.createElement("td"); name.id = `zone-name-${wall}-${key}`;
-    zoneNameCell(wall, key, labels.get(key), name);
-    const size = document.createElement("td");
-    size.textContent = zone.area === "rectangle"
-      ? `${Number((zone.u_m[1] - zone.u_m[0]).toFixed(3))} × ${Number((zone.v_m[1] - zone.v_m[0]).toFixed(3))}` : "整面";
-    const mode = document.createElement("td"); mode.append(modeSelect(wall, key, setting));
-    const material = document.createElement("td"); material.id = `zone-material-${wall}-${key}`;
-    if (setting.mode === "fixed") fixedCell(wall, key, zone, material);
-    else if (setting.mode === "keep_original") {
-      const line = document.createElement("p"); line.id = `zone-keep-${wall}-${key}`;
-      const words = originalWords(originalMaterial(zone.material), wall, key);
-      line.textContent = words === KEEP_WORDS ? words : `${words}，不貼東西`;
-      material.append(line);
-      const same = zoneSameAsOriginal.get(`${wall}/${key}`);
-      if (same) {
-        const why = document.createElement("p"); why.className = "ok"; why.id = `zone-same-${wall}-${key}`;
-        why.textContent = `選的「${same}」跟原本一樣，當成不貼（做法自己改成「${KEEP_WORDS}」）`;
-        material.append(why);
-      }
-      material.append(numbersDetail(zone.material, `zone-numbers-${wall}-${key}`, wall));
-    }
-    else searchCell(wall, key, zone, setting, material);
-    const depth = document.createElement("td"); depth.id = `zone-depth-${wall}-${key}`;
-    zoneDepthCell(wall, key, setting, depth);
-    const lines = zoneLimitLines(wall, key);
-    if (lines.length) material.append(limitLinesBlock(lines, `limit-${wall}-${key}`));
-    row.append(name, size, mode, material, depth); table.append(row);
-  }
-  area.append(table, showAllRow(wall));
-  const toSearch = searchButtonRow();
-  if (toSearch) area.append(toSearch);
-  const note = document.createElement("p"); note.id = "zone-note"; note.setAttribute("aria-live", "polite");
-  note.textContent = zoneNoteText; note.className = zoneNoteKind; area.append(note);
-  // 舊做法表預設收著（做法改在「這間房貼什麼」那一頁設）；裡面有紅字或要人處理的提醒時自己打開，不讓它藏著。
-  const fold = $("zone-table-fold");
-  if (fold && area.querySelector(".limit-red, .notice")) fold.open = true;
+  // 原方案與總厚度上限（房間預設）兩格在第 1 段右卡（#1265）。
+  renderRoomEditors();
+  // 第 2 段牆那一行、右欄唯讀清單（上方是限制總結、整面判決、兩句錯誤提示）、「每一區的位置與大小」（#1265 單元 3）；
+  // 這一面的總厚度上限那一格在牆那一行「這一面另設」打開的那一塊。
+  renderWallSection(wall);
+  refreshClearUndo();
+  // 頁底「交給程式最佳化 ▸」講的是整份方案，跟右欄上方的限制總結一起重畫：選不選牆都畫（#1265 單元 3 之二收尾追加第 1 條；
+  // 以前排在下面「沒選牆就走」之後，開檔沒點牆時鈕跟總結對不上）。
+  renderSearchAction();
+  // 清掉那一塊之前拿；擁有者是第幾次打開＋哪一面（同 room_facts.js 房間預設那一句，#1265 單元 3 審查真錯 4）。
+  // 沒方案不必另判：唯一叫這一支的 renderElevation 開頭就擋掉沒方案（收尾保險行）。
+  const depthSaid = wall ? depthNote("depth-wall-note", `${zoneDesignGeneration}/${wall}`) : null;
+  $("wall-depth-editor").replaceChildren();
+  if (!wall) return;
+  $("wall-depth-editor").append(depthRow(wall, depthSaid));
 }
 window.renderZoneTable = renderZoneTable;

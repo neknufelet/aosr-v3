@@ -101,6 +101,9 @@ def test_mainline_existing_forms_and_preview_values_are_unchanged() -> None:
         preview = input_preview(data, CAPABILITIES, DIRECTIVITY)
         names = preview.pop('wall_names')
         assert isinstance(names, dict) and names['x0'] == '前牆'
+        # #1265 再多一個欄位（輸入頁右卡四句與姿勢，字的答案在 test_gui_room_facts）；原有每一個欄位照舊逐值比。
+        facts = preview.pop('room_facts')
+        assert isinstance(facts, dict) and set(facts) == {'room', 'speakers', 'primary', 'furniture', 'posture'}
         assert preview == control['previews'][name]
 
 

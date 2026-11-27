@@ -259,7 +259,9 @@ def test_seams_narrower_than_the_weld_still_mesh(air: PhysicsConstants, degrees:
     volume = float(np.linalg.det(local[mesh.tetrahedra][:, 1:] - local[mesh.tetrahedra][:, :1]).sum() / 6.0)
     # 焊點只把頂點挪到代表點，體積最多差「焊點距離 × 邊界面積」。
     assert volume == pytest.approx(exact, abs=WELD_M * area)
-    assert np.allclose(mesh.nodes.mean(axis=0), np.mean([c for t in shell for c in (t.a, t.b, t.c)], axis=0), atol=1.0)
+    corners = np.array([c for t in shell for c in (t.a, t.b, t.c)])
+    np.testing.assert_allclose(mesh.nodes.min(axis=0), corners.min(axis=0), rtol=0, atol=WELD_M)
+    np.testing.assert_allclose(mesh.nodes.max(axis=0), corners.max(axis=0), rtol=0, atol=WELD_M)
 
 
 def test_a_large_room_far_from_the_origin_and_turned_still_meshes(air: PhysicsConstants) -> None:
@@ -269,6 +271,9 @@ def test_a_large_room_far_from_the_origin_and_turned_still_meshes(air: PhysicsCo
     mesh = generate_room_shell_mesh(RoomShell("m", shell, (), (), ()), weld_m=WELD_M, max_frequency_hz=20.0,
                                     elements_per_wavelength=6, sound_speed_m_s=air.sound_speed_m_s, random_seed=1)
     assert mesh.volume_m3() == pytest.approx(50.0 * 40.0 * 30.0, rel=1e-9)
+    corners = np.array([c for t in shell for c in (t.a, t.b, t.c)])
+    np.testing.assert_allclose(mesh.nodes.min(axis=0), corners.min(axis=0), rtol=0, atol=WELD_M)
+    np.testing.assert_allclose(mesh.nodes.max(axis=0), corners.max(axis=0), rtol=0, atol=WELD_M)
 
 
 def test_nested_solids_are_refused_instead_of_meshing_nothing(air: PhysicsConstants) -> None:

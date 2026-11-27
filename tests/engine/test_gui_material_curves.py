@@ -20,12 +20,15 @@ from aosr.config.physics_constants import load_physics_constants
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.app import GuiSettings, create_app
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
+from aosr.materials.construction_models import MeasuredImpedance
 from aosr.materials.library import (
     PROVENANCE_LABELS,
     FixedEntry,
+    LibraryEntry,
     OptimizableEntry,
     basis_label,
     builtin_entries,
+    catalog_entries,
     template_assembly,
 )
 from aosr.physics.wall_surfaces import extrapolated_frequency_text
@@ -78,8 +81,20 @@ def _case(*requests: dict[str, object], physics: tuple[object, ...] = (), axis: 
     return {"requests": list(requests), "physics": list(physics), "axis": axis}
 
 
+def _table(entry: FixedEntry) -> MeasuredImpedance:
+    material = entry.surface_material()
+    assert isinstance(material, MeasuredImpedance)
+    return material
+
+
+def _on_lane() -> tuple[LibraryEntry, ...]:
+    """畫在房間軸上的內建材料；文獻硬面（阻抗表）另外一筆一案，畫在房間軸加表上的點。"""
+    catalog = {entry.id for entry in catalog_entries()}
+    return tuple(entry for entry in builtin_entries() if entry.id not in catalog)
+
+
 def _cases() -> dict[str, dict[str, object]]:
-    builtins = builtin_entries()
+    builtins = _on_lane()
     family = OptimizableEntry.model_validate(_family_with_cavity())
     with_cavity = template_assembly(family)
     renamed = _fixed(_assembly(_porous(30000.0)), "curve")
@@ -100,6 +115,10 @@ def _cases() -> dict[str, dict[str, object]]:
         **{f"measured_{imaginary}": _case(_post(_measured(imaginary)), axis=TABLE_AXIS, physics=(
             FixedEntry.model_validate(_measured(imaginary)).surface_material().model_dump(mode="json"),))
            for imaginary in (True, False)},
+        **{f"catalog_{entry.id}": _case(_post(entry.model_dump(mode="json")),
+                                         axis=sorted({*LANE, *(point.frequency_hz for point in _table(entry).points)}),
+                                         physics=(_table(entry).model_dump(mode="json"),))
+           for entry in catalog_entries()},
         "constant": _case(_post(_fixed({"kind": "constant_impedance", "impedance_pa_s_m": 800.0}))),
         "miki": _case(_post(_fixed(_assembly(_porous(15000.0, model="miki"))))),
         "incomplete": _case(_post(_fixed(_assembly(_porous(15000.0))) | {"provenance": None, "source": ""})),
@@ -168,11 +187,15 @@ def test_construction_curve_uses_its_own_load(probe: dict[str, dict[str, object]
 
 
 def test_every_builtin_is_drawn_on_the_room_axis_with_exactly_what_the_physics_returns(probe: dict[str, dict[str, object]]) -> None:
-    for index, entry in enumerate(builtin_entries()):
-        reply = _reply(probe, "builtins", index)
+    cases = [("builtins", index, entry, LANE) for index, entry in enumerate(_on_lane())] + [
+        (f"catalog_{entry.id}", 0, entry, sorted({*LANE, *(point.frequency_hz for point in _table(entry).points)}))
+        for entry in catalog_entries()]
+    assert len(cases) == len(builtin_entries())
+    for name, index, entry, axis in cases:
+        reply = _reply(probe, name, index)
         assert reply["status"] == "drawn", entry.id
-        assert reply["frequencies_hz"] == LANE
-        assert reply["absorption"] == _expected(probe, "builtins", index), entry.id
+        assert reply["frequencies_hz"] == axis, entry.id
+        assert reply["absorption"] == _expected(probe, name, index), entry.id
         assert f"空氣用產品設定的標準值（聲速 {AIR.sound_speed_m_s:g} m/s、密度 {AIR.air_density_kg_m3:g} kg/m³）" in str(reply["axis_text"])
         assert (reply["basis"], reply["provenance"], reply["source"], reply["links"]) == (
             basis_label(entry), PROVENANCE_LABELS[entry.provenance], entry.source, list(entry.links))
@@ -191,7 +214,7 @@ def test_an_optimizable_material_draws_its_initial_arrangement_and_says_it_is_on
 
 
 def test_frequency_extrapolation_is_an_ordinary_note_with_its_bands_shaded(probe: dict[str, dict[str, object]]) -> None:
-    index, entry = next((index, entry) for index, entry in enumerate(builtin_entries()) if entry.id == "glass_wool_48k")
+    index, entry = next((index, entry) for index, entry in enumerate(_on_lane()) if entry.id == "glass_wool_48k")
     assert isinstance(entry, OptimizableEntry)
     lower, upper = RANGES.komatsu.f_over_sigma_bounds_m3_kg
     flagged = {f for f in LANE if not lower <= f / entry.porous.flow_resistivity_pa_s_m2 <= upper}

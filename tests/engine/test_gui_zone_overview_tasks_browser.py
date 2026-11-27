@@ -19,6 +19,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
+from tests.engine._input_page_steps import open_scheme
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
@@ -610,39 +611,31 @@ def test_other_walls_never_changes_by_itself_while_zones_are_changed_one_group_a
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_the_first_view_shows_the_way_into_the_page_and_keeps_the_old_table_folded(tmp_path: Path, browser: Browser) -> None:
-    """開方案後立面圖那一段：第一眼是進「這間房貼什麼」的那顆按鈕（在那一段最上面），舊做法表收在「深度上限與舊做法表」裡、
-    預設關著；點開看得到整張表；表裡有要人處理的提醒時它自己打開。"""
+def test_the_first_view_shows_the_way_into_the_page(tmp_path: Path, browser: Browser) -> None:
+    """開方案後立面圖那一段：第一眼是進「這間房貼什麼」的那顆按鈕（第 2 段右欄）。#1265 單元 3 之二第二趟起舊做法表拆了
+    （這一題原名 …_and_keeps_the_old_table_folded）：舊表收著、點開看得到、有提醒自己打開那幾件跟著表走（丙）；
+    按鈕在那一段、字照示意圖、按了進那一頁照舊考，另外考舊表那一摺不在了。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option(SAMPLE)
-        page.locator("#open-scheme").click()
+        open_scheme(page, SAMPLE)
         page.wait_for_function("name => document.getElementById('save-id').value === name", arg=SAMPLE)
         page.wait_for_function("!document.querySelector('main').inert")
-        fold, table, enter = page.locator("#zone-table-fold"), page.locator("#elevation-zones"), page.locator("#zone-page-open")
-        assert fold.evaluate("fold => fold.open") is False
-        expect(table).to_be_hidden()
-        expect(fold.locator("> summary")).to_have_text("深度上限與舊做法表")
+        enter = page.locator("#zone-page-open")
+        expect(page.locator("#zone-table-fold")).to_have_count(0)
+        expect(page.locator("#elevation-zones")).to_have_count(0)
         expect(enter).to_be_visible()
         # 按鈕講的是動作（去設定），不是去看。
         expect(enter).to_have_text("設定每一區貼什麼 ▸")
-        expect(page.locator("#zone-methods-row")).to_contain_text("都在「這間房貼什麼」那一頁設定")
-        # 按鈕在立面圖那一段的最上面：在牆的圖、舊表的那一行之上。
+        # #1265 說明字瘦身：按鈕底下那一行說明拿掉，那一列只剩按鈕。
+        expect(page.locator("#zone-methods-row small")).to_have_count(0)
+        # #1265 單元 3 起按鈕在第 2 段右欄（示意圖 input-page-v3：「前牆這 N 區」清單底下），跟立面圖並排。
+        expect(page.locator("#elevation-panel .card.side #zone-page-open")).to_have_count(1)
         top = "selector => document.querySelector(selector).getBoundingClientRect().top"
-        assert cast(float, page.evaluate(top, "#zone-page-open")) < cast(float, page.evaluate(top, "#elevation")) < cast(float, page.evaluate(top, "#zone-table-fold"))
+        assert cast(float, page.evaluate(top, "#elevation-panel")) <= cast(float, page.evaluate(top, "#zone-page-open"))
         page.locator("#elevation-panel").scroll_into_view_if_needed()
         page.screenshot(path=str(tmp_path / "first-view.png"))
         page.locator("#elevation-wall-xL").click()
-        expect(table).to_be_hidden()
-        fold.locator("> summary").click()
-        expect(table).to_be_visible()
-        assert cast(int, table.evaluate("area => area.children.length")) > 0
-        fold.locator("> summary").click()
-        expect(table).to_be_hidden()
-        # 有要人處理的提醒：自己打開。
-        page.evaluate("zoneNote('考卷放的一句提醒', 'notice'); window.renderElevation()")
-        expect(table).to_be_visible()
         enter.click()
         expect(page.locator("#zone-map")).to_be_visible()
         assert watched.page_errors == [] and watched.console_errors == []
@@ -750,7 +743,8 @@ def test_fixed_depth_only_keeps_every_material_and_other_zone(tmp_path: Path, br
         _apply(page)
         page.locator("#zone-page-close").click()
         page.locator("#elevation-wall-yL").click()
-        expect(page.locator("#depth-cap-yL-z1")).to_have_text("生效：0.12 公尺（這一塊擋的）")
+        # 舊表那一格「生效：0.12 公尺（這一塊擋的）」跟著表走；改讀右欄那一句（改字：公尺→公分、「擋的」拿掉）。
+        expect(page.locator("#wall-zone-what-yL-z1")).to_contain_text("總厚度最多 12 公分（這一塊）")
         _save(page, design=True)
         zones, materials = _stored(tmp_path)
         before = cast(dict[str, dict[str, object]], SAMPLE_DESIGN["zones"])

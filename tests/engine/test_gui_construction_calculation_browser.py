@@ -21,6 +21,7 @@ from governance.exit_codes import note
 from aosr.gui.jobs import _proc_stat
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
+from tests.engine._input_page_steps import scheme_open_button
 from tests.engine._furniture_cases import reference_document
 from tests.engine._construction_gui_server import _stop_calculations, calculation_group_exists, real_server
 from tests.engine.test_construction_cli_end_to_end import environment
@@ -215,9 +216,9 @@ def test_web_save_reload_one_real_calculation_uses_typed_layer_and_shows_notes(t
     # 等待上限只防卡死、不是時間預算：牆鐘照實印在 note。
     with real_server(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        page.locator("#scheme-list").select_option("small")
+        open_button = scheme_open_button(page, "small")
         with page.expect_response("**/api/input-preview"):
-            page.locator("#open-scheme").click()
+            open_button.click()
         page.wait_for_function("!document.querySelector('main').inert")
         _filled(page, "#material-kind-floor", "assembly")
         _filled(page, "#preset-floor", "glass_wool_96k_50mm")

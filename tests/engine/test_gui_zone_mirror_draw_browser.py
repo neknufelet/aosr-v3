@@ -17,6 +17,7 @@ from aosr.gui.zone_edit import CutBox, WallName, cut_wall
 from aosr.gui.zone_symmetry import Frame, ZoneFrame, symmetry_axis
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine._input_page_steps import reveal
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _cut_by, _drag, _open_scheme, _ready_pixel, _write, _zones
@@ -70,7 +71,6 @@ def _room(tmp_path: Path, browser: Browser, boxes: tuple[CutBox, ...] = (), *, c
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, NAME)
-        page.locator("#zone-table-fold > summary").click()
         page.locator(f"#elevation-wall-{wall}").click()
         _settled(page)
         yield page
@@ -197,7 +197,8 @@ def test_side_walls(tmp_path: Path, browser: Browser, centred: bool) -> None:
         else:
             assert _zones(page, "xL") == before
             expect(page.locator("#elevation-complete")).to_have_count(0)
-            expect(page.locator("#elevation-selected")).to_contain_text("對稱軸離左牆 2.45 公尺，房間正中是 2.60 公尺")
+            # 第二趟決定第 6 條：選取框這一句也叫鏡子（輸入頁上一個東西只用一個叫法）。
+            expect(page.locator("#elevation-selected")).to_contain_text("鏡子離左牆 2.45 公尺，房間正中是 2.60 公尺")
             expect(page.locator("#elevation-note")).to_contain_text("不在房間正中")
             _shot(page, tmp_path, "side-axis-offset")
 
@@ -274,9 +275,9 @@ def test_delayed_cut_then_save(tmp_path: Path, browser: Browser, send: bool) -> 
             page.mouse.up()
         assert page.evaluate("inputBusy && document.querySelector('main').inert")
         assert not _drawn(page, "x0") and not _drawn(page, "xL")
-        for button, note, refused in (("calculate", "messages", "沒有開算"), ("open-scheme", "open-note", "沒有打開"),
-                                      ("load-template", "template-note", "沒有載入範本")):
-            page.locator(f"#{button}").dispatch_event("click")
+        for button, note, refused in (("#calculate", "messages", "沒有開算"), (f'[data-scheme="{NAME}"] .home-open', "open-note", "沒有打開"),
+                                      ("#new-scheme-go", "new-scheme-note", "沒有開新的")):
+            page.locator(button).dispatch_event("click")
             expect(page.locator(f"#{note}")).to_contain_text(refused)
         page.locator("#zone-to-search" if send else "#save").dispatch_event("click")
         with page.expect_response(lambda r: r.url.endswith(f"/api/schemes/{NAME}") and r.request.method == "PUT", timeout=5000):
@@ -328,7 +329,7 @@ def test_centre_crossing_and_thin_remainder(tmp_path: Path, browser: Browser, st
             else:
                 expect(page.locator("#elevation-complete")).to_be_visible()
         else:
-            expect(page.locator(".mirror-axis text")).to_have_text("對稱軸")
+            expect(page.locator(".mirror-axis text")).to_have_text("鏡子：兩支喇叭的中線")
             expect(line).not_to_contain_text("另一邊沒有跟著畫")
             expect(page.locator("#elevation-complete")).to_have_count(0)
 
@@ -336,7 +337,7 @@ def test_centre_crossing_and_thin_remainder(tmp_path: Path, browser: Browser, st
 def test_axis_unavailable_and_existing_boxes_stay_in_place(tmp_path: Path, browser: Browser) -> None:
     with _room(tmp_path, browser, (FIRST, SECOND)) as page:
         original = _drawn(page)
-        page.locator("#receiver-main-x").fill("2.8")
+        reveal(page, "#receiver-main-x").fill("2.8")
         page.locator("#receiver-main-x").press("Tab")
         _settled(page)
         expect(page.locator("#elevation-axis-words")).to_contain_text("主位不在兩支喇叭中間")
@@ -422,6 +423,7 @@ def test_centring_keeps_the_previous_partner(tmp_path: Path, browser: Browser, m
 @pytest.mark.parametrize("condition", ["side", "axis", "scheme"])
 def test_unpaired_edit_stays_green(tmp_path: Path, browser: Browser, condition: str) -> None:
     with _room(tmp_path, browser, (FIRST,)) as page:
+        reveal(page, "#receiver-main-x")  # #1265 起座標收在第 1 段「座標數字」摺疊裡，點框之前先打開
         if condition == "side":
             page.locator("#elevation-wall-x0").click()
             _drag(page, 5.5, H, START, END)
@@ -461,8 +463,8 @@ def test_existing_exact_mirror_completes_pair_quietly(tmp_path: Path, browser: B
 def test_input_axis_words_and_switch(tmp_path: Path, browser: Browser, centred: bool) -> None:
     with _room(tmp_path, browser, (FIRST,), centred=centred) as page:
         distance = "2.60" if centred else "2.45"
-        suffix = "" if centred else "（不在房間正中，左右牆不跟著畫）"
-        expect(page.locator("#elevation-axis-words")).to_have_text(f"對稱軸：兩支喇叭中點到主位，離左牆 {distance} 公尺{suffix}")
+        where = "" if centred else "；不在正中，左右牆不跟著畫"  # #1265 說明字瘦身：在正中不多講
+        expect(page.locator("#elevation-axis-words")).to_have_text(f"鏡子：喇叭中線，離左牆 {distance} 公尺{where}")
         page.locator("#elevation [data-zone-id=z1] > rect").click()
         expect(page.locator("#elevation-selected")).to_contain_text("這一塊沒有另一邊")
         expect(page.locator("#elevation-complete")).to_be_visible()
@@ -485,15 +487,21 @@ def test_toggle_only_edits_design_and_shows_both_states(tmp_path: Path, browser:
         expect(page.locator("#zone-page-unsaved")).to_be_visible()
 
 
-def test_positions_off_leave_the_limits_alone(tmp_path: Path, browser: Browser) -> None:
+def test_positions_off_leave_the_limits_verdict_alone(tmp_path: Path, browser: Browser) -> None:
     with _room(tmp_path, browser) as page:
         page.locator("#elevation-symmetry-off").click()
         _settled(page)
-        generation = page.evaluate("zoneLimitsGeneration")
+        # 單元 6 起改了就自動檢查，每一次平面圖檢查都重問限制（#1265 單元 6 第二趟審查第 1 條），所以不再比世代號；
+        # 對稱關著時座標跟鏡子無關，要守的是限制的判決與頂條那一句都不因改座標而變。
+        verdict = "JSON.stringify([zoneLimits.status, zoneLimits.zones, zoneLimits.refusals])"
+        before = page.evaluate(verdict)
+        sentence = page.locator("#check-state").text_content()
         for field in ("speaker-left-x", "receiver-main-x"):
-            page.locator(f"#{field}").fill("2.8")
+            reveal(page, f"#{field}").fill("2.8")
             page.locator(f"#{field}").press("Tab")
-            assert page.evaluate("zoneLimitsGeneration") == generation
+            _settled(page)
+            assert page.evaluate(verdict) == before
+            expect(page.locator("#check-state")).to_have_text(sentence or "")
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-page-unsaved")).to_be_visible()
 

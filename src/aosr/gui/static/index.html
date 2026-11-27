@@ -14,98 +14,207 @@
   <script src="/static/elevation.js" defer></script>
   <script src="/static/zone_modes.js" defer></script>
   <script src="/static/zone_limits.js" defer></script>
+  <script src="/static/check_state.js" defer></script>
   <script src="/static/zone_rules.js" defer></script>
   <script src="/static/material-kind.js" defer></script>
   <script src="/static/zone_overview.js" defer></script>
+  <script src="/static/wall_section.js" defer></script>
+  <script src="/static/room_facts.js" defer></script>
   <script src="/static/home.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
-<body>
+<body data-input-start="loading">
   <main>
-    <header><p><a href="/search-start">開始擺位搜尋</a>　<a href="/searches">查看搜尋進度</a>　<a href="/materials">材料庫：新增與編輯材料</a>　<a href="/gradient">第三階段搜尋：開跑與看結果</a></p><h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
-    <section id="home"><h2 id="home-title">讀取中…</h2><p id="home-facts"></p>
-      <div class="home-top"><figure id="home-picture" hidden><svg id="home-room" role="img" aria-label="最近算的房間俯視圖：前牆在上"></svg>
-          <figcaption><span class="home-legend"><span class="home-key home-simulated"></span>貼了吸音材料，數字是電腦算的（模擬，之後要拿實測對照）</span>
-            <span class="home-legend"><span class="home-key home-measured"></span>貼了吸音材料，數字是實際量過的（實測）</span>
-            <span id="home-unnamed" class="note" hidden>喇叭靠的牆跟座位面向的不一致，分不出前後左右：圖照 x 起點牆朝上，牆名用座標名。</span></figcaption></figure>
-        <nav class="home-next" aria-label="下一步"><h3>下一步做什麼</h3>
-          <a id="home-result" class="home-go" hidden><b>看這一間的結果</b><span class="home-note"></span></a>
-          <a id="home-materials" class="home-go" href="#scheme-section"><b>挑材料：每一面牆貼什麼</b><span class="home-note"></span></a>
-          <a id="home-layout" class="home-go" href="/search-start"><b>挑擺位：喇叭和座位放哪（擺位搜尋）</b><span class="home-note"></span></a>
-          <p class="note">要改房間、喇叭或座位：在下面「已存的方案」按那一份的「打開來改」，改完按頁面下方的「計算這個方案」。下面的表單一開頁是範本，不是上面這一間。</p></nav></div>
-      <h3>已存的方案</h3><ul id="home-schemes" class="home-schemes"></ul>
-      <details id="home-auto" hidden><summary id="home-auto-count"></summary><ul id="home-auto-schemes" class="home-schemes"></ul></details></section>
-    <section id="scheme-section"><h2>方案</h2>
-      <div class="scheme-row"><label><span class="row-name">方案代號</span><input id="save-id" readonly></label>
-        <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button><button id="archive-scheme" disabled>封存這個方案</button><span id="open-note" aria-live="polite"></span></div>
-      <p id="scheme-zone-row"><button id="scheme-zone-open" type="button">設定每一區貼什麼 ▸</button><span>上面這一份方案每一面牆、每一區要貼什麼、不貼、還是由程式最佳化，都在「這間房貼什麼」那一頁設定。</span></p>
+    <header id="input-bars">
+      <nav aria-label="網站導覽" class="input-nav"><a href="#input-bars" aria-current="page">方案輸入</a>
+        <a href="#zone-page" id="nav-zones">這間房貼什麼</a><a href="/materials">材料庫</a>
+        <a href="/search-start">找喇叭和座位的位置</a><a href="/gradient">程式最佳化（挑材料）</a></nav>
+      <div class="bar-row">
+        <span id="empty-title">還沒有開任何方案</span>
+        <label class="scheme-name">房間方案<input id="save-id" readonly></label>
+        <div class="bar-anchor"><button id="scheme-menu-button" disabled aria-haspopup="menu" aria-expanded="false" aria-controls="scheme-menu">換一個方案 ▾</button>
+          <div id="scheme-menu" role="menu" aria-label="換一個方案" hidden>
+            <strong>最近的方案</strong><div id="home-schemes" role="group" aria-label="方案"></div>
+            <button role="menuitem" id="all-schemes" hidden></button>
+            <button role="menuitem" id="choose-template">從範本開一份新的…<small>選範本、取名字，存好才開始改</small></button>
+            <button role="menuitem" id="show-archived">看已封存的</button>
+          </div>
+          <div class="bar-popup" id="template-box" hidden><strong>從範本開一份新的</strong>
+            <form id="new-scheme" class="new-scheme"><fieldset class="tpl"><legend>範本</legend>
+                <label><input type="radio" name="new-template" id="new-template-reference" value="reference" checked><span><b>參考房</b><small>寬 4 × 深 6 × 高 3 公尺，兩支喇叭左右對稱擺，主位和周圍 6 點</small></span></label>
+                <label><input type="radio" name="new-template" id="new-template-stage_one" value="stage_one"><span><b>第一階段範本</b><small>六面同一種牆、全向聲源、沒有家具；看房間本身的共振</small></span></label></fieldset>
+              <div class="new-name"><label for="new-scheme-id">新方案的名字</label><input id="new-scheme-id" autocomplete="off" placeholder="例如：study-v1（英文字母、數字、_ 或 -）">
+                <button id="new-scheme-go" type="submit" class="primary">開一份新的</button><button id="new-scheme-cancel" type="button">取消</button></div>
+              <p id="new-scheme-note" aria-live="polite"></p></form></div>
+        </div>
+        <span id="save-state" role="status"></span>
+        <span id="check-state" data-kind="pending" aria-live="polite" tabindex="-1">檢查中…</span>
+        <div class="bar-actions"><button id="show-results" type="button">算過的結果與比較 ▸</button>
+          <div class="bar-anchor"><button id="save-as-toggle" aria-expanded="false" aria-controls="save-as-box">另存新名字</button>
+            <form id="save-as-box" class="bar-popup" hidden><label>新名字<input id="save-as-id" autocomplete="off" placeholder="英文字母、數字、_ 或 -"></label>
+              <button id="save-as" type="submit">確定</button><button id="cancel-save-as" type="button">取消</button><span id="save-as-note" aria-live="polite"></span></form>
+          </div><button id="save" class="primary">儲存</button>
+        </div>
+      </div>
+      <div id="open-note" aria-live="polite"></div>
+      <p id="messages" aria-live="polite"></p>
+      <div id="save-feedback" aria-live="polite"></div><div id="lock-bar" hidden></div>
+    </header>
+    <dialog id="leave-edits" aria-labelledby="leave-title"><form method="dialog">
+      <h2 id="leave-title">這一份有改動還沒存</h2><p id="leave-note"></p>
+      <button value="cancel" autofocus>取消</button><button value="discard">不存走</button><button value="save">存了再走</button>
+    </form></dialog>
+    <p id="boot-note" role="status">讀取中…</p>
+    <div id="empty-start" hidden><h2>從一份範本開始</h2>
+      <p class="say">選一份範本、取個名字，存好就能開始改房間、擺位和牆面。</p>
+      <p id="empty-list-note" class="notice" hidden></p><div id="empty-slot"></div>
+      <p><button type="button" id="empty-results" hidden></button></p>
+      <p><button type="button" id="empty-archived" hidden></button></p></div>
+    <h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p>
+    <section id="scheme-section" class="room-step" aria-labelledby="room-step-title">
+      <h2 id="room-step-title"><span class="step-no" aria-hidden="true">1</span><span class="step-title">房間和擺位</span></h2>
       <p id="scheme-archive-notice" class="notice" aria-live="polite" hidden></p>
-      <div class="scheme-row"><label><span class="row-name">範本</span><select id="template-list"><option value="reference">參考房（第二階段）</option><option value="stage_one">第一階段範本（六面 30ρc、全向聲源、無家具）</option></select></label><button id="load-template">載入範本</button><span id="template-note" aria-live="polite"></span></div>
-      <div class="scheme-row"><label><span class="row-name">新名字</span><input id="save-as-id" autocomplete="off" placeholder="英文字母、數字、_ 或 -"></label><button id="save-as">另存新名字</button><span id="save-as-note" aria-live="polite"></span></div>
-      <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
-      <p id="furniture-notice" class="notice" hidden></p>
-      <p id="speaker-setup-notice" class="notice" hidden></p>
-    </section>
-    <section><h2>房間與材料</h2><div id="room-fields" class="fields"></div>
-      <p id="rho-c"></p><div id="walls"></div>
-      <div id="elevation-panel"><h3>立面圖：在牆上切區</h3><p id="zone-methods-row"><button id="zone-page-open" type="button">設定每一區貼什麼 ▸</button><span>每一區要貼什麼、不貼、還是由程式最佳化，都在「這間房貼什麼」那一頁設定。</span></p><p class="note">站在房間裡看那一面。畫好的框之外會自動補滿成長方形，不重疊、不留空。</p>
-        <div id="elevation-walls"></div><p id="elevation-size"></p>
-        <div id="elevation-symmetry" role="group" aria-label="左右對稱"><strong>左右對稱</strong>
-          <span><button id="elevation-symmetry-on" type="button">開</button><button id="elevation-symmetry-off" type="button">關</button></span>
-          <span id="elevation-axis-words" class="note"></span></div>
-        <div id="elevation"><div id="elevation-banner" hidden></div></div><p id="elevation-note" aria-live="polite"></p><div id="elevation-selected"></div>
-        <details id="zone-table-fold"><summary>深度上限與舊做法表</summary><h4>這一面每一區的做法</h4><div id="elevation-zones"></div></details></div>
-      <label><input id="use-scattering" type="checkbox">填入六面散射係數</label><div id="scattering"></div>
-    </section>
-    <section><h2>喇叭與座位</h2><div id="labels-notice" hidden><p class="notice">喇叭與座位的中文名沒載到，下面先用代號顯示。</p>
-      <details><summary>技術細節</summary><p id="labels-technical"></p></details></div><h3>喇叭座標（公尺）</h3><div id="speakers"></div>
-      <h3>主位與周圍點座標（公尺）</h3><div id="receivers"></div>
-      <p>主位 z 座標只改主位；周圍點要逐點改。</p>
-      <p id="feature-note" class="note"></p>
-    </section>
-    <section id="input-setup"><h2>家具與喇叭設定</h2>
-      <div class="shortcut-actions"><button id="shortcut-working">工作</button><button id="shortcut-listening">聆聽</button></div>
-      <p>快捷會填入家具選項，並一起平移主位與全部周圍點的 z 座標；喇叭高度與天雲位置維持原值。</p>
-      <h3>家具</h3><div class="fields">
-        <label><input id="furniture-sofa" type="checkbox">沙發</label>
-        <label>前方桌面<select id="furniture-table-kind"><option value="none">無</option><option value="coffee_table">茶几</option><option value="desk">書桌</option></select></label>
-        <label><input id="furniture-cloud" type="checkbox">天雲</label>
+      <div class="roomrow">
+        <div class="card room-plan">
+          <div class="viewrow"><span id="plan-views-title">看哪一張圖</span><span class="seg" id="plan-views" role="group" aria-labelledby="plan-views-title">
+            <button type="button" id="view-plan-xy" data-view="plan-xy" aria-pressed="true">平面</button><button type="button" id="view-plan-xz" data-view="plan-xz" aria-pressed="false">側面</button><button type="button" id="view-zoom-xy" data-view="zoom-xy" aria-pressed="false">聆聽區平面放大</button><button type="button" id="view-zoom-xz" data-view="zoom-xz" aria-pressed="false">聆聽區側面放大</button></span></div>
+          <div class="plan-frame" id="plan-frame" data-view="plan-xy">
+            <div id="room-fields" class="room-dims"></div>
+            <div class="drawings" id="plan-drawings">
+              <div class="drawing shown" data-view="plan-xy"><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div>
+              <div class="drawing" data-view="plan-xz"><h3>側面圖 x–z</h3><svg id="plan-xz" viewBox="0 0 600 400" role="img" aria-label="側面圖"></svg></div>
+              <div class="drawing" data-view="zoom-xy"><h3>聆聽區平面放大</h3><svg id="zoom-xy" viewBox="0 0 600 400" role="img" aria-label="聆聽區平面放大"></svg></div>
+              <div class="drawing" data-view="zoom-xz"><h3>聆聽區側面放大</h3><svg id="zoom-xz" viewBox="0 0 600 400" role="img" aria-label="聆聽區側面放大"></svg></div></div>
+          </div>
+          <p id="plan-detail" aria-live="polite"></p>
+        </div>
+        <div id="input-setup" class="card facts" role="group" aria-label="這間房現在">
+          <div id="room-result" class="last" data-state="never"><span class="k" id="room-result-title">還沒算過</span><span id="room-result-text"></span><a id="room-result-link" hidden>看結果 ▸</a></div>
+          <div class="fact" id="fact-room"><span class="k">房間</span>
+            <div class="v"><span id="fact-room-text"></span><small id="fact-depth-text"></small></div>
+            <button type="button" class="mini" id="edit-depth" aria-expanded="false" aria-controls="depth-editor">改總厚度上限</button>
+            <div class="fact-editor" id="depth-editor" hidden></div></div>
+          <div class="fact" id="fact-speakers"><span class="k">喇叭位置</span>
+            <div class="v"><span id="fact-speakers-text"></span><small id="fact-speakers-kind"></small>
+              <p id="stand-height-hint" class="notice fact-note" aria-live="polite"></p></div>
+            <button type="button" class="mini" id="edit-speakers" aria-expanded="false" aria-controls="speaker-editor">改喇叭與擺法</button>
+            <div class="fact-editor" id="speaker-editor" hidden>
+              <p id="speaker-setup-notice" class="notice fact-note" hidden></p>
+              <label><input id="use-speaker-setup" type="checkbox">設定喇叭箱體與擺法</label>
+              <div id="speaker-setup-fields" hidden>
+                <div class="fields"><label>喇叭類型<select id="speaker-kind"></select></label>
+                  <label>喇叭擺法<select id="speaker-mount"></select></label>
+                  <label><input id="representative" type="checkbox">代表模型</label><span id="representative-state"></span></div>
+                <div id="cabinet-fields" class="fields"></div>
+                <p>喇叭聲學中心高度在「座標數字」裡喇叭的 z 格填寫，可以手改；切換擺法會保留原高度。</p>
+              </div>
+              <p class="note">兩支喇叭放在哪（x、y、z）在下面「座標數字」改。</p></div></div>
+          <div class="fact" id="fact-primary"><span class="k">主位位置</span>
+            <div class="v"><span id="fact-primary-text"></span></div>
+            <span class="seg shortcut-actions" role="group" aria-label="姿勢"><button type="button" id="shortcut-working" aria-pressed="false">工作姿勢</button><button type="button" id="shortcut-listening" aria-pressed="false">聆聽姿勢</button></span></div>
+          <div class="fact" id="fact-furniture"><span class="k">家具</span>
+            <div class="v"><span id="fact-furniture-text"></span></div>
+            <button type="button" class="mini" id="edit-furniture" aria-expanded="false" aria-controls="furniture-editor">改家具</button>
+            <div class="fact-editor" id="furniture-editor" hidden>
+              <p id="furniture-notice" class="notice fact-note" hidden></p>
+              <div class="fields">
+                <label><input id="furniture-sofa" type="checkbox">沙發</label>
+                <label>前方桌面<select id="furniture-table-kind"><option value="none">無</option><option value="coffee_table">茶几</option><option value="desk">書桌</option></select></label>
+                <label><input id="furniture-cloud" type="checkbox">天雲</label>
+              </div>
+              <p>沙發與桌面填相對主位的位置，旁邊顯示房間底面中心；天雲填固定房間座標。</p>
+              <div id="furniture-sofa-fields" class="furniture-fields" hidden></div>
+              <div id="furniture-table-fields" class="furniture-fields" hidden></div>
+              <div id="furniture-cloud-fields" class="furniture-fields" hidden></div>
+              <ul id="readonly-furniture" class="note" hidden></ul></div></div>
+          <div class="fact" id="fact-original"><span class="k">改造前（原方案）</span>
+            <div class="v"><span id="fact-original-text">每一面都只有原本的牆（沒指定原方案）</span></div>
+            <button type="button" class="mini" id="edit-original" aria-expanded="false" aria-controls="original-editor">指定一份方案當改造前</button>
+            <div class="fact-editor" id="original-editor" hidden></div></div>
+          <ul id="placement-warnings" class="notice" aria-live="polite" hidden></ul>
+          <div id="labels-notice" hidden><p class="notice">喇叭與座位的中文名沒載到，下面先用代號顯示。</p>
+            <details><summary>技術細節</summary><p id="labels-technical"></p></details></div>
+          <details class="fold" id="coordinates-fold"><summary id="coordinates-summary">座標數字</summary>
+            <h3>喇叭座標（公尺）</h3><div id="speakers"></div>
+            <h3>主位與周圍點座標（公尺）</h3><div id="receivers"></div>
+            <p>主位 z 座標只改主位；周圍點要逐點改。</p>
+            <ul id="plan-legend"></ul></details>
+          <details class="fold" id="advanced-fold"><summary>進階</summary>
+            <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
+            <h4>散射係數</h4><label><input id="use-scattering" type="checkbox">填入六面散射係數</label><div id="scattering"></div>
+            <h4>比對設定</h4><p id="feature-note" class="note"></p>
+            <h4>空氣</h4><p id="rho-c"></p></details>
+        </div>
       </div>
-      <p>沙發與桌面填相對主位的位置，旁邊顯示房間底面中心；天雲填固定房間座標。</p>
-      <div id="furniture-sofa-fields" class="furniture-fields" hidden></div>
-      <div id="furniture-table-fields" class="furniture-fields" hidden></div>
-      <div id="furniture-cloud-fields" class="furniture-fields" hidden></div>
-      <ul id="readonly-furniture" class="note" hidden></ul>
-      <h3>喇叭類型與擺法</h3><label><input id="use-speaker-setup" type="checkbox">設定喇叭箱體與擺法</label>
-      <div id="speaker-setup-fields" hidden>
-        <div class="fields"><label>喇叭類型<select id="speaker-kind"></select></label>
-          <label>喇叭擺法<select id="speaker-mount"></select></label>
-          <label><input id="representative" type="checkbox">代表模型</label><span id="representative-state"></span></div>
-        <div id="cabinet-fields" class="fields"></div>
-        <p>喇叭聲學中心高度在上方喇叭座標的 z 格填寫，可以手改；切換擺法會保留原高度。</p>
+    </section>
+    <section id="wall-section" class="room-step" aria-labelledby="wall-step-title">
+      <h2 id="wall-step-title"><span class="step-no" aria-hidden="true">2</span><span class="step-title">牆上切區</span>
+        <span class="say">在牆上拖框切一區</span></h2>
+      <div id="elevation-panel">
+        <div class="cutrow">
+          <div class="card elev">
+            <div class="walls-row">
+              <div id="elevation-walls" role="group" aria-label="看哪一面"></div>
+              <div id="elevation-symmetry" role="group" aria-labelledby="elevation-symmetry-title">
+                <span class="mirror-switch"><strong id="elevation-symmetry-title">兩邊一起畫</strong>
+                  <span class="seg"><button id="elevation-symmetry-on" type="button">開</button><button id="elevation-symmetry-off" type="button">關</button></span></span>
+                <small id="elevation-axis-words"></small></div>
+            </div>
+            <div class="wallline" id="elevation-wall-line">
+              <span id="elevation-size"></span>
+              <span id="elevation-original-line"><span id="elevation-original"></span>
+                <button type="button" class="mini" id="edit-wall-original" aria-expanded="false" aria-controls="wall-original-editor">換原本的牆</button></span>
+              <span id="elevation-depth-line"><span id="elevation-depth"></span>
+                <button type="button" class="mini" id="edit-wall-depth" aria-expanded="false" aria-controls="wall-depth-editor">這一面另設</button></span>
+              <span class="spacer"></span>
+              <span id="elevation-clear-slot"></span>
+            </div>
+            <div class="fact-editor" id="wall-original-editor" hidden><div id="walls"></div></div>
+            <div class="fact-editor" id="wall-depth-editor" hidden></div>
+            <div id="elevation"><div id="elevation-banner" hidden></div></div>
+            <p id="elevation-note" aria-live="polite"></p><div id="elevation-selected"></div>
+            <p class="legend" id="elevation-legend"><span><i class="sw zone-mode-search"></i>由程式最佳化</span><span><i class="sw zone-mode-fixed"></i>指定貼一種</span><span><i class="sw zone-mode-keep_original"></i>保留原樣</span><span>實線：畫的框；虛線：自動補的區</span><span><i class="sw-mirror"></i>點劃線：鏡子</span></p>
+          </div>
+          <div class="card side" id="elevation-list">
+            <h3 id="elevation-list-title"></h3>
+            <div id="elevation-list-notes"></div>
+            <div id="elevation-list-zones"></div>
+            <p id="zone-methods-row"><button id="zone-page-open" class="go" type="button">設定每一區貼什麼 ▸</button></p>
+            <details class="fold" id="zone-numbers-fold"><summary>每一區的位置與大小（公尺）</summary><div id="zone-numbers"></div></details>
+          </div>
+        </div>
       </div>
-      <p id="stand-height-hint" class="notice" aria-live="polite"></p>
-      <ul id="placement-warnings" class="notice" aria-live="polite" hidden></ul>
     </section>
-    <section><h2>平面圖與側面圖</h2><div class="drawings" id="plan-drawings">
-      <div><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div>
-      <div><h3>側面圖 x–z</h3><svg id="plan-xz" viewBox="0 0 600 400" role="img" aria-label="側面圖"></svg></div>
-      <div><h3>聆聽區平面放大</h3><svg id="zoom-xy" viewBox="0 0 600 400" role="img" aria-label="聆聽區平面放大"></svg></div>
-      <div><h3>聆聽區側面放大</h3><svg id="zoom-xz" viewBox="0 0 600 400" role="img" aria-label="聆聽區側面放大"></svg></div></div>
-      <p id="plan-detail" aria-live="polite"></p><ul id="plan-legend"></ul></section>
-    <section><h2>檢查與計算</h2><div class="actions"><button id="check">檢查</button><button id="save">儲存</button><button id="calculate">計算這個方案</button><button id="stop" disabled>停止</button></div>
-      <p id="messages" aria-live="polite"></p><p id="run-state" aria-live="polite"></p><ul id="other-runs" hidden></ul>
-      <details id="run-log" hidden><summary>計算程式的輸出（英文原文，技術細節）</summary><pre id="run-log-text"></pre></details>
-      <a id="result-link" class="button-link" hidden>查看結果頁</a><span id="result-stale" hidden>設定已修改，這份結果是修改前算的</span>
-    </section>
-    <section><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" class="button-link" hidden>比較</a></p>
-      <table><thead><tr><th>方案代號</th><th>算完時間</th><th>全程</th><th>物理</th><th>評分設定</th><th>查看</th><th>選為 A</th><th>選為 B</th><th>封存方案</th></tr></thead><tbody id="results-list"></tbody></table>
-      <details id="archived" hidden><summary>已封存</summary>
-        <p><button id="clear-archive" type="button" class="archive-danger" hidden>全部清除封存</button></p>
-        <p class="archive-scroll-note note">表格可左右滑動查看完整內容與操作按鈕。</p>
-        <table id="archived-packages" hidden><thead><tr><th>方案名字</th><th>封存時間</th><th>結果</th><th>搬回整包</th><th>永久刪除</th></tr></thead><tbody id="archived-packages-list"></tbody></table>
-        <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th><th>永久刪除</th></tr></thead><tbody id="archived-list"></tbody></table></div>
-      </details></section>
+    <footer id="input-footer">
+      <div class="bar-row"><div class="bar-prompt"><strong id="next-title"></strong><small id="next-note"></small></div>
+        <span id="current-stop"><button id="stop" disabled hidden>停止</button></span>
+        <details id="run-log" hidden><summary>看出錯紀錄</summary><pre id="run-log-text"></pre></details>
+        <div id="calculate-action"><button id="calculate">照現在牆上貼的算一次</button></div>
+        <a id="result-link" class="button-link" hidden>算好了 ▸ 看結果</a><span id="result-stale" hidden>設定已修改，這份結果是修改前算的</span>
+        <div id="search-action"><button id="zone-to-search" disabled>交給程式最佳化 ▸</button><small id="zone-to-search-note"></small></div>
+      </div>
+      <div class="followed-run"><span id="run-state" aria-live="polite"></span><span id="followed-stop"></span></div><ul id="other-runs" hidden></ul>
+    </footer>
+    <div id="results-drawer" hidden>
+      <div id="results-mask"></div>
+      <section id="results-panel" role="dialog" aria-modal="true" aria-labelledby="results-title" aria-describedby="results-say" tabindex="-1">
+        <div class="drawer-head"><h2 id="results-title">算過的結果與比較</h2><button id="results-close" type="button">關閉 ✕</button></div>
+        <p class="say" id="results-say">每算一次就多一列，新的在上面：同一份方案算過好幾次（算失敗再算、留著的舊紀錄、搜尋放進來的）就有好幾列。勾兩筆就能並排比，先勾的是 A。</p>
+        <p id="results-note" aria-live="polite"></p>
+        <p id="results-empty" hidden>還沒有算過的結果；在頁底按「照現在牆上貼的算一次」，算好就列在這裡。</p>
+        <table id="results-table"><tbody id="results-list"></tbody></table>
+        <div id="compare-row"><span id="compare-hint" aria-live="polite"></span><a id="compare-go" class="button-link" aria-disabled="true">比較 ▸</a></div>
+        <p id="compare-warning" hidden>評分設定不同，放在一起比會不準</p>
+        <p class="say" id="archive-say">封存＝從清單收起來，隨時拿得回來。</p>
+        <p id="archive-none" tabindex="-1" hidden>還沒有封存的結果</p>
+        <details id="archived" hidden><summary>看已封存的結果</summary>
+          <p><button id="clear-archive" type="button" class="archive-danger" hidden>全部清除封存</button></p>
+          <p class="archive-scroll-note note">表格可左右滑動查看完整內容與操作按鈕。</p>
+          <table id="archived-packages" hidden><thead><tr><th>方案名字</th><th>封存時間</th><th>結果</th><th>搬回整包</th><th>永久刪除</th></tr></thead><tbody id="archived-packages-list"></tbody></table>
+          <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th><th>永久刪除</th></tr></thead><tbody id="archived-list"></tbody></table></div>
+        </details>
+      </section>
+    </div>
   </main>
   <div id="zone-page" hidden></div>
 </body>

@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, expect
 from aosr.gui import reference_only
-from tests.engine._zone_panel_steps import edit_candidates
+from tests.engine._zone_panel_steps import choose_mode, edit_candidates
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_symmetry_room import NAME, symmetry_document
@@ -28,7 +28,7 @@ from tests.engine.test_gui_vpr_reference_browser import (
     _BAND,
     _CARD_SENTENCES,
     _HeldLimits,
-    _OLD_TABLE_SETTLED,
+    _UNLOCKED_AND_VERDICT_SHOWN,
     _allowed,
     _apply,
     _band_at,
@@ -55,15 +55,15 @@ def test_the_old_table_search_row_is_stopped_and_says_the_refusal_in_red(tmp_pat
         page = watched.page
         _open_scheme(page, NAME)
         page.locator("#elevation-wall-x0").click()
-        page.wait_for_function(_OLD_TABLE_SETTLED)
+        page.wait_for_function(_UNLOCKED_AND_VERDICT_SHOWN)
         expect(page.locator("#zone-to-search")).to_be_disabled()
         expect(page.locator("#zone-to-search-note")).to_have_class("limit-red")
         expect(page.locator("#zone-to-search-note")).to_have_text(_refused(page, "x0/a"))
         edit_candidates(page, "x0", "a", remove=(HIT,))
-        page.wait_for_function(_OLD_TABLE_SETTLED)
+        page.wait_for_function(_UNLOCKED_AND_VERDICT_SHOWN)
         expect(page.locator("#zone-to-search")).to_be_enabled()
         expect(page.locator("#zone-to-search-note")).to_have_class("note")
-        expect(page.locator("#zone-to-search-note")).to_have_text("會先照畫面儲存，再打開第三階段搜尋頁")
+        expect(page.locator("#zone-to-search-note")).to_have_text("交出黃色的 2 區；下一頁按「開始搜尋」才開始算")
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
@@ -207,9 +207,11 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_on_
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
-def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_the_old_table(tmp_path: Path, browser: Browser) -> None:
-    """舊做法表（來源：這一頁上一次改過的組合）：剛改過的那一份剩「命中那一筆或不貼」，再把另一區改成由程式最佳化，
-    那一區拿到三種玻璃棉＋不貼。剛改過的那一份沒有命中、只剩「不貼」的，照舊帶「只有不貼」。"""
+def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_the_panel(tmp_path: Path, browser: Browser) -> None:
+    """上一次改過的組合帶到另一區（小框）：剛改過的那一份剩「命中那一筆或不貼」，再把另一區改成由程式最佳化，
+    那一區拿到三種玻璃棉＋不貼。剛改過的那一份沒有命中、只剩「不貼」的，照舊帶「只有不貼」。
+    （#1265 單元 3 之二收尾改名，原名 test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_the_old_table：
+    舊做法表拆了，另一區改從輸入頁「改這一區 ▸」開小框改。）"""
     for start, left in ((LISTED, [HIT, "none"]), (["glass_wool_48k", "none"], ["none"])):
         _prepare(tmp_path, {"x0/a": start}, left_right_symmetry="off")  # 這一題不考左右對稱，明寫關著
         with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -218,9 +220,9 @@ def test_a_carried_list_left_with_only_nothing_falls_back_to_the_three_wools_in_
             page.locator("#elevation-wall-x0").click()
             edit_candidates(page, "x0", "a", remove=("glass_wool_48k",))
             assert cast(list[str], page.evaluate("zoneDesign.zones.x0.a.allowed")) == left
-            with page.expect_response("**/api/zone-material"):
-                page.locator("#zone-mode-x0-b").select_option("search")
-            page.wait_for_function(_OLD_TABLE_SETTLED)
+            # 舊做法表那一路拆了：另一區改從輸入頁「改這一區 ▸」開小框改成由程式最佳化（上一次的組合照樣帶）。
+            choose_mode(page, "x0", "b", "search")
+            page.wait_for_function(_UNLOCKED_AND_VERDICT_SHOWN)
             assert cast(list[str], page.evaluate("zoneDesign.zones.x0.b.allowed")) == (WOOLS if HIT in left else ["none"]), left
             assert (watched.console_errors, watched.page_errors) == ([], [])
 

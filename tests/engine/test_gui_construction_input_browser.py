@@ -6,6 +6,7 @@ import pytest
 from playwright.sync_api import Browser, expect
 
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
+from tests.engine._input_page_steps import open_example_scheme
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
 
@@ -14,6 +15,7 @@ from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
 def test_select_edit_save_reload_and_reverse_lookup(tmp_path: Path, browser: Browser, width: int) -> None:
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=width) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _filled(page, "#material-kind-floor", "assembly")
         _filled(page, "#preset-floor", "glass_wool_48k_50mm_gap50")
         expect(page.locator("#preset-state-floor")).to_have_text("使用預設：48K 玻璃棉 50 mm＋50 mm 空腔")
@@ -45,6 +47,7 @@ def test_layer_error_is_visible_plain_400(tmp_path: Path, browser: Browser) -> N
     test_gui_construction_repairs::test_preview_layer_range_error_is_plain_400；網頁印字這一段由這一格守）。"""
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        open_example_scheme(page, base, tmp_path)
         _filled(page, "#material-kind-floor", "assembly")
         field = "thickness_m"
         with page.expect_response("**/api/input-preview") as response:
