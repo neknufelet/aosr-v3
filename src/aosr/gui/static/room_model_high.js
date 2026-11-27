@@ -220,12 +220,12 @@
     $("high").hidden = true; $("high-body").hidden = true; $("run-high").disabled = true;
   });
   $("run-high").addEventListener("click", async () => {
-    const forModel = $("model").dataset.id, absorption = {}, mine = ++generation;
-    document.querySelectorAll("#layers select").forEach((select) => { absorption[select.dataset.layer] = select.value; });
+    const forModel = $("model").dataset.id, materials = Object.create(null), mine = ++generation;
+    document.querySelectorAll("#layers select").forEach((select) => { materials[select.dataset.layer] = select.value; });
     $("run-high").disabled = true;
     $("high").hidden = false; $("high-body").hidden = true;
     try {
-      const job = await call(`/api/room-models/${forModel}/high-runs`, {absorption});
+      const job = await call(`/api/room-models/${forModel}/high-runs`, {materials});
       if (mine !== generation) return;
       $("high-state").textContent = job.display_text || "計算高音中";
       stop();

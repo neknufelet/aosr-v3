@@ -1,7 +1,8 @@
-"""網頁「自訂房間」那一頁的高音背景計算：一份 Rhino 檔加每個圖層的吸音，算反射路徑、回聲圖、衰減與逐頻能量。
+"""網頁「自訂房間」那一頁的高音背景計算：一份 Rhino 檔加每個圖層的材料，算反射路徑、回聲圖、衰減與逐頻能量。
 
-跟低頻那一支（:mod:`aosr.reporting.room_shell_run`）吃同一份快照（模型檔路徑、每個圖層是硬牆還是幾倍 ρc
-的實數阻抗），輸出一份 JSON 給網頁畫圖。晚期分格與形狀因子只看房間，算一次；路徑表每支喇叭各算一次。
+跟低頻那一支（:mod:`aosr.reporting.room_shell_run`）吃同一份快照（模型檔路徑、每個圖層凍結下來的材料庫材料，
+硬牆是 None），阻抗也用同一支 :func:`~aosr.physics.layer_impedance.normal_impedance` 在高音的頻率軸上算；
+輸出一份 JSON 給網頁畫圖。晚期分格與形狀因子只看房間，算一次；路徑表每支喇叭各算一次。
 
 - 喇叭當全向聲源（自訂房間還沒有喇叭指向性可選）；散射每個圖層都用材料預設值。
 - 「硬牆」那一檔用 :data:`~aosr.config.shell_lane.SHELL_HARD_WALL_IMPEDANCE_RATIO` 倍 ρc。
@@ -22,6 +23,7 @@ from tempfile import NamedTemporaryFile
 import numpy as np
 from numpy.typing import NDArray
 
+from aosr import runtime
 from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ, GEOMETRIC_LANE_FREQUENCIES_HZ
 from aosr.config.paths import config_path
 from aosr.config.product_air import product_air_environment
@@ -31,12 +33,15 @@ from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.rhino_room import read_rhino_room
 from aosr.geometry.room_shell import MAIN_SEAT, RoomShell, check_room_shell, signed_volume
 from aosr.geometry.shell_faces import ShellFaces, make_occluders, shell_faces
+from aosr.materials.library import LibraryEntry, preview_material
+from aosr.physics.layer_impedance import normal_impedance
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.shell_geometric_lane import ShellAcoustics, scattered_path_pressures, solve_shell_geometric_lane
 from aosr.physics.shell_late_energy import ShellLateGeometry, shell_late_geometry, solve_shell_late_energy_by_order
 from aosr.physics.shell_paths import ShellPathTable, shell_path_table
 from aosr.physics.wall_surfaces import impedance_absorption_rows
 from aosr.reporting.room_shell_picture import layer_color
+from pydantic import TypeAdapter
 
 # 回聲圖每條反射的大小取這一段頻率的平均（人耳最敏感、反射最分得出來的那一段）。
 ECHO_BAND_HZ = (500.0, 2000.0)
@@ -45,13 +50,14 @@ ECHO_BAND_HZ = (500.0, 2000.0)
 DECAY_FLOOR_DB = -60.0
 DECAY_MAX_ORDERS = 3000
 DECAY_MAX_POINTS = 240
-# 吸音只看實數阻抗、跟頻率無關，晚期衰減每個頻點都一樣，取一個頻點算就好。
+# 衰減圖與殘響時間取 1 kHz 那一點（材料的吸音隨頻率變，畫一條就挑人耳最敏感那一段的中間）。
 DECAY_FREQUENCY_HZ = 1000.0
 # 嵌牆喇叭往房內挪的距離（公尺）：5 毫米，一階反射的路程只多一公分，回聲圖上看不出來。
 SPEAKER_WALL_NUDGE_M = 0.005
 # 喇叭離聽位比這個近就不算（回聲圖以直達聲當 0 dB，距離是 0 就沒有基準）。
 MIN_SPEAKER_SEAT_M = 0.1
 OMNI = SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL)
+_ENTRY: TypeAdapter[LibraryEntry] = TypeAdapter(LibraryEntry)
 FloatArray = NDArray[np.float64]
 
 
@@ -61,6 +67,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--engine-commit", required=True)
     parser.add_argument("--capabilities", type=Path, required=True)
+    # 只給考卷切粗一點省時間，網頁不傳。
+    parser.add_argument("--patch-edge-m", type=float, default=SHELL_PATCH_EDGE_M)
     return parser
 
 
@@ -69,15 +77,25 @@ def high_frequencies() -> tuple[float, ...]:
     return tuple(f for f in GEOMETRIC_LANE_FREQUENCIES_HZ if f >= FEM_GEOMETRIC_CROSSOVER_CAP_HZ)
 
 
-def _impedances(ratios: Mapping[str, object], layers: tuple[str, ...], rho_c: float) -> dict[str, complex]:
-    out: dict[str, complex] = {}
+def _impedances(chosen: Mapping[str, object], layers: tuple[str, ...], frequencies: tuple[float, ...], *,
+                density: float, c: float) -> dict[str, tuple[complex, ...]]:
+    """每個圖層逐頻的垂直入射阻抗；硬牆（None）用 :data:`SHELL_HARD_WALL_IMPEDANCE_RATIO` 倍 ρc。"""
+    out: dict[str, tuple[complex, ...]] = {}
     for name in layers:
-        if name not in ratios:
-            raise ValueError(f"圖層「{name}」沒有選吸音")
-        ratio = ratios[name]
-        if ratio is not None and not isinstance(ratio, (int, float)):
-            raise ValueError(f"圖層「{name}」的吸音不是數字")
-        out[name] = complex((SHELL_HARD_WALL_IMPEDANCE_RATIO if ratio is None else float(ratio)) * rho_c)
+        if name not in chosen:
+            raise ValueError(f"圖層「{name}」沒有選材料")
+        document = chosen[name]
+        if document is None:
+            out[name] = (complex(SHELL_HARD_WALL_IMPEDANCE_RATIO * density * c),) * len(frequencies)
+            continue
+        material = preview_material(_ENTRY.validate_python(document))
+        try:
+            value, _ = normal_impedance(material, frequencies, density_kg_m3=density, sound_speed_m_s=c)
+        except ValueError as exc:
+            raise ValueError(f"圖層 {name}：{exc}") from exc
+        if value is None:
+            raise ValueError(f"圖層 {name}：材料沒有給阻抗")
+        out[name] = (complex(value),) * len(frequencies) if isinstance(value, (int, float)) else tuple(value)
     return out
 
 
@@ -123,7 +141,7 @@ def _db(values: FloatArray | tuple[float, ...]) -> list[float]:
 
 
 def _speaker(faces: ShellFaces, late: ShellLateGeometry, source: tuple[float, float, float],
-             seat: tuple[float, float, float], impedance: dict[str, complex], rho_c: float, c: float,
+             seat: tuple[float, float, float], impedance: Mapping[str, tuple[complex, ...]], rho_c: float, c: float,
              frequencies: tuple[float, ...]) -> dict[str, object]:
     table = shell_path_table(faces, source, seat, max_order=REFLECTION_ORDER_K, tol_m=SHELL_GEOMETRY_TOL_M)
     prepared = ShellAcoustics(faces, table, late)
@@ -151,10 +169,11 @@ def _decay_orders(absorption: FloatArray, layer_areas: FloatArray) -> int:
     return int(min(DECAY_MAX_ORDERS, max(12, np.ceil(needed))))
 
 
-def _decay(late: ShellLateGeometry, impedance: dict[str, complex], rho_c: float, c: float,
+def _decay(late: ShellLateGeometry, impedance: Mapping[str, tuple[complex, ...]], rho_c: float, c: float,
            volume: float) -> dict[str, object]:
-    """晚期能量逐階到降 60 dB，每一階換成時間：第 k 階 ≈ k × 平均自由路徑 ÷ 聲速；另回 T30 推的殘響時間。"""
-    rows = impedance_absorption_rows({name: (impedance[name],) for name in late.layers}, rho_c)
+    """:data:`DECAY_FREQUENCY_HZ` 那一點的晚期能量逐階到降 60 dB，每一階換成時間：第 k 階 ≈ k × 平均自由路徑 ÷
+    聲速；另回 T30 推的殘響時間。``impedance`` 是每個圖層在那一點的阻抗（一格）。"""
+    rows = impedance_absorption_rows({name: impedance[name] for name in late.layers}, rho_c)
     absorption = np.asarray([rows[name][0] for name in late.layers], dtype=np.float64)
     orders = _decay_orders(absorption, late.layer_areas())
     band = solve_shell_late_energy_by_order(late, absorption[:, None], (DECAY_FREQUENCY_HZ,), max_order=orders).bands[0]
@@ -175,7 +194,7 @@ def _decay(late: ShellLateGeometry, impedance: dict[str, complex], rho_c: float,
 
 def run(snapshot: Mapping[str, object], *, engine_commit: str,
         patch_edge_m: float = SHELL_PATCH_EDGE_M) -> dict[str, object]:
-    """``patch_edge_m`` 只給考卷切粗一點省時間，網頁不傳。"""
+    """``patch_edge_m`` 只給考卷切粗一點省時間，網頁不傳。材料庫的構造材料要雙精度，從 :func:`main` 進來才有。"""
     started = time.monotonic()
     air, _ = product_air_environment()
     settings = load_room_shell_import_settings(config_path("room_shell_import.toml"))
@@ -183,20 +202,21 @@ def run(snapshot: Mapping[str, object], *, engine_commit: str,
     report = check_room_shell(room, settings)
     if not report.ok:
         raise ValueError("模型沒過匯入檢查：" + "；".join(p.text for p in report.problems if p.blocking))
-    ratios = snapshot["impedance_ratio_by_layer"]
-    if not isinstance(ratios, dict):
-        raise ValueError("快照缺每個圖層的吸音")
+    chosen = snapshot["material_by_layer"]
+    if not isinstance(chosen, dict):
+        raise ValueError("快照缺每個圖層的材料")
     rho_c, c = air.air_density_kg_m3 * air.sound_speed_m_s, air.sound_speed_m_s
     faces = shell_faces(room, settings.coplanar_angle_deg, settings.coplanar_offset_m, SHELL_GEOMETRY_TOL_M)
-    impedance = _impedances(ratios, faces.layers, rho_c)
     seat = next(item for item in room.seats if item.kind == MAIN_SEAT)
     positions = [_off_the_wall(speaker.position, faces) for speaker in room.speakers]
     for number, position in enumerate(positions, start=1):
         if float(np.linalg.norm(np.subtract(position, seat.position))) < MIN_SPEAKER_SEAT_M:
             raise ValueError(f"喇叭 {number} 跟聽位幾乎在同一點（不到 {MIN_SPEAKER_SEAT_M * 100:.0f} 公分），請把其中一個移開")
-    # 先擋掉算不了的，再做吃時間的分格與形狀因子。
-    late = shell_late_geometry(faces, patch_edge_m=patch_edge_m)
     frequencies = high_frequencies()
+    impedance = _impedances(chosen, faces.layers, frequencies, density=air.air_density_kg_m3, c=c)
+    at_decay = _impedances(chosen, faces.layers, (DECAY_FREQUENCY_HZ,), density=air.air_density_kg_m3, c=c)
+    # 先擋掉算不了的（喇叭貼聽位、材料算不出阻抗），再做吃時間的分格與形狀因子。
+    late = shell_late_geometry(faces, patch_edge_m=patch_edge_m)
     speakers = [{"label": f"喇叭 {number}（{speaker.kind}）", "position": list(position),
                  **_speaker(faces, late, position, seat.position, impedance, rho_c, c, frequencies)}
                 for number, (speaker, position) in enumerate(zip(room.speakers, positions, strict=True), start=1)]
@@ -205,7 +225,7 @@ def run(snapshot: Mapping[str, object], *, engine_commit: str,
                  for name in order}
     return {"engine_commit": engine_commit, "frequencies_hz": [round(f, 3) for f in frequencies],
             "seat": list(seat.position), "speakers": speakers,
-            "decay": _decay(late, impedance, rho_c, c, _room_volume(room)),
+            "decay": _decay(late, at_decay, rho_c, c, _room_volume(room)),
             "layers": [{"name": name, "color": layer_color(i)} for i, name in enumerate(order)],
             "triangles": triangles, "solid_layers": sorted({t.layer for solid in room.solids for t in solid.triangles}),
             "hidden_area_m2": round(late.hidden_area_m2, 2),
@@ -213,11 +233,12 @@ def run(snapshot: Mapping[str, object], *, engine_commit: str,
 
 
 def main(argv: list[str] | None = None) -> int:
+    runtime.configure_calculation_jax()  # 構造材料的阻抗要雙精度；子行程是正式入口，開機就固定（同低頻那一支）
     args = _parser().parse_args(argv)
     snapshot: object = json.loads(args.snapshot.read_text(encoding="utf-8"))
     if not isinstance(snapshot, dict):
         raise ValueError("快照不是物件")
-    result = run(snapshot, engine_commit=args.engine_commit)
+    result = run(snapshot, engine_commit=args.engine_commit, patch_edge_m=args.patch_edge_m)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile("w", encoding="utf-8", dir=args.out.parent, delete=False, suffix=".tmp") as handle:
         json.dump(result, handle, ensure_ascii=False)
