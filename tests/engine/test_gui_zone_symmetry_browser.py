@@ -571,3 +571,18 @@ def test_heading_distinguishes_both_added_partners(tmp_path: Path, browser: Brow
             expect(follows).to_contain_text(face + " " + number)
         expect(follows).to_contain_text("跟著選")
         expect(follows).not_to_contain_text("左牆")
+
+
+def test_both_missed_pair_summaries_point_to_the_face_cut_button(tmp_path: Path, browser: Browser) -> None:
+    # 前牆兩區大小不同，後牆只有單側一區，讓伺服器一次產生兩種切區建議。
+    cuts = {"x0": UNEVEN["x0"], "xL": [FRONT_PAIR[0]]}
+    _prepare(tmp_path, cuts, _design({"x0": ["b", "a"], "xL": ["b"]}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_page(page)
+        summaries = page.locator("#zone-symmetry-missed .zv-sym-sum:visible")
+        assert set(summaries.all_inner_texts()) == {
+            "大小不同，各自調；要配對，按那一面的「切區」，切到左右對稱的位置",
+            "對稱軸另一邊沒有一樣大小的區，各自調；要配對，按那一面的「切區」，在對稱的位置切出一區",
+        }
+        assert "回「房間方案輸入」" not in page.locator("#zone-page").inner_text()

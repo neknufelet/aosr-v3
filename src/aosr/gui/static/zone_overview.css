@@ -438,6 +438,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page #zone-groups .zv-num {font-size:13px}
 
 /* 分區頁借用輸入頁的立面圖；左欄可捲，完成鈕在同一欄頂端。 */
+#zone-page :is(.zv-side,.zv-foot)[inert]{opacity:.55}
 #zone-page #elevation-panel{overflow:auto;min-width:0}
 #zone-page .cutrow{display:block}
 #zone-page #elevation-walls,#zone-page #elevation-list,#zone-page .fact-editor,
@@ -454,3 +455,4 @@ html.zone-page-open{scroll-padding-bottom:112px}
 /* 提示與圖疊在同一格，拖曳中提示出現或收起都不能推動滑鼠下的牆面。 */
 #zone-page #elevation-banner{position:relative}
 #zone-page #elevation-note{margin:4px 0}
+#zone-page #elevation-note[data-repeated]{display:none}

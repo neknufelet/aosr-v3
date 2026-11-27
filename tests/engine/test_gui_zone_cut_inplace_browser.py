@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Page, Route, expect
 
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -142,3 +142,104 @@ def test_all_faces_fit_and_done_can_be_hit(tmp_path: Path, browser: Browser) -> 
                 return button === document.elementFromPoint(r.x + r.width/2, r.y + r.height/2); }""")
             done.click()
             expect(page.locator(f"#zone-cut-{face}")).to_be_focused()
+
+
+def test_cut_toolbar_controls_the_scheme_symmetry(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser) as page:
+        page.locator("#zone-page-open").click()
+        _enter(page)
+        title = page.locator("#elevation-symmetry-title").inner_text()
+        page.locator("#elevation-symmetry-off").click()
+        page.get_by_role("button", name="切好了").click()
+        expect(page.locator("#zone-symmetry-off")).to_have_attribute("aria-pressed", "true")
+        assert page.locator("#zone-symmetry-title").inner_text() == title == "左右對稱"
+
+
+def test_one_done_click_applies_the_typed_width(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser, (FIRST, SECOND)) as page:
+        page.locator("#zone-page-open").click()
+        _enter(page)
+        pixel = _ready_pixel(page, W, H)
+        page.mouse.click(*pixel((0.9, 0.9)))
+        page.locator("#elevation-width").fill("0.6")
+        with page.expect_response("**/api/zone-cut") as cut:
+            page.get_by_role("button", name="切好了").click()
+        assert cut.value.ok
+        expect(page.locator("#zone-cut-yL")).to_be_focused()
+        expect(page.locator("#zone-map [data-wall=yL][data-zone=z1]")).to_be_visible()
+        assert _drawn(page)["z1"]["u_m"] == pytest.approx([0.55, 1.15])
+
+
+@pytest.mark.parametrize(("finish", "accepted"), [("Escape", True), ("click", True), ("Escape", False), (None, True)])
+def test_finish_during_a_pending_cut(tmp_path: Path, browser: Browser, finish: str | None, accepted: bool) -> None:
+    with _room(tmp_path, browser) as page:
+        page.locator("#zone-page-open").click()
+        _enter(page)
+        done = page.locator("#zone-finish-cut")
+        held: list[Route] = []
+        page.route("**/api/zone-cut", lambda route: held.append(route))
+        pixel = _ready_pixel(page, W, H)
+        page.mouse.move(*pixel(START))
+        page.mouse.down()
+        page.mouse.move(*pixel(END), steps=6)
+        with page.expect_request("**/api/zone-cut"):
+            page.mouse.up()
+        if finish == "Escape":
+            page.keyboard.press("Escape")
+        elif finish == "click":
+            done.click()
+        expect(page.locator("#zone-map")).to_be_hidden()
+        if accepted:
+            held[0].continue_()
+        else:
+            held[0].fulfill(status=422, json={"error": "這一塊超出牆面"})
+        _settled(page)
+        if accepted and finish:
+            expect(page.locator("#zone-map")).to_be_visible()
+            expect(page.locator("#zone-cut-yL")).to_be_focused()
+        else:
+            expect(done).to_be_focused()
+            if not accepted:
+                expect(page.locator("#elevation-note")).to_have_text("沒有切：這一塊超出牆面")
+                expect(page.locator("#elevation-banner")).to_have_text("沒有切：這一塊超出牆面")
+                expect(page.locator("#elevation-banner")).to_be_visible()
+                assert not _drawn(page)
+
+
+def test_cut_dims_and_disables_side_and_footer(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser) as page:
+        page.locator("#zone-page-open").click()
+        _enter(page)
+        for selector in (".zv-side", ".zv-foot"):
+            region = page.locator(f"#zone-page {selector}")
+            assert region.evaluate("e => e.inert")
+            assert 0 < region.evaluate("e => Number(getComputedStyle(e).opacity)") < 1
+            expect(region).to_have_attribute("aria-disabled", "true")
+        page.get_by_role("button", name="切好了").click()
+        for selector in (".zv-side", ".zv-foot"):
+            region = page.locator(f"#zone-page {selector}")
+            assert region.evaluate("e => !e.inert && getComputedStyle(e).opacity === '1'")
+            expect(region).not_to_have_attribute("aria-disabled", "true")
+
+
+def test_mirror_drag_shows_one_preview_sentence_in_overview(tmp_path: Path, browser: Browser) -> None:
+    with _room(tmp_path, browser) as page:
+        page.locator("#zone-page-open").click()
+        _enter(page)
+        words = "放開後，另一邊跟著出現"
+
+        def preview() -> None:
+            expect(page.locator("#elevation-banner")).to_have_text(words)
+            expect(page.locator("#elevation-banner")).to_be_visible()
+            expect(page.get_by_text(words, exact=True).locator("visible=true")).to_have_count(1)
+
+        _drag(page, W, H, START, END, during=preview)
+        page.get_by_role("button", name="切好了").click()
+        page.locator("#zone-page-close").click()
+        _cut_by(page, "#elevation-clear")
+
+        def input_preview() -> None:
+            expect(page.locator("#elevation-banner")).to_have_text(words)
+            expect(page.get_by_text(words, exact=True).locator("visible=true")).to_have_count(2)
+
+        _drag(page, W, H, START, END, during=input_preview)

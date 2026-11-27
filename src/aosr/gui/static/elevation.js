@@ -101,9 +101,14 @@ function newBoxId(wall) {
   while (used.has(`z${n}`)) n += 1;
   return `z${n}`;
 }
+function markRepeatedNote() {
+  const noteLine = $("elevation-note"), top = $("elevation-banner");
+  noteLine.toggleAttribute("data-repeated", !top.hidden && top.textContent === noteLine.textContent);
+}
 function note(text, kind) {
   const line = $("elevation-note");
   line.textContent = text; line.className = kind;
+  markRepeatedNote();
 }
 function banner(text = "", kind = "", button = null) {
   const line = $("elevation-banner");
@@ -112,6 +117,7 @@ function banner(text = "", kind = "", button = null) {
   line.hidden = !text;
   bannerOwner = text ? scheme : null;
   if (button) line.append(button);
+  markRepeatedNote();
 }
 function repairWords(wall, before, repair) {
   const size = wallSize(wall), view = views[wall];
@@ -206,12 +212,19 @@ window.pendingMirrorCut = () => pendingMirror;
 // cut：真的切了之後、等圖面檢查之前要同步做的事（清掉的復原快照在這裡記：applyCut 結束時頁面已解鎖，等 /api/plan 的空檔
 // 人可以改別格，等檢查回來才記就會把改完的樣子當成清掉後那一刻，檢查丟錯則整個沒記到；#1265 單元 3 審查設計洞 1）。
 async function cutWall(wall, boxes, done, change, repairing = false, cut = null) {
+  if (inputBusy) { note("上一個改動還在處理，請稍等再切", "notice"); return false; }
   const mirror = change && window.zoneSymmetry.isOn() ? change : null;
+  const unlock = window.lockZoneCut();
   const applied = applyCut(wall, boxes, done, mirror, repairing);
   if (mirror && !pendingMirror) pendingMirror = applied;
   let changed;
-  try { changed = await applied; } finally { if (pendingMirror === applied) pendingMirror = null; }
-  if (changed) cut?.();
+  try {
+    changed = await applied;
+    if (changed) cut?.();
+  } finally {
+    if (pendingMirror === applied) pendingMirror = null;
+    unlock(changed);
+  }
   if (changed) await refreshPlan();
   return Boolean(changed);  // 清掉這一面的切法要知道真的切了沒（沒切就不給復原）
 }
@@ -223,13 +236,11 @@ function cutZoneLabel(surface, wall) {
 }
 
 async function applyCut(wall, boxes, done, mirror, repairing) {
-  if (inputBusy) { note("上一個改動還在處理，請稍等再切", "notice"); return; }
   if (measuredDrafts[wall]) { note(`${wallNames[wall]}有還沒套用的實測阻抗草稿：先套用或取消，再切這一面`, "notice"); return; }
   const draft = wallDocument();
   showSelectionBanner = false; mirrorWarning = null; banner();
   inputBusy = true;
   document.querySelector("main").inert = true;
-  $("zone-page").inert = true;
   let data, changedWalls, message = "", kind = "ok", fields = "", repairBefore = null;
   const payload = {scheme: draft, wall, boxes};
   if (mirror) payload.mirror = {...mirror, protected_walls: Object.keys(measuredDrafts)};
@@ -297,7 +308,6 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
     elevationThin = [];
   } finally {
     document.querySelector("main").inert = false;
-    $("zone-page").inert = false;
     inputBusy = false;
   }
   if (done) done(data);

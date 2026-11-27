@@ -8,6 +8,7 @@ const WALL_ROW_HEIGHT = 190;    // 一面牆最高畫多高（px）
 const TILE_DEPTH = 190, TILE_WIDTH = 140;  // 地板、天花那兩張小圖最大的深與寬（px）
 const WALL_ORDER = ["front", "back", "left", "right"];
 const VPR_WORDS = "鋼板共振吸音";
+const SYMMETRY_TITLE = "左右對稱";
 let overviewOpen = false;
 let cutting = null;
 let cutGeneration = 0;
@@ -573,16 +574,22 @@ function cutFace(wall) {
   const toolbar = panel.querySelector(".walls-row");
   const title = el("strong", "zv-cut-title", `${wallNames[wall]}　切區`);
   const done = button("zv-cut-done", "切好了", "zone-finish-cut", finishCut);
+  // 等完整點擊才讓數字格失焦，避免滑鼠還沒放開，拒收的回覆就先到了。
+  done.onmousedown = event => {
+    if (document.activeElement?.matches("#elevation-selected input")) event.preventDefault();
+  };
   cutGeneration++;
-  cutting = {wall, map, home, title, done, revision: editRevision};
+  cutting = {wall, map, home, title, done, revision: editRevision, pending: false, finishRequested: false};
   panel.before(home);
   map.replaceWith(panel);
   toolbar.prepend(title);
   toolbar.append($("elevation-clear-slot"), done);
-  $("elevation-symmetry-title").textContent = "左右一起切";
+  $("elevation-symmetry-title").textContent = SYMMETRY_TITLE;
   // 舊選取顯示到切完，再按新座標核對；這段時間不能把草稿套到已重編的代號。
-  page.querySelector(".zv-side").inert = true;
-  page.querySelector(".zv-foot").inert = true;
+  for (const region of page.querySelectorAll(".zv-side, .zv-foot")) {
+    region.inert = true;
+    region.setAttribute("aria-disabled", "true");
+  }
   window.showElevationWall(wall);
   done.focus({preventScroll: true});
 }
@@ -601,7 +608,40 @@ function restoreElevation() {
   cutting = null;
 }
 
+// 送出中保留完成鈕。從它逐層往外鎖住旁支，解鎖時保留切區原本就鎖住的右欄與底列。
+window.lockZoneCut = () => {
+  const page = $("zone-page"), editor = cutting;
+  if (!editor) {
+    page.inert = true;
+    return () => { page.inert = false; };
+  }
+  editor.pending = true;
+  const locked = [];
+  for (let branch = editor.done; branch !== page; branch = branch.parentElement) {
+    for (const sibling of branch.parentElement.children) {
+      if (sibling === branch || sibling.inert) continue;
+      sibling.inert = true;
+      locked.push(sibling);
+    }
+  }
+  return changed => {
+    for (const element of locked) element.inert = false;
+    editor.pending = false;
+    if (cutting !== editor) return;
+    if (changed && editor.finishRequested) finishCut();
+    else editor.done.focus({preventScroll: true});
+    editor.finishRequested = false;
+  };
+};
+
 function finishCut() {
+  const field = document.activeElement;
+  if (field?.matches("#elevation-selected input") && field.value !== field.defaultValue) {
+    cutting.done.focus({preventScroll: true});  // 失焦會送出數字；格子本身拒收時留下原因
+    if (!cutting.pending) return;
+  }
+  if (cutting.pending) { cutting.finishRequested = true; return; }
+  if (inputBusy) return;
   const wall = cutting.wall;
   restoreElevation();
   renderZoneOverview();
@@ -609,7 +649,7 @@ function finishCut() {
 }
 
 document.addEventListener("keydown", event => {
-  if (cutting && event.key === "Escape" && !inputBusy) {
+  if (cutting && event.key === "Escape") {
     event.preventDefault();
     finishCut();
   }
@@ -1943,7 +1983,7 @@ function withZones(text, entry) {
 function symmetryBox() {
   const box = el("div", "zv-sym"); box.id = "zone-symmetry"; box.dataset.state = pairing.state;
   const head = el("div", "zv-sym-head");
-  const title = el("span", "zv-sym-title", "左右對稱"); title.id = "zone-symmetry-title";
+  const title = el("span", "zv-sym-title", SYMMETRY_TITLE); title.id = "zone-symmetry-title";
   const toggle = el("span", "zv-seg"); toggle.setAttribute("role", "group"); toggle.setAttribute("aria-labelledby", "zone-symmetry-title");
   for (const [on, words, id] of [[true, "開", "zone-symmetry-on"], [false, "關", "zone-symmetry-off"]]) {
     const item = button("zv-seg-item", words, id, () => setSymmetry(on));
