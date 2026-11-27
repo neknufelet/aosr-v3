@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const TICKS_HZ = [20, 30, 40, 50, 60, 80, 100, 150, 200, 300];
   const COLORS = ["#2a6fdb", "#e07b39", "#5fb36b", "#9b59b6"];
-  let model = null, timer = null, plot = null, activeRun = null;
+  let model = null, timer = null, plot = null, activeRun = null, upload = 0;
 
   async function call(url, body) {
     const response = await fetch(url, body === undefined ? {} :
@@ -89,12 +89,20 @@
   $("file").addEventListener("change", async () => {
     const file = $("file").files[0];
     if (!file) return;
+    // 一選新檔就放掉舊房：還在路上的起算回應、輪詢、較早的上傳回應都對不上，不會畫到新房上。
+    const mine = ++upload;
+    model = null;
     stopPolling();
+    $("run").disabled = true;
     $("result").hidden = true;
     $("state").textContent = "讀取中…";
     try {
-      showModel(await call("/api/room-models", {file_name: file.name, data_base64: base64(await file.arrayBuffer())}));
+      const data = await call("/api/room-models", {file_name: file.name, data_base64: base64(await file.arrayBuffer())});
+      if (mine !== upload) return;
+      stopPolling();
+      showModel(data);
     } catch (error) {
+      if (mine !== upload) return;
       $("model").hidden = true;
       $("state").textContent = error.message;
     }

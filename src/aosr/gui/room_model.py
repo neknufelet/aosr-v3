@@ -92,6 +92,7 @@ class RoomModels:
             raise ValueError(f"檔案 {len(content) / 1e6:.1f} MB，超過上限 {self.settings.max_file_bytes / 1e6:.0f} MB")
         model_id = hashlib.sha256(content).hexdigest()
         folder = self.models / model_id
+        new_folder = not folder.exists()
         folder.mkdir(exist_ok=True)
         path = folder / "model.3dm"
         fresh = not path.exists()
@@ -100,9 +101,10 @@ class RoomModels:
         try:
             room = read_rhino_room(path, self.settings.max_file_bytes)
         except ValueError:
-            if fresh:  # 讀不了的檔不留在磁碟上
+            if fresh:  # 讀不了的檔不留在磁碟上；資料夾只在這次新建的才拿掉
                 path.unlink()
-                folder.rmdir()
+                if new_folder:
+                    folder.rmdir()
             raise
         report = check_room_shell(room, self.settings)
         area = _layer_areas(room)

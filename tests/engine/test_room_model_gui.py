@@ -91,6 +91,10 @@ def test_an_upload_over_the_limit_is_refused_while_reading(tmp_path: Path) -> No
         big = client.post("/api/room-models", content=b'{"data_base64": "' + b"A" * 2000 + b'"}',
                           headers={"Content-Type": "application/json"})
         assert big.status_code == 400 and "太大" in big.json()["error"]
+        # 沒帶長度（分段送）也要在讀到超過上限時就停
+        chunked = client.post("/api/room-models", content=iter([b'{"data_base64": "', b"A" * 2000, b'"}']),
+                              headers={"Content-Type": "application/json"})
+        assert chunked.status_code == 400 and "太大" in chunked.json()["error"]
         small = client.post("/api/room-models", content=b"[", headers={"Content-Type": "application/json"})
         assert small.status_code == 400 and "JSON" in small.json()["error"]
 
