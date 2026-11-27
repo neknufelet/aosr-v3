@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -52,8 +53,12 @@ def _layer_names(model: dict[str, object]) -> list[str]:
 
 def test_upload_lists_checks_layers_and_a_picture(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
-        assert client.get("/room-model").status_code == 200
-        assert client.get("/static/room_model.js").status_code == 200
+        page = client.get("/room-model")
+        assert page.status_code == 200
+        # 頁面自己引用的每一支腳本與樣式表都要拿得到（白名單漏登記就 404）。
+        assets = re.findall(r'(?:src|href)="([^"]+\.(?:js|css))"', page.text)
+        assert any(asset.endswith("room_model.js") for asset in assets)
+        assert all(client.get(asset).status_code == 200 for asset in assets)
         first = _upload(client)
         assert first["ok"] is True
         layers = first["layers"]
