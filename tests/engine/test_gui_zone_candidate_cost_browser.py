@@ -61,6 +61,10 @@ def test_new_search_zone_saves_explicit_builtin_candidates(tmp_path: Path, brows
 
 def _expect_candidate_cost(surface: Locator, present: bool) -> None:
     expect(surface).to_be_visible()
+    # 面板先畫暫定列、伺服器判決回來再畫一次：等畫的是判決後那一版再讀（慢的機器上兩版之間會被讀到一半）。
+    form = surface.page.locator("#zone-panel-form")
+    if form.count():
+        expect(form).to_have_attribute("data-candidates", "checked")
     note = surface.locator(".zone-candidate-cost")
     if not present:
         expect(note).to_have_count(0)

@@ -62,6 +62,8 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
 
 def _visible_candidate_texts(page: Page, rows: Locator) -> list[str]:
     # 每次都展開同一批候選列的選項，讀取畫面實際顯示的範圍、區號與動作。
+    # 先等面板畫的是伺服器判決後那一版（暫定列之後還會重畫一次，展開的選項會被收起）。
+    expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
     page.locator("#zone-panel h2").hover()
     for menu in rows.locator(".zv-row-options").all():
         if menu.get_attribute("open") is None:

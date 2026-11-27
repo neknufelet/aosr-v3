@@ -1745,6 +1745,8 @@ function searchForm(items, walls, sync) {
   }
   form.id = "zone-panel-form";
   if (!preview.rows) preview.displayedPending = true;
+  // 先照勾選畫暫定列讓人可以先操作，伺服器逐區判決回來會再畫一次；這個標記講現在畫的是哪一版（考卷讀列之前等它變 checked）。
+  form.dataset.candidates = preview.rows ? "checked" : "pending";
   const selections = preview.rows ?? raw.lists.map(allowed => ({allowed, covered: {}}));
   form.candidateRows = selections;
   const perZone = selections.map(row => row.covered);

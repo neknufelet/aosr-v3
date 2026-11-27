@@ -33,6 +33,9 @@ def test_apply_visible_in_every_mode(tmp_path: Path, browser: Browser) -> None:
         _open_zone(page)
         for mode in ("search", "fixed", "keep_original"):
             page.locator(f"#zone-panel-mode-{mode}").check()
+            if mode == "search":
+                # 由程式最佳化先畫暫定候選、核完再重畫一次：等最後那一版再量按鈕，不量到被換掉的舊按鈕。
+                expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
             hit = page.locator("#zone-panel-apply").evaluate("""button => {
                 const r = button.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2;
                 return {y, hit: document.elementFromPoint(x, y) === button};
