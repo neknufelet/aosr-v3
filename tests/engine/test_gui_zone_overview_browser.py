@@ -15,6 +15,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, expect
 
+from tests.engine._input_page_steps import open_zone_page
 from tests.engine._zone_material_steps import open_groups
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
@@ -60,8 +61,7 @@ def _rules(page: Page, zones: list[dict[str, object]]) -> dict[str, object]:
 
 def _open_overview(page: Page) -> None:
     _open_scheme(page, SAMPLE)
-    page.locator("#zone-page-open").click()
-    expect(page.locator("#zone-map")).to_be_visible()
+    open_zone_page(page)
 
 
 def _shown(page: Page, kind: str) -> set[str]:
