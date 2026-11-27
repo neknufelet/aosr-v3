@@ -37,8 +37,10 @@ class RoomModelHigh:
         earlier = self.started.get(text)
         if earlier is not None:
             try:
-                if self.manager.get(str(earlier["run_id"]))["status"] in ("running", "done"):
-                    return earlier
+                state = self.manager.get(str(earlier["run_id"]))
+                done = state["status"] == "done" and Path(str(state["result_path"])).is_file()
+                if state["status"] == "running" or done:
+                    return state
             except (ValueError, FileNotFoundError, KeyError):
                 pass
         job = self.manager.start_snapshot(text, model_id[:12], job_fields={"running_label": "計算高音中"})

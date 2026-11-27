@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
 import math
 import re
@@ -13,11 +14,21 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+import pytest
 from starlette.testclient import TestClient
 
 from aosr.gui.app import GuiSettings, create_app
+from aosr.config.room_shell_import import load_room_shell_import_settings
+from aosr.config.paths import config_path
+from aosr.config.shell_lane import SHELL_GEOMETRY_TOL_M
+from aosr.geometry.rhino_room import read_rhino_room
+from aosr.geometry.room_shell import RoomShell
+from aosr.geometry.shell_faces import ShellFaces, shell_faces
 from aosr.gui.room_model import ABSORPTION_RATIOS
-from aosr.reporting.room_shell_high_run import high_frequencies, run
+from aosr.physics.shell_paths import shell_path_table
+from aosr.reporting import room_shell_high_run
+from aosr.reporting.room_shell_high_run import SPEAKER_WALL_NUDGE_M, _off_the_wall, high_frequencies, run
 
 TEST_ROOM = Path(__file__).parent / "data" / "room_shell_test_room.3dm"
 FAKE_RUNNER = """
@@ -104,10 +115,57 @@ def test_background_high_run_has_every_chart_field(tmp_path: Path) -> None:
     assert counts == [[1, 6, 18, 34], [1, 6, 17, 32]]
     assert any(p["order"] == 1 and p["via"] == ["Ceiling_石膏板"] for p in speakers[0]["blocked"])
     decay = result["decay"]
-    assert isinstance(decay, list) and decay[0]["db"] == 0.0
-    assert all(later["db"] < earlier["db"] and later["t_ms"] > earlier["t_ms"] for earlier, later in zip(decay, decay[1:]))
+    assert isinstance(decay, dict)
+    points = decay["points"]
+    assert points[0]["db"] == 0.0 and -61.0 < points[-1]["db"] <= -60.0  # 算到降 60 dB 為止
+    assert all(later["db"] < earlier["db"] and later["t_ms"] > earlier["t_ms"] for earlier, later in zip(points, points[1:]))
+    assert isinstance(decay["t60_s"], float) and decay["t60_s"] > 0.0
     triangles, layers = result["triangles"], result["layers"]
     assert isinstance(triangles, dict) and isinstance(layers, list)
     assert sorted(triangles) == names and [layer["name"] for layer in layers] == names
     assert result["solid_layers"] == ["Cloud_木板"]  # 測試房的吸音板是外殼凸出來的，天雲是單獨的造型
     json.dumps(result, ensure_ascii=False)
+
+
+def _test_room() -> tuple[RoomShell, ShellFaces]:
+    settings = load_room_shell_import_settings(config_path("room_shell_import.toml"))
+    room = read_rhino_room(TEST_ROOM, settings.max_file_bytes)
+    return room, shell_faces(room, settings.coplanar_angle_deg, settings.coplanar_offset_m, SHELL_GEOMETRY_TOL_M)
+
+
+def _on_back_wall(room: RoomShell, faces: ShellFaces) -> tuple[tuple[float, float, float], int]:
+    """把喇叭 1 往它背後那面牆推到正好貼在牆上（嵌牆喇叭），回位置與那一面。"""
+    point = np.asarray(room.speakers[0].position)
+    planes = np.unique(faces.plane_of[:faces.shell_triangles])
+    planes = planes[faces.supporting[planes]]
+    heights = point @ faces.plane_normals[planes].T - faces.plane_offsets[planes]
+    plane = int(planes[int(np.argmin(heights))])
+    on_wall = point - float(np.min(heights)) * faces.plane_normals[plane]
+    return (float(on_wall[0]), float(on_wall[1]), float(on_wall[2])), plane
+
+
+def test_in_wall_speaker_is_moved_off_the_wall() -> None:
+    """貼在牆上的喇叭原本被拒（不在房間裡面），往房內挪 5 毫米就算得出路徑表。"""
+    room, faces = _test_room()
+    on_wall, plane = _on_back_wall(room, faces)
+    seat = room.seats[0].position
+    with pytest.raises(ValueError, match="不在房間裡面"):
+        shell_path_table(faces, on_wall, seat, max_order=1, tol_m=SHELL_GEOMETRY_TOL_M)
+    moved = _off_the_wall(on_wall, faces)
+    height = float(np.asarray(moved) @ faces.plane_normals[plane] - faces.plane_offsets[plane])
+    assert math.isclose(height, SPEAKER_WALL_NUDGE_M, abs_tol=1e-9)
+    assert shell_path_table(faces, moved, seat, max_order=1, tol_m=SHELL_GEOMETRY_TOL_M).path_count > 1
+    inside = room.speakers[1].position
+    assert _off_the_wall(inside, faces) == inside  # 不貼牆的不動
+
+
+def test_speaker_on_the_seat_is_refused_in_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """喇叭跟聽位同一點原本算出 NaN、結果檔寫不出來；現在一開始就說人話。"""
+    room, _ = _test_room()
+    on_seat = dataclasses.replace(room.speakers[1], position=room.seats[0].position)
+    moved = dataclasses.replace(room, speakers=(room.speakers[0], on_seat))
+    monkeypatch.setattr(room_shell_high_run, "read_rhino_room", lambda *_: moved)
+    names = sorted({t.layer for t in (*room.shell, *(t for s in room.solids for t in s.triangles))})
+    with pytest.raises(ValueError, match="喇叭 2 跟聽位幾乎在同一點"):
+        run({"model_path": str(TEST_ROOM), "impedance_ratio_by_layer": dict.fromkeys(names)},
+            engine_commit="a" * 40, patch_edge_m=2.0)
