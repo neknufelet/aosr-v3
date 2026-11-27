@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import cast
 
@@ -112,6 +113,15 @@ def test_redraw_uses_unsaved_form_values_and_says_when_the_curve_is_stale(tmp_pa
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 
+def _until_held(page: Page, held: list[Route], count: int) -> None:
+    """等攔下的請求真的記進 held：請求事件先到，route 的回呼要等 Playwright 下一次收訊息才跑，
+    請求一出去就拿 held[1]，雲端忙的時候還沒記到（11-27 雲端紅過一次）。最多等 10 秒。"""
+    deadline = time.monotonic() + 10
+    while len(held) < count and time.monotonic() < deadline:
+        page.wait_for_timeout(50)
+    assert len(held) == count, f"攔下 {len(held)} 個請求，要 {count} 個"
+
+
 def test_a_late_reply_for_the_previous_material_never_replaces_the_one_on_screen(tmp_path: Path, browser: Browser) -> None:
     with real_server(tmp_path) as base, _open(browser, f"{base}/materials") as watched:
         page = watched.page
@@ -127,6 +137,7 @@ def test_a_late_reply_for_the_previous_material_never_replaces_the_one_on_screen
         expect(page.locator("#curve-warnings li")).to_have_count(0)
         with page.expect_request("**/api/material-curve"):
             _row(page, "fixed", "glass_wool_48k_50mm")
+        _until_held(page, held, 2)
         held[1].continue_()
         expect(page.locator("#curve-chart canvas")).to_have_count(1, timeout=COMPUTED_MS)
         expect(page.locator('#curve-warnings li[data-code="komatsu_frequency_extrapolation"]')).to_be_visible()
