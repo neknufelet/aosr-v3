@@ -5,6 +5,7 @@ from pathlib import Path
 from playwright.sync_api import Browser, expect
 
 from aosr.materials import library
+from tests.engine._zone_material_steps import pick_fixed_row
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_gui_gradient_browser import _serve, _shot
 from tests.engine.test_gui_gradient_jobs import FakeLauncher, _place_surrogate
@@ -40,7 +41,7 @@ def test_reselect_rechecks_the_same_zone_cap(tmp_path: Path, browser: Browser) -
             page.locator("#zone-page-open").click()
             _click_zone(page, "x0/whole_wall")
             page.locator("#zone-panel-mode-fixed").check()
-            page.locator("#zone-panel-material").select_option(identifier)
+            pick_fixed_row(page, identifier)
             _apply(page)
             page.locator("#zone-page-close").click()
             _save(page, name)

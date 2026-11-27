@@ -510,7 +510,7 @@ function allowedProblem(allowed) {
 
 // 「顯示全部材料」那幾組的組標題、開關的字、「不是這一面用的」那一句：「這間房貼什麼」小框（#1265）用。
 function hiddenGroupLabel(group) { return `不列的：${zoneSurfaceGroups[group]}`; }
-const SHOW_ALL_WORDS = "顯示全部材料（門、窗、整片天花構造、另一間示範房的這些平常不列；要選它們才打開）";
+const SHOW_ALL_WORDS = "顯示全部材料";
 function awayWords(entry, wall) { return `「${entry.label}」不是${wallNames[wall]}用的：${entry.placement.reason}`; }
 function sameList(left, right) { return left.length === right.length && left.every(id => right.includes(id)); }
 function originalSchemeRow() {

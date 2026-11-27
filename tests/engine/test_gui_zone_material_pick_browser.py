@@ -9,6 +9,8 @@ from typing import cast
 from playwright.sync_api import Browser, Locator, Page, expect
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import row_options
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
@@ -90,7 +92,7 @@ def _boss_room(tmp_path: Path) -> None:
 
 
 def _add_candidate(page: Page, choice: str) -> None:
-    page.locator("#zone-panel-add").click()
+    page.locator("#zone-panel-picker-search").focus()
     page.locator(f"#zone-panel-pick-{choice}").click()
 
 
@@ -131,9 +133,11 @@ def test_the_front_wall_is_handed_to_the_program_with_only_48k_or_nothing_in_fiv
         actions.click(page.locator("#zone-whole-yL"), "前牆「選整面」")
         _expect_selected(page, FRONT)
         actions.click(page.locator("#zone-panel-mode-search"), "由程式最佳化")
+        page.locator("#zone-panel-row-glass_wool_48k").hover()
+        page.locator("#zone-panel-options-glass_wool_48k summary").hover()
         actions.click(page.locator("#zone-panel-only-glass_wool_48k"), "清掉其他候選")
         actions.fill(page.locator("#zone-panel-depth"), "15")
-        expect(page.locator("#zone-panel-apply")).to_have_text("套用到選中的 5 區")
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 5 區")
         actions.click(page.locator("#zone-panel-apply"), "套用")
         expect(page.locator("#zone-panel")).to_have_count(0)
         _settled(page)
@@ -145,9 +149,10 @@ def test_the_front_wall_is_handed_to_the_program_with_only_48k_or_nothing_in_fiv
         expect(page.locator("#zone-result-search")).to_have_attribute("data-count", "5")
         expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 5 區")
         # 右欄把這五區寫成一行「前牆整面」，清單卡只剩 48K 玻璃棉與也可以不貼。
+        open_groups(page)
         expect(page.locator("#zone-special [data-whole='yL']")).to_have_text("前牆整面 12345")
-        expect(page.locator("#zone-list-who")).to_have_text("現在管 5 區：前牆整面 12345")
-        assert page.locator("#zone-list-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ONLY_48K
+        expect(page.locator("#zone-group-who")).to_have_text("這組有 5 區：前牆整面 12345")
+        assert page.locator("#zone-group-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ONLY_48K
         _send_to_search(page)
         assert watched.page_errors == [] and watched.console_errors == []
     zones, materials = _stored(tmp_path)
@@ -173,17 +178,18 @@ def test_select_whole_face_takes_every_zone_of_that_wall_except_doors_and_window
         expect(page.locator("#zone-whole-xL")).to_have_text("選整面")
         page.locator("#zone-whole-xL").click()
         _expect_selected(page, RIGHT_WITHOUT_OPENINGS)
-        expect(page.locator("#zone-panel h2")).to_have_text("已選 6 區")
-        expect(page.locator("#zone-panel-face")).to_contain_text("右牆整面")
-        assert page.locator("#zone-panel-face .zv-num").count() == 6
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 6 區")
+        expect(page.locator("#zone-panel h2")).to_have_text("右牆 345678 整面")
+        assert page.locator("#zone-panel h2 .zv-num").count() == 6
         # 一區一行的那幾列收在摺疊裡；點開拿掉一區，就不再是整面。
-        expect(page.locator("#zone-panel-zones summary")).to_have_text("看每一區、拿掉幾區")
+        expect(page.locator("#zone-panel-zones summary")).to_have_text("整面選區")
         expect(page.locator("#zone-panel-drop-xL-auto3")).to_be_hidden()
         page.locator("#zone-panel-zones summary").click()
         page.locator("#zone-panel-drop-xL-auto3").click()
-        expect(page.locator("#zone-panel h2")).to_have_text("已選 5 區")
-        expect(page.locator("#zone-panel-face")).to_have_count(0)
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 5 區")
+        expect(page.locator("#zone-panel h2")).not_to_contain_text("整面")
         expect(page.locator("#zone-panel-whole")).to_have_text("改選右牆整面（6 區）")
+        page.locator("#zone-panel-zones summary").click()
         page.locator("#zone-panel-whole").click()
         _expect_selected(page, RIGHT_WITHOUT_OPENINGS)
         # 只點圖上一區：也有那一條；選到的跨兩面牆就沒有。
@@ -205,9 +211,9 @@ def test_the_panel_marks_what_each_picked_zone_is_now_and_cancel_changes_nothing
         state = page.evaluate("() => JSON.stringify([zoneDesign, scheme])")
         _click_zone(page, "yL/z1")
         expect(page.locator("#zone-panel [id^='zone-panel-now-']")).to_have_count(1)
-        expect(page.locator("#zone-panel-now-fixed")).to_have_text("目前")
+        expect(page.locator("#zone-panel-now-fixed")).to_have_text("目前指定貼一種")
         expect(page.locator("#zone-panel-now-fixed")).to_have_attribute("data-zones", "yL/z1")
-        expect(page.locator("#zone-panel-option-fixed .zv-now-what")).to_contain_text("160 mm")
+        expect(page.locator("#zone-panel-now-fixed + .zv-now-what")).to_contain_text("160 mm")
         assert "原本" not in page.locator("#zone-panel").inner_text()
         # 再加選一區由程式最佳化的、一區不貼的：三項各掛一個「目前」，各寫是哪一區的號碼。
         _click_zone(page, "yL/z3")
@@ -216,12 +222,12 @@ def test_the_panel_marks_what_each_picked_zone_is_now_and_cancel_changes_nothing
         for mode, zone in (("fixed", "yL/z1"), ("search", "yL/z3"), ("keep_original", "x0/whole_wall")):
             expect(page.locator(f"#zone-panel-now-{mode}")).to_have_attribute("data-zones", zone)
         number = page.locator("#zone-map [data-wall='yL'][data-zone='z3'] .zv-badge text").text_content()
-        expect(page.locator("#zone-panel-option-search .zv-now-what")).to_have_text(f"前牆 {number}")
-        expect(page.locator("#zone-panel-option-keep_original .zv-now-what")).to_have_text("左牆整面")
+        expect(page.locator("#zone-panel-now-search + .zv-now-what")).to_have_text(f"前牆 {number}")
+        expect(page.locator("#zone-panel-now-keep_original + .zv-now-what")).to_have_text("左牆整面")
         # 點別的選項，「目前」不跟著跑（它講的是打開時的樣子）。
         page.locator("#zone-panel-mode-keep_original").check()
         expect(page.locator("#zone-panel-now-fixed")).to_have_attribute("data-zones", "yL/z1")
-        expect(page.locator("#zone-panel-cancel-note")).to_have_text("取消＝不改")
+        expect(page.locator("#zone-panel-cancel")).to_have_text("取消")
         page.locator("#zone-panel-cancel").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         assert page.evaluate("() => JSON.stringify([zoneDesign, scheme])") == state
@@ -249,26 +255,30 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         cells = page.locator("#zone-panel-list input, #zone-panel-list select, #zone-panel-list textarea")
         expect(cells).to_have_count(0)
         for choice in WOOLS[:-1]:
+            row_options(page, choice)
             page.locator(f"#zone-panel-range-toggle-{choice}").click()
         assert cells.evaluate_all("cells => cells.map(cell => cell.id)") == [
             f"zone-panel-range-{choice}-{part}-{end}" for choice, parts in (
                 ("glass_wool_48k", ("porous", "cavity")), ("glass_wool_24k", ("porous",)), ("glass_wool_96k", ("porous",)))
             for part in parts for end in ("low", "high")]
-        expect(page.locator("#zone-panel-range-note")).to_contain_text("範圍從材料頁帶來，可以改（只改這一區，不改材料頁）")
+        expect(page.locator("#zone-panel-range-note")).to_contain_text("範圍只改這一區，不改材料頁")
         expect(page.locator("#zone-panel-materials")).to_have_attribute("href", "/materials")
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
         expect(page.locator("#zone-panel-list #zone-panel-none-row")).to_contain_text("也可以不貼")
         expect(page.locator("#zone-panel-none-row")).to_contain_text("程式算出來不貼比較好的區，就不貼，保留原樣")
         expect(page.locator("#zone-panel-depth")).to_be_visible()
-        expect(page.locator("#zone-panel-deepest")).to_contain_text("這一區最深")
+        expect(page.locator("#zone-panel-deepest label")).to_have_text("最深（含空腔）")
         _click_zone(page, "yL/auto2")
-        expect(page.locator("#zone-panel-deepest")).to_contain_text("這幾區最深")
+        expect(page.locator("#zone-panel-apply")).to_have_text("套用到 2 區")
         # 「材料的勾全拿掉」不動「也可以不貼」；一種都沒勾（連不貼也拿掉）就不能套用。
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-only-glass_wool_48k").click()
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         assert page.locator("#zone-panel-list > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["none"]
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        row_options(page, "none")
         page.locator("#zone-panel-remove-none").click()
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
         expect(page.locator("#zone-panel-problem")).to_contain_text("至少勾一種")
@@ -282,24 +292,31 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         covered = cast(dict[str, list[str]], page.evaluate(
             "() => Object.fromEntries(zoneLibrary.filter(entry => entry.kind === 'optimizable').map(entry => [entry.id, entry.preset_members]))"))
         assert len(covered["glass_wool_48k"]) == 4 and len(covered["glass_wool_24k"]) == 1 and len(covered["glass_wool_96k"]) == 1
         _click_zone(page, "yL/auto1")
         _pick_search(page)
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         for family, name in (("glass_wool_48k", "48K 玻璃棉"), ("glass_wool_24k", "24K 玻璃棉"), ("glass_wool_96k", "96K 玻璃棉")):
             for product in covered[family]:
                 row = page.locator(f"#zone-panel-pick-{product}")
                 expect(row).to_have_attribute("data-covered", family)
-                expect(page.locator(f"#zone-panel-pick-{product}")).to_be_disabled()
-                expect(row.locator(".zv-covered-why")).to_have_text(f"上面可調的 {name} 已經包含它；只想用成品，先取消上面的 {name}")
+                expect(row).to_have_attribute("aria-disabled", "true")
+                expect(row).to_be_disabled()
+                plain = page.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}")
+                assert row.evaluate("e => getComputedStyle(e).color") != plain.evaluate("e => getComputedStyle(e).color")
+                expect(row).to_have_css("cursor", "default")
+                expect(row.locator(".zv-covered-why")).to_be_visible()
+                expect(row.locator(".zv-covered-why")).to_have_text(f"已含在可調的 {name} 裡")
         # 沒被包含的成品照常勾得到。
         expect(page.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}")).to_be_enabled()
         assert page.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}").get_attribute("data-covered") is None
         # 取消 48K：它那四筆勾得到了，24K、96K 的照舊灰著。
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         for product in covered["glass_wool_48k"]:
             expect(page.locator(f"#zone-panel-pick-{product}")).to_be_enabled()
             expect(page.locator(f"#zone-panel-pick-{product} .zv-covered-why")).to_have_count(0)
@@ -309,13 +326,13 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/auto1"] == [
             "glass_wool_24k", "glass_wool_96k", "none", covered["glass_wool_48k"][0]]
         # 從清單卡重新打開小框，也遵守同一條規則：清單裡的 24K 已經包含的那一筆灰著、勾不了、寫為什麼；48K 不在清單裡，它那幾筆勾得到。
-        page.locator("#zone-list-select").click()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-group-select").click()
+        page.locator("#zone-panel-picker-search").focus()
         inside = covered["glass_wool_24k"][0]
         expect(page.locator(f"#zone-panel-pick-{inside}")).to_be_disabled()
         expect(page.locator(f"#zone-panel-pick-{inside}")).to_have_attribute("data-covered", "glass_wool_24k")
         expect(page.locator(f"#zone-panel-pick-{inside} .zv-covered-why")).to_have_text(
-            "上面可調的 24K 玻璃棉 已經包含它；只想用成品，先取消上面的 24K 玻璃棉")
+            "已含在可調的 24K 玻璃棉 裡")
         expect(page.locator(f"#zone-panel-pick-{covered['glass_wool_48k'][1]}")).to_be_enabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -331,15 +348,15 @@ def test_fixed_products_stay_folded_and_the_line_says_how_many_there_are_and_how
         assert count > 4
         _click_zone(page, "yL/auto1")
         _pick_search(page)
-        expect(page.locator("#zone-panel-picker")).to_have_count(0)
+        expect(page.locator("#zone-panel-picker")).to_be_visible()
         expect(page.locator(f"#zone-panel-row-{vpr}")).to_have_count(0)
-        page.locator("#zone-panel-add").click()
-        assert page.locator("#zone-panel-picker [data-kind='fixed']").count() == count
+        page.locator("#zone-panel-picker-search").focus()
+        assert page.locator("#zone-panel-picker [data-entry-kind='fixed']").count() == count
         page.locator(f"#zone-panel-pick-{vpr}").click()
-        expect(page.locator("#zone-panel-picker")).to_have_count(0)
+        expect(page.locator("#zone-panel-picker")).to_be_visible()
         expect(page.locator(f"#zone-panel-row-{vpr}")).to_be_visible()
-        page.locator("#zone-panel-add").click()
-        assert page.locator("#zone-panel-picker [data-kind='fixed']").count() == count - 1
+        page.locator("#zone-panel-picker-search").focus()
+        assert page.locator("#zone-panel-picker [data-entry-kind='fixed']").count() == count - 1
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 5 種裡選，每一區各自最佳化。")
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -360,13 +377,14 @@ def test_the_page_says_optimized_by_the_program_everywhere(tmp_path: Path, brows
         expect(page.locator("#wall-zones-search .tag").first).to_have_text("由程式最佳化")
         assert OLD_WORDS not in page.locator("body").inner_text()
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         expect(page.locator("#zone-page .zv-legend")).to_contain_text("由程式最佳化")
         expect(page.locator("#zone-rule-mode option[value=search]")).to_have_text("由程式最佳化")
-        expect(page.locator("#zone-list h2")).to_contain_text("由程式最佳化的 15 區")
+        expect(page.locator("#zone-result-search")).to_have_attribute("data-count", "15")
         expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 15 區")
         _click_zone(page, "yL/z1")
-        expect(page.locator("#zone-panel-option-search label")).to_contain_text("由程式最佳化")
+        expect(page.locator("#zone-panel-option-search .zv-opt-words")).to_contain_text("由程式最佳化")
         _pick_search(page)
         for part in ("#zone-page", "#elevation-panel"):  # 舊做法表（#zone-table-fold）拆了，改看它原本在的第 2 段整段
             words = cast(str, page.locator(part).evaluate("element => element.textContent"))
@@ -380,20 +398,23 @@ def test_nothing_new_on_the_panel_is_smaller_than_thirteen_pixels_or_too_pale_to
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         # 地圖看得到就開量，雲端慢的時候清單卡還沒排好版，量到零段字（PR #1252 第一跑）；等量得到字再量。
-        expect(page.locator("#zone-list h2")).to_contain_text("由程式最佳化的 15 區")
-        page.wait_for_function(f"() => ({_TEXT_STYLES})(document.getElementById('zone-list')).length > 5")
-        card = cast(list[dict[str, object]], page.locator("#zone-list").evaluate(_TEXT_STYLES))
+        expect(page.locator("#zone-result-search")).to_have_attribute("data-count", "15")
+        page.wait_for_function(f"() => ({_TEXT_STYLES})(document.getElementById('zone-group')).length > 5")
+        card = cast(list[dict[str, object]], page.locator("#zone-group").evaluate(_TEXT_STYLES))
         page.locator("#zone-whole-yL").click()
         _pick_search(page)
-        page.locator("#zone-panel-add").click()
-        expect(page.locator("#zone-panel-picker .zv-covered-why").first).to_be_visible()
+        page.locator("#zone-panel-picker-search").focus()
+        expect(page.locator("#zone-panel-picker [data-covered] .zv-covered-why").first).to_be_visible()
         panel = cast(list[dict[str, object]], page.locator("#zone-panel").evaluate(_TEXT_STYLES))
         assert len(panel) > 30 and len(card) > 5
-        assert any("已經包含它" in cast(str, row["words"]) for row in panel)
-        # 空格子裡的提示字是瀏覽器另外畫的灰字，上面那一支量不到：小框裡不准有，空白的意思寫成看得到的字。
-        assert page.locator("#zone-panel input[placeholder]").count() == 0
-        assert any("空白＝不限" in cast(str, row["words"]) for row in panel)
+        assert any("已含在可調的" in cast(str, row["words"]) for row in panel)
+        depth = page.locator("#zone-panel-depth")
+        expect(depth).to_have_attribute("placeholder", "空白＝不限")
+        assert page.locator("#zone-panel input[type=number][placeholder]:not(#zone-panel-depth)").count() == 0
+        assert depth.evaluate("e => getComputedStyle(e, '::placeholder').color") == "rgb(73, 92, 102)"
+        expect(page.get_by_role("searchbox", name="找材料")).to_be_visible()
         small = [row for row in [*panel, *card] if cast(float, row["size"]) < 13]
         pale = [row for row in [*panel, *card] if cast(float, row["contrast"]) < 4.5]
         assert small == [] and pale == []
@@ -432,7 +453,9 @@ def test_picking_a_whole_face_changing_the_draft_then_cancelling_stores_both_fil
             expect(page.locator("#zone-map")).to_be_visible()
             page.locator("#zone-whole-yL").click()
             _pick_search(page)
+            row_options(page, "glass_wool_24k")
             page.locator("#zone-panel-remove-glass_wool_24k").click()
+            row_options(page, "none")
             page.locator("#zone-panel-remove-none").click()
             page.locator("#zone-panel-depth").fill("12")
             page.locator("#zone-panel-depth").press("Tab")
@@ -481,8 +504,10 @@ def test_unticking_and_ticking_back_on_the_floor_changes_no_other_zone(tmp_path:
         before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
         _click_zone(page, "floor/auto1")
         _pick_search(page)
+        row_options(page, "none")
         page.locator("#zone-panel-remove-none").click()
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        row_options(page, "none")
         page.locator("#zone-panel-addto-none").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "floor/auto1": ["none"]}
@@ -508,7 +533,7 @@ def test_two_zones_with_different_deepest_keep_their_own_when_the_box_is_typed_i
         assert zones == {"auto1": {"mode": "search", "allowed": ONLY_48K}, "auto2": {"mode": "search", "allowed": ONLY_48K, "max_depth_m": 0.125}}
         _click_zone(page, "yL/auto1")
         _click_zone(page, "yL/auto2")
-        expect(page.locator("#zone-panel-deepest small")).to_contain_text("空白＝各區照目前的")
+        expect(page.locator("#zone-panel-depth")).to_have_attribute("placeholder", "空白＝各區照目前的")
         assert "原本" not in cast(str, page.locator("#zone-panel-deepest").text_content())
         # 不收的時候那一句講的空白也要是同一個意思（各區不同時空白不是「不限」）。
         page.locator("#zone-panel-depth").fill("-3")
@@ -537,6 +562,7 @@ def test_applying_the_panel_only_adds_and_removes_what_was_ticked_and_keeps_the_
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
         _expect_candidate_states(page, {WOOLS[0]: "all", WOOLS[1]: "none"})
         _add_candidate(page, "glass_wool_24k")
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": [FLOOR_ONLY, "none", "glass_wool_24k"], "floor/auto1": on_floor}
