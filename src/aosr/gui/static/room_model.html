@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>自訂房間</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/room_model.css">
+  <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+  <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
+  <script src="/static/room_model.js" defer></script>
+</head>
+<body><main>
+  <header><h1>自訂房間（低頻）</h1>
+    <p><a href="/">回首頁</a></p>
+    <label>Rhino 檔 <input id="file" type="file" accept=".3dm"></label>
+    <p id="state" aria-live="polite"></p>
+  </header>
+  <section id="model" hidden>
+    <ul id="problems"></ul>
+    <div class="model-grid">
+      <table><thead><tr><th>圖層</th><th>面積 m²</th><th>吸音</th></tr></thead><tbody id="layers"></tbody></table>
+      <figure id="preview"></figure>
+    </div>
+    <div class="actions"><button id="run" type="button">算低頻</button></div>
+  </section>
+  <section id="result" hidden>
+    <div id="chart"></div>
+    <p id="modes"></p>
+    <figure id="mesh"></figure>
+    <p id="facts"></p>
+  </section>
+</main></body>
+</html>
