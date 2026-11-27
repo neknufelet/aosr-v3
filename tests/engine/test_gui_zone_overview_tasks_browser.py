@@ -423,8 +423,12 @@ def test_picking_the_ceiling_or_the_floor_lists_only_what_can_go_there_and_has_n
     """天花、地板也點得到，同一個面板；材料只列那一面能貼的（伺服器每一筆給的「能用在哪幾面」），地板能貼的跟牆不一樣。
     「＝其他牆面」只在選到的都是算進規則的牆區時才標。"""
     _prepare(tmp_path)
-    usable = """walls => (zoneLibrary || []).filter(entry => entry.kind === 'fixed' && walls.every(wall => entry.placement.surfaces.includes(wall)))
-        .map(entry => entry.id)"""
+    usable = """walls => {
+        const families = walls.length === 1 && ['floor', 'ceiling'].includes(walls[0])
+            ? ['surface', 'porous', 'resonant', 'custom'] : ['porous', 'resonant', 'surface', 'custom'];
+        return families.flatMap(family => zoneLibrary.filter(entry => entry.kind === 'fixed' &&
+            entry.placement.family === family && walls.every(wall => entry.placement.surfaces.includes(wall))).map(entry => entry.id));
+    }"""
     options = "options => options.map(option => option.value).filter(Boolean)"
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -690,7 +694,7 @@ def test_what_a_first_time_reader_needs_is_written_on_the_page(tmp_path: Path, b
         # （#1199：是哪幾種改在底下的材料框一種一列勾著，這一句只講幾種。）
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
         assert page.locator("#zone-panel-list [data-state=all]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == [
-            "glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+            "none", "glass_wool_48k", "glass_wool_24k", "glass_wool_96k"]
         page.screenshot(path=str(tmp_path / "first-time-reader.png"))
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/z3"] == WOOLS

@@ -1,7 +1,4 @@
-"""真瀏覽器考每一區的材料清單（#1265 單元 3 之二第二趟起舊做法表拆了：改在「這間房貼什麼」的小框選、輸入頁第 2 段右欄讀；#1176，老闆 11-15「109示範又不知道是娥麼這也能當成一個材料」「都不知道在講甚麼」）：
-選單與小框只列這一面能貼的（門、窗、地板、整片吊頂、另一間示範房的不出現），指定貼一種的下拉可以打開「顯示全部材料」分組列出；
-這一區現在放的那一筆就算不是這一面用的也照樣顯示；用語是白話（做法三種、原牆不寫阻抗數字、可調寫得出調什麼）。
-材料庫用自己編的合成 12 筆（``_sample_material_library``），房間用 109 號房的長寬高。"""
+"""用自編材料庫驗證各面的候選、指定材料，以及套用後的分區用語。"""
 from __future__ import annotations
 
 import json
@@ -21,17 +18,20 @@ from tests.engine._zone_panel_steps import (apply_and_return, choose_fixed, choo
                                             listed, material_values, mode_words, open_alone, open_panel)
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
-from tests.engine._surface_zone_cases import room109_document
+from tests.engine._surface_zone_cases import room109_document, room109_quarters
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
+from tests.engine.test_gui_zone_overview_tasks_browser import _click_zone
 from tests.engine.test_gui_zone_modes_browser import _modes, _save
 
-HIDDEN_ON_WALLS = ("hall_door_hollow_core", "side_window_glass_12mm_single", "ceiling_gypsum9mm_gap300",
+HIDDEN_ON_WALLS = ("ceiling_gypsum9mm_gap300",
                    "perforated_gypsum_8_18r_backed_gw30_ceiling", "carpet_on_concrete", "joist_floor_plank_fixed",
                    "demo109_rockwool60k_capped", "demo109_measured_pet35_synthetic_b7")
 DOOR = "hall_door_hollow_core"
 FLOOR_WOOD = "joist_floor_plank_fixed"
+FLOOR_CHOICES = ["carpet_on_concrete", "wood_floor_on_joists", "wood_floor_on_sleepers",
+                 "concrete_floor", "hard_surface_average", FLOOR_WOOD]
 
 
 PLAIN_PRODUCT = "fabric_pet_a_gap100"  # 內建的一筆固定成品：牆面能貼、不是哪一種可調玻璃棉包含的、也不是「鋼板直接貼在棉上」的構造
@@ -57,7 +57,7 @@ CONTRAST = """node => {
 }"""
 
 
-def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(tmp_path: Path, browser: Browser) -> None:
+def test_menus_list_only_what_this_face_can_take(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, room109_document())
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -69,11 +69,10 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         fixed = material_values(page, "x0", "whole_wall")
         assert "glass_wool_48k_50mm" in fixed and "pet60_vpr_steel1p2mm_foam90_sample" in fixed
         assert not set(HIDDEN_ON_WALLS) & set(fixed)
+        assert {DOOR, "side_window_glass_12mm_single", "side_window_glass_table_upper"} <= set(fixed)
         expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
-        # 舊表「顯示全部材料」那一段：小框那一題蓋得到（test_gui_zone_panel_show_all_browser.py 的
-        # test_the_panel_lists_only_what_this_face_can_take_and_show_all_reveals_the_rest，乙）。
         choose_mode(page, "x0", "whole_wall", "search")
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_48k", "glass_wool_24k", "glass_wool_96k"]
         # 舊表方塊上「可調：…」那幾個字跟著表走：48K、24K 兩句同字在那一頁清單卡（test_gui_zone_overview_browser.py 的
         # test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chose_differently，乙）；96K 那一句、
         # 「不含（可調厚度與空腔）」沒有題逐字考（丙，回報第 5 節）。
@@ -81,44 +80,57 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         page.locator("#zone-panel-picker-search").focus()
         for choice in HIDDEN_ON_WALLS:
             expect(page.locator(f"#zone-panel-pick-{choice}")).to_have_count(0)
-        expect(page.locator("#zone-panel-pick-fabric_pet_a_gap100 .zv-description")).to_have_text("整塊貼、固定 10 cm")
+        expect(page.locator("#zone-panel-pick-fabric_pet_a_gap100 .zv-description")).to_have_text("10 cm")
         expect(page.locator("#zone-panel-pick-slotted18_pet45_vpr_steel2p25mm_foam70_sample .zv-description")).to_have_text(
-            "整塊貼、固定 13.3 cm（不含薄板）")
+            "13.3 cm（不含薄板）")
         page.locator("#zone-panel-cancel").click()
         page.locator("#zone-page-close").click()
         page.locator("#elevation-wall-floor").click()
-        assert material_values(page, "floor", "whole_wall") == ["carpet_on_concrete"]
+        assert material_values(page, "floor", "whole_wall") == FLOOR_CHOICES
         choose_mode(page, "floor", "whole_wall", "search")
         assert _chips(page, "floor", "whole_wall") == ["none"]
         open_panel(page, "floor", "whole_wall")
         expect(page.locator("#zone-panel-form")).to_contain_text("這裡沒有可調的材料：程式只能從「不貼」開始")
         page.locator("#zone-panel-picker-search").focus()
-        expect(page.locator("#zone-panel-picker button")).to_have_count(1)
+        assert _values(page, "#zone-panel-picker [role=checkbox][aria-checked=false]") == FLOOR_CHOICES
         expect(page.locator("#zone-panel-pick-carpet_on_concrete")).to_be_enabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: Path, browser: Browser) -> None:
-    """選單只列這一面能貼的，但這一區現在放的就是門（打開「顯示全部材料」選的）：關掉之後選單照樣是它、寫出它不是這一面用的；
-    保留原牆的區寫白話、數字收在細節；直接取代整面的（地板本身就是木地板那一筆）照樣顯示、不標紅。"""
+@pytest.mark.parametrize("with_original", [False, True])
+def test_input_page_recognizes_the_assigned_door_and_existing_floor(tmp_path: Path, browser: Browser, with_original: bool) -> None:
+    """門和木地板採各自的面，右欄能認出已指定的門和原方案內的木地板。"""
     document = room109_document()
     floor = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == FLOOR_WOOD)
     cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["floor"][0]["material"] = (
         cast(dict[str, object], floor))
     _write(tmp_path, document)
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    original = walls["x0"][0]["material"]
+    if with_original:
+        _write(tmp_path, document | {"scheme_id": "before"})
+        (tmp_path / "designs").mkdir()
+        (tmp_path / "designs" / "room109.json").write_text(json.dumps({"scheme_id": "room109", "original_scheme_id": "before"}))
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        # 舊表「顯示全部材料」分組、選了門之後下拉照樣是它與「不是前牆用的…背後是空氣」：小框同名題蓋得到（乙）。
-        choose_fixed(page, "x0", "whole_wall", DOOR, show_all=True)
+        # 回到輸入頁再重開，門仍是這一區已選的材料。
+        choose_fixed(page, "x0", "whole_wall", DOOR)
         assert fixed_value(page, "x0", "whole_wall") == DOOR
 
-        choose_mode(page, "x0", "whole_wall", "keep_original")
-        # 舊表「不貼」那一格（#zone-keep-）→ 右欄那一區那一句的開頭（同一支 keepWords）。
-        expect(page.locator("#wall-zone-what-x0-whole_wall")).to_have_text(re.compile(r"^原牆原樣，不貼東西。"))
-        expect(page.locator("#zone-numbers-x0-whole_wall")).to_contain_text("原牆：固定阻抗")
+        door = page.evaluate('zoneList("x0")[0].material')
+        choose_mode(page, "x0", "whole_wall", "keep_original",
+                    said_part="放回原牆" if with_original else "看不出原牆是什麼；照現在的材料不動")
+        current = page.locator("#wall-zone-what-x0-whole_wall")
+        if with_original:
+            expect(current).to_contain_text("原牆")
+            assert page.evaluate('zoneList("x0")[0].material') == original
+        else:
+            expect(current).not_to_contain_text("原牆「")
+            expect(current).to_contain_text("木門")
+            assert page.evaluate('zoneList("x0")[0].material') == door
 
         # 地板本身就是木地板那一筆（直接取代整面的固定阻抗，有的房間地板就是這樣）：選單照樣是它，但它就是地板本身，不標紅說不是地板用的。
         page.locator("#elevation-wall-floor").click()
@@ -148,7 +160,7 @@ def test_search_starts_from_a_ready_list_and_panel_edits_carry_to_the_next_face(
         choose_fixed(page, "x0", "whole_wall", "glass_wool_48k_50mm")
         choose_mode(page, "x0", "whole_wall", "search")
         three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
-        assert _chips(page, "x0", "whole_wall") == three
+        assert _chips(page, "x0", "whole_wall") == ["none", *three[:-1]]
         assert _modes(page, "x0")["whole_wall"] == {"mode": "search", "allowed": three}
         # 舊表方塊上的說明字跟著表走：24K 那一句同字在那一頁清單卡（test_gui_zone_overview_browser.py 同上，乙）；
         # 「不貼」方塊「保留原樣，程式可以決定這裡不貼」只有舊表寫（丙）。
@@ -160,12 +172,12 @@ def test_search_starts_from_a_ready_list_and_panel_edits_carry_to_the_next_face(
         # 回到「48K 或不貼」：先留下 48K，再加不貼。
         edit_candidates(page, "x0", "whole_wall", remove=("none",), add=("glass_wool_48k",), only="glass_wool_48k")
         edit_candidates(page, "x0", "whole_wall", add=("none",))
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_48k"]
         # 改成不貼再改回來：這一區已經不是那一筆了，「只讓程式決定：這一筆」那一顆不再出現；清單照上一次的組合。
         choose_mode(page, "x0", "whole_wall", "keep_original")
         choose_mode(page, "x0", "whole_wall", "search")
         expect(page.locator("#zone-preset-x0-whole_wall-this_or_none")).to_have_count(0)
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_48k"]
 
         # 下一面改成由程式最佳化：照這一頁上一次的組合（48K＋不貼）。
         page.locator("#elevation-wall-y0").click()
@@ -200,7 +212,7 @@ def test_the_ready_list_is_always_the_three_wools_even_with_more_tunable_materia
         page.locator("#elevation-wall-x0").click()
         choose_mode(page, "x0", "whole_wall", "search")
         three = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
-        assert _chips(page, "x0", "whole_wall") == three  # 也就是沒有 own_rock_wool_free
+        assert _chips(page, "x0", "whole_wall") == ["none", *three[:-1]]  # 也就是沒有 own_rock_wool_free
         edit_candidates(page, "x0", "whole_wall", add=("own_rock_wool_free",))
         assert _modes(page, "x0")["whole_wall"]["allowed"] == [*three, "own_rock_wool_free"]
         assert watched.page_errors == [] and watched.console_errors == []
@@ -219,7 +231,7 @@ def test_the_bottom_message_follows_the_list_and_clears_on_another_face(tmp_path
         page.locator("#elevation-wall-x0").click()
         choose_mode(page, "x0", "whole_wall", "search")
         edit_candidates(page, "x0", "whole_wall", remove=("glass_wool_48k",), said="1 區改成「由程式最佳化」")
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_24k", "glass_wool_96k", "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_24k", "glass_wool_96k"]
         page.locator("#elevation-wall-floor").click()
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-map")).to_be_visible()
@@ -244,17 +256,17 @@ def test_the_last_combination_does_not_follow_into_another_scheme(tmp_path: Path
         edit_candidates(page, "x0", "whole_wall", only="glass_wool_48k")
         page.locator("#elevation-wall-y0").click()
         choose_mode(page, "y0", "whole_wall", "search")
-        assert _chips(page, "y0", "whole_wall") == ["glass_wool_48k", "none"]  # 同一份方案：照上一次的組合
+        assert _chips(page, "y0", "whole_wall") == ["none", "glass_wool_48k"]  # 同一份方案：照上一次的組合
         _open_scheme(page, "room109-b")
         page.locator("#elevation-wall-x0").click()
         choose_mode(page, "x0", "whole_wall", "search")
-        assert _chips(page, "x0", "whole_wall") == three
+        assert _chips(page, "x0", "whole_wall") == ["none", *three[:-1]]
         # 這一份也改成 48K＋不貼，再從範本開一份新的（#1265 單元 5b 取代載入範本）：一樣從頭。
         edit_candidates(page, "x0", "whole_wall", only="glass_wool_48k")
         new_from_template(page, "fresh-room")
         page.locator("#elevation-wall-x0").click()
         choose_mode(page, "x0", "whole_wall", "search")
-        assert _chips(page, "x0", "whole_wall") == three
+        assert _chips(page, "x0", "whole_wall") == ["none", *three[:-1]]
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -277,7 +289,7 @@ def test_an_old_zone_without_a_list_shows_and_saves_what_the_server_means(tmp_pa
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
         everything = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "demo109_rockwool60k_capped", "none"]
-        assert _chips(page, "x0", "whole_wall") == everything
+        assert _chips(page, "x0", "whole_wall") == ["none", *everything[:-1]]
         # 舊表方塊上「不是前牆用的」那一句：小框候選列沒有對應的字（回報第 8 節，待主對話定要不要補到小框），這一行跟著表走。
         assert page.evaluate("zoneDesign.zones.x0.whole_wall") == {"mode": "search"}  # 打開不改設計，存檔才寫
         _save(page, "room109")
@@ -451,7 +463,7 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         # （舊表下拉第一項「現在：沒貼東西（…）」→ 右欄那一區那一句，改字：拿掉「現在：」）。
         expect(page.locator("#wall-zone-what-ceiling-whole_wall")).to_contain_text(
             "沒貼東西（原本的天花「天花 纖維水泥板 8 mm＋岩棉毯 30 mm 平鋪在板背＋18 cm 空腔（剛背）」原樣）")
-        choose_fixed(page, "ceiling", "whole_wall", ceiling, show_all=True, said_part="選的跟原本一樣，當成不貼")
+        choose_fixed(page, "ceiling", "whole_wall", ceiling, said_part="選的跟原本一樣，當成不貼")
         expect_mode(page, "ceiling", "whole_wall", "keep_original")
         # 那一列自己也寫為什麼（舊表那一列的新家：第 2 段右欄那一區，id 照舊）。
         expect(page.locator("#zone-same-ceiling-whole_wall")).to_contain_text("跟原本一樣，當成不貼")
@@ -482,7 +494,7 @@ def test_the_same_as_original_remark_goes_once_the_original_ceiling_changes(tmp_
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-ceiling").click()
-        choose_fixed(page, "ceiling", "whole_wall", ceiling, show_all=True, said_part="選的跟原本一樣，當成不貼")
+        choose_fixed(page, "ceiling", "whole_wall", ceiling, said_part="選的跟原本一樣，當成不貼")
         same = page.locator("#zone-same-ceiling-whole_wall")
         expect(same).to_contain_text("跟原本一樣，當成不貼")
         page.locator("#edit-wall-original").click()
@@ -510,7 +522,7 @@ def test_the_same_as_original_remark_goes_while_a_layer_of_the_original_ceiling_
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-ceiling").click()
-        choose_fixed(page, "ceiling", "whole_wall", ceiling, show_all=True, said_part="選的跟原本一樣，當成不貼")
+        choose_fixed(page, "ceiling", "whole_wall", ceiling, said_part="選的跟原本一樣，當成不貼")
         same = page.locator("#zone-same-ceiling-whole_wall")
         expect(same).to_contain_text("跟原本一樣，當成不貼")
         page.wait_for_function("!document.querySelector('main').inert && !inputBusy && zoneLimitsShown === zoneLimitsGeneration")
@@ -592,9 +604,203 @@ def test_a_tunable_vpr_in_the_library_never_shows_on_the_zone_page(tmp_path: Pat
         page = watched.page
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-x0").click()
-        assert _chips(page, "x0", "whole_wall") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", WOOL, "none"]
+        assert _chips(page, "x0", "whole_wall") == ["none", "glass_wool_48k", "glass_wool_24k", "glass_wool_96k", WOOL]
         assert page.evaluate(f"[zoneLibrary.length > 0, zoneLibrary.some(entry => entry.id === '{VPR}')]") == [True, False]
-        assert page.evaluate(f"['x0', 'floor'].flatMap(wall => hiddenGroups(wall, zoneLibrary).flatMap(([, items]) => items))"
-                             f".some(entry => entry.id === '{VPR}')") is False
+        for wall in ("x0", "floor"):
+            page.locator(f"#elevation-wall-{wall}").click()
+            assert VPR not in material_values(page, wall, "whole_wall")
         assert "鋼板 VPR（自編）" not in page.locator("body").inner_text()
         assert watched.page_errors == [] and watched.console_errors == []
+
+def test_old_mounted_door_changes_only_depth_after_save(tmp_path: Path, browser: Browser) -> None:
+    document = room109_document()
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)
+    walls["x0"][0]["material"] = {"kind": "mounted_on_wall", "layers": cast(dict[str, object], door["material"])["layers"],
+                                 "wall": walls["x0"][0]["material"]}
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    path = tmp_path / "schemes" / "room109.json"
+    before = json.loads(path.read_bytes())["scene"]["surface_zones_by_wall"]["x0"][0]["material"]
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        open_panel(page, "x0", "whole_wall")
+        expect(page.locator(f"#zone-panel-material-{DOOR}")).to_be_checked()
+        page.locator("#zone-panel-depth").fill("22")
+        apply_and_return(page)
+        _save(page, "room109")
+    assert json.loads(path.read_bytes())["scene"]["surface_zones_by_wall"]["x0"][0]["material"] == before
+    setting = json.loads((tmp_path / "designs" / "room109.json").read_bytes())["zones"]["x0"]["whole_wall"]
+    assert setting == {"mode": "fixed", "max_depth_m": 0.22}
+
+
+def test_expanding_door_depth_edit_preserves_methods_until_a_material_is_chosen(tmp_path: Path, browser: Browser) -> None:
+    document = room109_document()
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)["material"]
+    old = {"kind": "mounted_on_wall", "layers": cast(dict[str, object], door)["layers"], "wall": walls["x0"][0]["material"]}
+    walls["x0"][0]["material"] = old
+    bare = walls["xL"][0]["material"]
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    path = tmp_path / "designs" / "room109.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"scheme_id": "room109", "zones": {"xL": {"whole_wall": {"mode": "keep_original"}}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        for replace in (False, True):
+            page.locator("#zone-page-open").click()
+            _click_zone(page, "x0/whole_wall")
+            expect(page.locator(f"#zone-panel-material-{DOOR}")).to_be_checked()
+            page.locator("#zone-panel-depth").fill("24" if replace else "22")
+            _click_zone(page, "xL/whole_wall")
+            expect(page.locator("#zone-panel [role=radio][aria-checked=true]")).to_have_count(0)
+            if replace:
+                pick_fixed_row(page, DOOR)
+            apply_and_return(page)
+            _save(page, "room109")
+            saved = json.loads((tmp_path / "schemes" / "room109.json").read_bytes())["scene"]["surface_zones_by_wall"]
+            settings = json.loads(path.read_bytes())["zones"]
+            if replace:
+                for wall in ("x0", "xL"):
+                    assert saved[wall][0]["material"] == door
+                    assert settings[wall]["whole_wall"]["mode"] == "fixed"
+            else:
+                assert saved["x0"][0]["material"] == old and saved["xL"][0]["material"] == bare
+                assert settings["x0"]["whole_wall"] == {"mode": "fixed", "max_depth_m": 0.22}
+                assert settings["xL"]["whole_wall"] == {"mode": "keep_original"}
+
+
+def test_apply_and_search_goes_on_when_one_zone_keeps_its_unknown_wall(tmp_path: Path, browser: Browser) -> None:
+    document = room109_document()
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)["material"]
+    walls["x0"][0]["material"] = door
+    original = walls["xL"][0]["material"]
+    walls["xL"][0]["material"] = {"kind": "mounted_on_wall", "layers": cast(dict[str, object], door)["layers"], "wall": original}
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    path = tmp_path / "designs" / "room109.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"scheme_id": "room109", "zones": {"x0": {"whole_wall": {"mode": "fixed", "picked_entry": DOOR}},
+        "y0": {"whole_wall": {"mode": "search", "allowed": ["glass_wool_48k", "none"]}}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#zone-page-open").click()
+        for zone in ("x0/whole_wall", "xL/whole_wall"):
+            _click_zone(page, zone)
+        page.locator("#zone-panel-mode-keep_original").check()
+        go = page.locator("#zone-page-search")
+        expect(go).to_have_text("套用並拿去搜尋")
+        # 原牆不明是正常狀態（#1334 預期行為第 1 條）：按一次就套用並送去搜尋，不用按第二次。
+        with page.expect_response(lambda r: r.url.endswith("/api/designs/room109") and r.request.method == "PUT") as design:
+            go.click()
+        assert design.value.ok
+        page.wait_for_url("**/gradient?scheme=room109")
+        saved = json.loads((tmp_path / "schemes" / "room109.json").read_text(encoding="utf-8"))["scene"]["surface_zones_by_wall"]
+        assert saved["x0"][0]["material"] == door
+        assert saved["xL"][0]["material"] == original
+
+
+def test_depth_only_keeps_mounted_door_and_replacement_window(tmp_path: Path, browser: Browser) -> None:
+    document = room109_document()
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    window_id = "side_window_glass_12mm_single"
+    door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)["material"]
+    window = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == window_id)["material"]
+    mounted = {"kind": "mounted_on_wall", "layers": cast(dict[str, object], door)["layers"], "wall": walls["x0"][0]["material"]}
+    walls["x0"][0]["material"] = mounted
+    walls["xL"][0]["material"] = window
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    path = tmp_path / "designs" / "room109.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"scheme_id": "room109", "zones": {"xL": {"whole_wall": {"mode": "fixed", "picked_entry": window_id}}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#zone-page-open").click()
+        _click_zone(page, "x0/whole_wall")
+        expect(page.locator(f"#zone-panel-material-{DOOR}")).to_be_checked()
+        page.locator("#zone-panel-depth").fill("22")
+        _click_zone(page, "xL/whole_wall")
+        expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
+        expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        apply_and_return(page)
+        _save(page, "room109")
+        saved = json.loads((tmp_path / "schemes" / "room109.json").read_bytes())["scene"]["surface_zones_by_wall"]
+        settings = json.loads(path.read_bytes())["zones"]
+        assert saved["x0"][0]["material"] == mounted and saved["xL"][0]["material"] == window
+        assert settings["x0"]["whole_wall"] == {"mode": "fixed", "max_depth_m": 0.22}
+        assert settings["xL"]["whole_wall"] == {"mode": "fixed", "picked_entry": window_id, "max_depth_m": 0.22}
+
+
+def test_crossing_original_cut_refuses_both_zones_on_each_search_click(tmp_path: Path, browser: Browser) -> None:
+    original = room109_document("before-cut")
+    room109_quarters(original, "xL", (510.0, 620.0, 730.0, 840.0))
+    _write(tmp_path, original)
+    document = room109_document()
+    door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)["material"]
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    walls["x0"][0]["material"] = door
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    path = tmp_path / "designs" / "room109.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"scheme_id": "room109", "original_scheme_id": "before-cut",
+                                "zones": {"x0": {"whole_wall": {"mode": "fixed", "picked_entry": DOOR}}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#zone-page-open").click()
+        for zone in ("x0/whole_wall", "xL/whole_wall"):
+            _click_zone(page, zone)
+        page.locator("#zone-panel-mode-search").check()
+        before = page.evaluate("[scheme, zoneDesign, zonePageHasEdits()]")
+        sent: list[str] = []
+        page.on("request", lambda r: sent.append(r.url) if r.method == "PUT" or r.is_navigation_request() else None)
+        for _ in range(2):
+            with page.expect_response("**/api/zone-material/batch") as batch:
+                page.get_by_role("button", name="套用並拿去搜尋").click()
+            assert batch.value.status == 400
+            reason = batch.value.json()
+            assert (reason["index"], reason["wall"], reason["zone"]) == (1, "xL", "whole_wall")
+            assert "切線劃過" in reason["reason"]
+            # 等這次送搜尋的處理結束，再核對兩區、未存旗標、選區和存檔請求。
+            page.wait_for_function("!document.body.inert")
+            expect(page.locator("#zone-page-note")).to_contain_text("一區都沒改")
+            assert page.evaluate("[scheme, zoneDesign, zonePageHasEdits()]") == before
+            expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "x0/whole_wall xL/whole_wall")
+            expect(page.locator("#zone-panel-mode-search")).to_be_checked()
+            assert sent == []
+
+
+def test_search_uses_the_assigned_door_as_backing_and_names_its_zone(tmp_path: Path, browser: Browser) -> None:
+    _write(tmp_path, room109_document())
+    _sample_library(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        choose_fixed(page, "x0", "whole_wall", DOOR)
+        door = page.evaluate("zoneList('x0')[0].material")
+        name = page.evaluate("id => libraryEntry(id).label", DOOR)
+        page.locator("#zone-page-open").click()
+        _click_zone(page, "x0/whole_wall")
+        page.locator("#zone-panel-mode-search").check()
+        page.locator("#zone-panel-apply").click()
+        note = page.locator("#zone-page-note")
+        expect(note).to_contain_text("1 區改成「由程式最佳化」")
+        expect(note).to_contain_text("前牆整面")
+        expect(note).to_contain_text(f"「{name}」當作最佳化時背後的牆面")
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        page.locator("#zone-page-close").click()
+        _save(page, "room109")
+        saved = json.loads((tmp_path / "schemes" / "room109.json").read_bytes())["scene"]["surface_zones_by_wall"]
+        settings = json.loads((tmp_path / "designs" / "room109.json").read_bytes())["zones"]["x0"]["whole_wall"]
+        assert saved["x0"][0]["material"] == door
+        assert settings["mode"] == "search" and "none" in settings["allowed"] and "picked_entry" not in settings

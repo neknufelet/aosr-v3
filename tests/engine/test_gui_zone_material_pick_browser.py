@@ -246,12 +246,12 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         _expect_selected(page, ["yL/auto1"])  # 小框換成這一區之後再判，不然還沒畫出來就先過
         expect(page.locator("#zone-panel-form")).to_have_count(0)
         _pick_search(page)
-        rows = page.locator("#zone-panel-list [data-kind='optimizable']")
+        rows = page.locator("#zone-panel-list .zv-candidate[data-kind='optimizable']")
         assert rows.evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k"]
         expect(rows.nth(0)).to_contain_text("48K 玻璃棉")
-        expect(rows.nth(0).locator(".zv-range")).to_have_text("給程式調：棉厚 5–20 cm、空腔 0–25 cm，兩個加起來最多 30 cm（材料本身）")
-        expect(rows.nth(1).locator(".zv-range")).to_have_text("空腔：沒有（直接貼牆）；給程式調：棉厚 5–20 cm")
-        expect(rows.nth(2).locator(".zv-range")).to_have_text("空腔：沒有（直接貼牆）；給程式調：棉厚 5–20 cm")
+        expect(rows.nth(0).locator(".zv-range")).to_have_text("棉厚 5–20 cm背後空腔 0–25 cm兩個加起來最多 30 cm（材料本身）")
+        expect(rows.nth(1).locator(".zv-range")).to_have_text("棉厚 5–20 cm背後空腔 沒有（直接貼牆）")
+        expect(rows.nth(2).locator(".zv-range")).to_have_text("棉厚 5–20 cm背後空腔 沒有（直接貼牆）")
         cells = page.locator("#zone-panel-list input, #zone-panel-list select, #zone-panel-list textarea")
         expect(cells).to_have_count(0)
         for choice in WOOLS[:-1]:
@@ -265,7 +265,7 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         expect(page.locator("#zone-panel-materials")).to_have_attribute("href", "/materials")
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
         expect(page.locator("#zone-panel-list #zone-panel-none-row")).to_contain_text("也可以不貼")
-        expect(page.locator("#zone-panel-none-row")).to_contain_text("程式算出來不貼比較好的區，就不貼，保留原樣")
+        expect(page.locator("#zone-panel-pick-none")).to_have_text("也可以不貼")
         expect(page.locator("#zone-panel-depth")).to_be_visible()
         expect(page.locator("#zone-panel-deepest label")).to_have_text("最深（含空腔）")
         _click_zone(page, "yL/auto2")
@@ -275,7 +275,7 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         page.locator("#zone-panel-only-glass_wool_48k").click()
         row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
-        assert page.locator("#zone-panel-list > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["none"]
+        assert page.locator("#zone-panel-list .zv-candidate[data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["none"]
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
         row_options(page, "none")
@@ -285,9 +285,8 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_the_reason(tmp_path: Path, browser: Browser) -> None:
-    """可調的 48K 玻璃棉勾著時，它已經包含的那幾筆成品（材料庫那一筆的 preset_members）在固定成品裡灰掉、勾不了，
-    旁邊寫為什麼、要怎麼才勾得到；取消 48K 就勾得到。24K、96K 各包含一筆，一樣。"""
+def test_products_covered_by_a_checked_family_are_read_only_members(tmp_path: Path, browser: Browser) -> None:
+    """三種玻璃棉各自展開唯讀規格；取消家族後可單選成品，套用後保留選擇。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -299,20 +298,16 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
         _click_zone(page, "yL/auto1")
         _pick_search(page)
         page.locator("#zone-panel-picker-search").focus()
-        for family, name in (("glass_wool_48k", "48K 玻璃棉"), ("glass_wool_24k", "24K 玻璃棉"), ("glass_wool_96k", "96K 玻璃棉")):
+        for family in WOOLS[:-1]:
+            detail = page.locator(f"#zone-panel-members-{family}")
+            expect(detail.locator("summary")).to_have_text(f"含 {len(covered[family])} 款")
+            detail.locator("summary").click()
+            assert detail.locator("[data-member]").evaluate_all("els => els.map(e => e.dataset.member)") == covered[family]
             for product in covered[family]:
-                row = page.locator(f"#zone-panel-pick-{product}")
-                expect(row).to_have_attribute("data-covered", family)
-                expect(row).to_have_attribute("aria-disabled", "true")
-                expect(row).to_be_disabled()
-                plain = page.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}")
-                assert row.evaluate("e => getComputedStyle(e).color") != plain.evaluate("e => getComputedStyle(e).color")
-                expect(row).to_have_css("cursor", "default")
-                expect(row.locator(".zv-covered-why")).to_be_visible()
-                expect(row.locator(".zv-covered-why")).to_have_text(f"已含在可調的 {name} 裡")
-        # 沒被包含的成品照常勾得到。
+                expect(page.locator(f"#zone-panel-pick-{product}")).to_have_count(0)
+                expect(detail.locator(f"[data-member={product}]")).to_be_visible()
+            expect(detail.locator("button,input")).to_have_count(0)
         expect(page.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}")).to_be_enabled()
-        assert page.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}").get_attribute("data-covered") is None
         # 取消 48K：它那四筆勾得到了，24K、96K 的照舊灰著。
         row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
@@ -320,7 +315,7 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
         for product in covered["glass_wool_48k"]:
             expect(page.locator(f"#zone-panel-pick-{product}")).to_be_enabled()
             expect(page.locator(f"#zone-panel-pick-{product} .zv-covered-why")).to_have_count(0)
-        expect(page.locator(f"#zone-panel-pick-{covered['glass_wool_24k'][0]}")).to_be_disabled()
+        expect(page.locator(f"#zone-panel-pick-{covered['glass_wool_24k'][0]}")).to_have_count(0)
         page.locator(f"#zone-panel-pick-{covered['glass_wool_48k'][0]}").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED))["yL/auto1"] == [
@@ -329,10 +324,12 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
         page.locator("#zone-group-select").click()
         page.locator("#zone-panel-picker-search").focus()
         inside = covered["glass_wool_24k"][0]
-        expect(page.locator(f"#zone-panel-pick-{inside}")).to_be_disabled()
-        expect(page.locator(f"#zone-panel-pick-{inside}")).to_have_attribute("data-covered", "glass_wool_24k")
-        expect(page.locator(f"#zone-panel-pick-{inside} .zv-covered-why")).to_have_text(
-            "已含在可調的 24K 玻璃棉 裡")
+        expect(page.locator(f"#zone-panel-pick-{inside}")).to_have_count(0)
+        detail = page.locator("#zone-panel-members-glass_wool_24k")
+        expect(detail.locator("summary")).to_have_text("含 1 款")
+        if detail.get_attribute("open") is None:
+            detail.locator("summary").click()
+        expect(detail.locator(f"[data-member={inside}]")).to_be_visible()
         expect(page.locator(f"#zone-panel-pick-{covered['glass_wool_48k'][1]}")).to_be_enabled()
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -344,19 +341,19 @@ def test_fixed_products_stay_folded_and_the_line_says_how_many_there_are_and_how
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
-        count = cast(int, page.evaluate("() => zoneLibrary.filter(entry => entry.kind === 'fixed' && entry.placement.surfaces.includes('yL')).length"))
+        count = cast(int, page.evaluate("() => zoneLibrary.filter(entry => entry.kind === 'fixed' && entry.placement.surfaces.includes('yL') && !zoneLibrary.some(f => f.preset_members?.includes(entry.id))).length"))
         assert count > 4
         _click_zone(page, "yL/auto1")
         _pick_search(page)
         expect(page.locator("#zone-panel-picker")).to_be_visible()
         expect(page.locator(f"#zone-panel-row-{vpr}")).to_have_count(0)
         page.locator("#zone-panel-picker-search").focus()
-        assert page.locator("#zone-panel-picker [data-entry-kind='fixed']").count() == count
+        assert page.locator("#zone-panel-picker [data-entry-kind='fixed'][aria-checked=false]").count() == count
         page.locator(f"#zone-panel-pick-{vpr}").click()
         expect(page.locator("#zone-panel-picker")).to_be_visible()
         expect(page.locator(f"#zone-panel-row-{vpr}")).to_be_visible()
         page.locator("#zone-panel-picker-search").focus()
-        assert page.locator("#zone-panel-picker [data-entry-kind='fixed']").count() == count - 1
+        assert page.locator("#zone-panel-picker [data-entry-kind='fixed'][aria-checked=false]").count() == count - 1
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 5 種裡選，每一區各自最佳化。")
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -406,10 +403,12 @@ def test_nothing_new_on_the_panel_is_smaller_than_thirteen_pixels_or_too_pale_to
         page.locator("#zone-whole-yL").click()
         _pick_search(page)
         page.locator("#zone-panel-picker-search").focus()
-        expect(page.locator("#zone-panel-picker [data-covered] .zv-covered-why").first).to_be_visible()
+        detail = page.locator("#zone-panel-members-glass_wool_48k")
+        detail.locator("summary").click()
+        expect(detail.locator("[data-member]").first).to_be_visible()
         panel = cast(list[dict[str, object]], page.locator("#zone-panel").evaluate(_TEXT_STYLES))
         assert len(panel) > 30 and len(card) > 5
-        assert any("已含在可調的" in cast(str, row["words"]) for row in panel)
+        assert any("含 4 款" in cast(str, row["words"]) for row in panel)
         depth = page.locator("#zone-panel-depth")
         expect(depth).to_have_attribute("placeholder", "空白＝不限")
         assert page.locator("#zone-panel input[type=number][placeholder]:not(#zone-panel-depth)").count() == 0

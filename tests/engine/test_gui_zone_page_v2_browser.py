@@ -33,6 +33,9 @@ def test_apply_visible_in_every_mode(tmp_path: Path, browser: Browser) -> None:
         _open_zone(page)
         for mode in ("search", "fixed", "keep_original"):
             page.locator(f"#zone-panel-mode-{mode}").check()
+            if mode == "search":
+                # 由程式最佳化先畫暫定候選、核完再重畫一次：等最後那一版再量按鈕，不量到被換掉的舊按鈕。
+                expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
             hit = page.locator("#zone-panel-apply").evaluate("""button => {
                 const r = button.getBoundingClientRect(), x = r.x + r.width / 2, y = r.y + r.height / 2;
                 return {y, hit: document.elementFromPoint(x, y) === button};
@@ -162,13 +165,26 @@ def test_candidate_options_follow_pointer_and_keyboard(tmp_path: Path, browser: 
         page = watched.page
         _open_zone(page)
         row = page.locator(f"#zone-panel-row-{WOOLS[0]}")
-        toggle = row.locator("summary")
+        toggle = row.locator(".zv-row-options > summary")
         page.locator("#zone-panel h2").hover()
         expect(toggle).to_have_css("pointer-events", "none")
         row.hover()
         expect(toggle).to_have_css("pointer-events", "auto")
+        # 使用者瞄準收合時的「詳情」，移上去再原地按一下，離開後明細仍固定展開。
+        toggle.scroll_into_view_if_needed()
+        box = toggle.bounding_box()
+        assert box is not None
+        x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        page.mouse.move(x, y)
+        expect(row.locator(".zv-remove")).to_be_visible()
+        page.mouse.click(x, y)
         page.locator("#zone-panel h2").hover()
+        expect(row.locator(".zv-remove")).to_be_visible()
+        toggle.press("Enter")
+        expect(row.locator(".zv-remove")).to_be_hidden()
         row.get_by_role("checkbox").focus()
+        page.keyboard.press("Tab")
+        expect(row.locator(".zv-members > summary")).to_be_focused()
         page.keyboard.press("Tab")
         expect(toggle).to_be_focused()
         expect(toggle).to_have_css("clip-path", "none")
@@ -235,7 +251,8 @@ def test_fixed_form_uses_short_label_and_depth_placeholder(tmp_path: Path, brows
         page = watched.page
         _open_zone(page)
         page.locator("#zone-panel-mode-fixed").check()
-        expect(page.locator(".zv-show-all")).to_have_text("顯示全部材料")
+        expect(page.locator("#zone-panel-material details > summary")).to_have_count(4)
+        expect(page.locator(".zv-show-all")).to_have_count(0)
         expect(page.locator("#zone-panel-depth")).to_have_attribute("placeholder", "空白＝不限")
         expect(page.locator("#zone-panel-deepest")).not_to_contain_text("空白＝不限")
 

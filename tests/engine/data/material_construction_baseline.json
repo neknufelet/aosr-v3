@@ -1134,7 +1134,9 @@
         "placement": {
           "group": "ceiling_build",
           "reason": "描述的是整片天花（板加吊頂空腔），貼上去會跟原本的天花疊成兩層",
-          "surfaces": []
+          "surfaces": [
+            "ceiling"
+          ]
         }
       },
       {
@@ -1716,7 +1718,12 @@
         "placement": {
           "group": "door_window",
           "reason": "背後是空氣（兩邊都是空氣），是門、窗這類東西，不是貼在牆上的",
-          "surfaces": []
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL"
+          ]
         }
       },
       {
@@ -1738,7 +1745,13 @@
         "placement": {
           "group": "surface_itself",
           "reason": "它本身就是一整面的表面阻抗（固定阻抗），只能整面換掉，不是貼上去的",
-          "surfaces": []
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
         }
       },
       {
@@ -1786,7 +1799,13 @@
         "placement": {
           "group": "surface_itself",
           "reason": "它本身就是一整面的表面阻抗（實測表），只能整面換掉，不是貼上去的",
-          "surfaces": []
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
         }
       },
       {
@@ -1834,7 +1853,13 @@
         "placement": {
           "group": "surface_itself",
           "reason": "它本身就是一整面的表面阻抗（實測表），只能整面換掉，不是貼上去的",
-          "surfaces": []
+          "surfaces": [
+            "x0",
+            "xL",
+            "y0",
+            "yL",
+            "ceiling"
+          ]
         }
       },
       {
@@ -2066,11 +2091,18 @@
   },
   "placement": {
     "pin_air": {
+      "family": "surface",
       "group": "door_window",
       "reason": "背後是空氣（兩邊都是空氣），是門、窗這類東西，不是貼在牆上的",
-      "surfaces": []
+      "surfaces": [
+        "x0",
+        "xL",
+        "y0",
+        "yL"
+      ]
     },
     "pin_family_false": {
+      "family": "porous",
       "group": "wall",
       "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
       "surfaces": [
@@ -2082,6 +2114,7 @@
       ]
     },
     "pin_family_true": {
+      "family": "porous",
       "group": "wall",
       "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
       "surfaces": [
@@ -2093,11 +2126,19 @@
       ]
     },
     "pin_impedance": {
+      "family": "surface",
       "group": "surface_itself",
       "reason": "它本身就是一整面的表面阻抗（固定阻抗），只能整面換掉，不是貼上去的",
-      "surfaces": []
+      "surfaces": [
+        "x0",
+        "xL",
+        "y0",
+        "yL",
+        "ceiling"
+      ]
     },
     "pin_rigid": {
+      "family": "porous",
       "group": "wall",
       "reason": "固定成品：牆面四面都能貼，天花也能貼在吊頂下面",
       "surfaces": [
@@ -2109,16 +2150,31 @@
       ]
     },
     "pin_table_false": {
+      "family": "surface",
       "group": "surface_itself",
       "reason": "它本身就是一整面的表面阻抗（實測表），只能整面換掉，不是貼上去的",
-      "surfaces": []
+      "surfaces": [
+        "x0",
+        "xL",
+        "y0",
+        "yL",
+        "ceiling"
+      ]
     },
     "pin_table_true": {
+      "family": "surface",
       "group": "surface_itself",
       "reason": "它本身就是一整面的表面阻抗（實測表），只能整面換掉，不是貼上去的",
-      "surfaces": []
+      "surfaces": [
+        "x0",
+        "xL",
+        "y0",
+        "yL",
+        "ceiling"
+      ]
     },
     "pin_vpr": {
+      "family": "porous",
       "group": "wall",
       "reason": "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面",
       "surfaces": [
@@ -2135,7 +2191,8 @@
   "zones": {
     "pin_air": {
       "material": {
-        "kind": "mounted_on_wall",
+        "backing": "air",
+        "kind": "assembly",
         "layers": [
           {
             "flow_resistivity_pa_s_m2": 17000.0,
@@ -2148,13 +2205,9 @@
             "kind": "air",
             "thickness_m": 0.06
           }
-        ],
-        "wall": {
-          "impedance_pa_s_m": 7654.0,
-          "kind": "constant_impedance"
-        }
+        ]
       },
-      "note": "「自編層 air」貼在原牆上（最後一層背後接原牆）",
+      "note": "記成選上去的「自編層 air」，整塊構造直接取代這一區的牆面。如果這一區本來就是它，改選「不貼，保留原樣」或在上面指定原方案",
       "same_as_original": false
     },
     "pin_impedance": {

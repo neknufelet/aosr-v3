@@ -1,30 +1,16 @@
-"""材料能用在哪幾面（#1176）：立面圖下「這一面每一區的做法」只列這一面能貼的處理材料，其餘分組收起來、各一句理由。
-
-構造照條目明寫的位置；舊材料現算：照代號、顯示名與材料種類分組，規則有先後（前面的先吃）：
-
-1. 代號 ``demo109`` 開頭 → 另一間示範房（109 號房）的，平常不列；
-2. 固定材料本身是固定阻抗或實測表 → 牆面、地面本身（整面換掉，不是貼上去的），不列；
-3. 固定多層構造、背後是空氣（``backing == "air"``）→ 門、窗，不列；
-4. 代號含 ``ceiling`` 或顯示名以「天花」開頭 → 整片天花構造，不列成貼上去的處理（它描述的是整片天花，貼上去會疊兩層，#1175）；
-5. 代號含 ``carpet`` 或 ``floor`` → 只列在地板；
-6. 剩下的（可最佳化材料、背後剛背的固定多層構造）→ 牆面四面與天花（天花是貼在吊頂下面）。
-
-背後只有剛背與空氣兩種（``Assembly.backing``），所以六條分完就沒有剩的；多一種背後時 ``assert_never`` 讓型別檢查紅，
-要先決定它歸哪一組（審查 11-15：原本第七條「其他」走不到，拿掉）。
-
-這裡只決定「列在哪幾面」；不列的照樣在網頁「顯示全部材料」裡分組看得到，存過的代號也照樣顯示。不碰搜尋規則與評分。
-"""
+"""材料的位置與分組，供分區頁的指定貼與最佳化清單共用。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, assert_never
 
-from aosr.materials.construction_models import Assembly, ConstantImpedance
-from aosr.materials.library import ConstructionEntry, LibraryEntry, fixed_surface
+from aosr.materials.construction_models import Assembly, ConstantImpedance, Layer
+from aosr.materials.library import ConstructionEntry, FixedEntry, LibraryEntry, fixed_surface
 
 SurfaceGroup: TypeAlias = Literal["demo109", "surface_itself", "door_window", "ceiling_build", "floor", "wall"]
+Family: TypeAlias = Literal["porous", "resonant", "surface", "custom"]
 WALLS: Final = ("x0", "xL", "y0", "yL")
-# 每一組在網頁上的標題（「顯示全部材料」打開後一組一個標題）；順序就是網頁列的順序。
+# 材料位置的說明與短名也供材料庫頁使用。
 GROUP_WORDS: Final[dict[SurfaceGroup, str]] = {
     "wall": "牆面與天花用的（貼在牆上、或貼在吊頂下面）",
     "floor": "地板用的",
@@ -42,6 +28,7 @@ GROUP_SHORT_WORDS: Final[dict[SurfaceGroup, str]] = {
     "surface_itself": "牆面地面本身",
     "demo109": "示範房的",
 }
+_ALL_FACE_FINISHES: Final = frozenset({"hard_surface_average"})
 _DEMO_PREFIX: Final = "demo109"
 
 
@@ -52,31 +39,58 @@ class Placement:
     group: SurfaceGroup
     surfaces: tuple[str, ...]
     reason: str
+    family: Family
 
     def to_json(self) -> dict[str, object]:
-        return {"group": self.group, "surfaces": list(self.surfaces), "reason": self.reason}
+        return {"group": self.group, "surfaces": list(self.surfaces), "reason": self.reason, "family": self.family}
 
 
-def placement(entry: LibraryEntry) -> Placement:
-    """照模組說明那六條規則的先後分組。"""
+def placement(entry: LibraryEntry, *, builtin: bool = False) -> Placement:
+    """設計器存的構造歸個人組；內建構造與舊材料依位置、層種類分組。"""
+    group, faces, reason = _location(entry)
+    family: Family = "porous"
+    if isinstance(entry, ConstructionEntry) and not builtin:
+        family = "custom"
+    elif group in ("door_window", "surface_itself", "floor", "ceiling_build"):
+        family = "surface"
+    else:
+        layers: tuple[Layer, ...] = ()
+        if isinstance(entry, ConstructionEntry):
+            layers = entry.layers
+        elif isinstance(entry, FixedEntry) and isinstance(entry.material, Assembly):
+            layers = entry.material.layers
+        if any(layer.kind in ("board", "perforated", "micro_perforated", "slotted") for layer in layers):
+            family = "resonant"
+    return Placement(group, faces, reason, family)
+
+
+def legacy_replacement(entry: LibraryEntry) -> bool:
+    """舊固定多層構造裡整塊換掉分區的兩種。"""
+    return (isinstance(entry, FixedEntry) and isinstance(entry.material, Assembly)
+            and _location(entry)[0] in ("door_window", "ceiling_build"))
+
+
+def _location(entry: LibraryEntry) -> tuple[SurfaceGroup, tuple[str, ...], str]:
     if isinstance(entry, ConstructionEntry):
         surfaces = {"wall": (*WALLS, "ceiling"), "floor": ("floor",), "ceiling_build": ("ceiling",), "door_window": WALLS}
-        return Placement(entry.placement, surfaces[entry.placement], GROUP_WORDS[entry.placement])
+        return (entry.placement, surfaces[entry.placement], GROUP_WORDS[entry.placement])
     material = fixed_surface(entry)
     if entry.id.startswith(_DEMO_PREFIX):
-        return Placement("demo109", (), "代號是 demo109 開頭，是另一間示範房（109 號房）的材料，這間房平常用不到")
+        return ("demo109", (), "代號是 demo109 開頭，是另一間示範房（109 號房）的材料，這間房平常用不到")
     if material is not None and not isinstance(material, Assembly):
         what = "固定阻抗" if isinstance(material, ConstantImpedance) else "實測表"
-        return Placement("surface_itself", (), f"它本身就是一整面的表面阻抗（{what}），只能整面換掉，不是貼上去的")
+        floor = any(term in text.lower() for text in (entry.id, entry.label) for term in ("carpet", "floor", "地板", "地毯"))
+        faces = (*WALLS, "ceiling", "floor") if entry.id in _ALL_FACE_FINISHES else ("floor",) if floor else (*WALLS, "ceiling")
+        return ("surface_itself", faces, f"它本身就是一整面的表面阻抗（{what}），只能整面換掉，不是貼上去的")
     backing = material.backing if material is not None else None  # 可最佳化材料沒有背後這一格
     if backing == "air":
-        return Placement("door_window", (), "背後是空氣（兩邊都是空氣），是門、窗這類東西，不是貼在牆上的")
+        return ("door_window", WALLS, "背後是空氣（兩邊都是空氣），是門、窗這類東西，不是貼在牆上的")
     if backing is not None and backing != "rigid":
         assert_never(backing)  # 多一種背後：先決定它歸哪一組
     if "ceiling" in entry.id or entry.label.startswith("天花"):
-        return Placement("ceiling_build", (), "描述的是整片天花（板加吊頂空腔），貼上去會跟原本的天花疊成兩層")
+        return ("ceiling_build", ("ceiling",), "描述的是整片天花（板加吊頂空腔），貼上去會跟原本的天花疊成兩層")
     if "carpet" in entry.id or "floor" in entry.id:
-        return Placement("floor", ("floor",), "地毯、地板類，只鋪在地板")
+        return ("floor", ("floor",), "地毯、地板類，只鋪在地板")
     if backing is None:
-        return Placement("wall", (*WALLS, "ceiling"), "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面")
-    return Placement("wall", (*WALLS, "ceiling"), "固定成品：牆面四面都能貼，天花也能貼在吊頂下面")
+        return ("wall", (*WALLS, "ceiling"), "可調的吸音材：牆面四面都能貼，天花也能貼在吊頂下面")
+    return ("wall", (*WALLS, "ceiling"), "固定成品：牆面四面都能貼，天花也能貼在吊頂下面")

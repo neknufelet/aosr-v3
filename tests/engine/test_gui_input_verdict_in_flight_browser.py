@@ -341,7 +341,7 @@ def test_a_construction_put_back_by_a_new_method_is_not_named_until_the_verdict_
         _open_scheme(page, "room109")
         page.locator("#elevation-wall-ceiling").click()
         _verdict_shown(page)
-        choose_fixed(page, "ceiling", "whole_wall", "table_sample", show_all=True)
+        choose_fixed(page, "ceiling", "whole_wall", "table_sample")
         _verdict_shown(page)
         what = page.locator("#wall-zone-what-ceiling-whole_wall")
         held = _hold_limits_and_apply(page, "ceiling", "whole_wall", "search")

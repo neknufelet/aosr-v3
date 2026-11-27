@@ -75,14 +75,12 @@ def choose_mode(page: Page, wall: str, key: str, mode: str, *, one_side: bool = 
     apply_and_return(page, said=said, said_part=said_part)
 
 
-def choose_fixed(page: Page, wall: str, key: str, material: str, *, show_all: bool = False, one_side: bool = False,
+def choose_fixed(page: Page, wall: str, key: str, material: str, *, one_side: bool = False,
                  said: str | None = None, said_part: str | None = None) -> None:
-    """小框把那一區改成指定貼一種、選那一筆（show_all：先勾「顯示全部材料」才列得出不列的那幾組），套用、回輸入頁。
+    """小框把那一區改成指定貼一種、選那一筆，套用、回輸入頁。
     取代舊做法表的「指定貼哪一種」下拉 `#zone-fixed-<牆>-<區>`。"""
     open_alone(page, wall, key, one_side=one_side)
     page.locator("#zone-panel-mode-fixed").check()
-    if show_all:
-        page.locator("#zone-panel-show-all").check()
     pick_fixed_row(page, material)
     apply_and_return(page, said=said, said_part=said_part)
 
@@ -110,7 +108,7 @@ def _peek(page: Page, wall: str, key: str, script: str, *, fixed: bool = False) 
 def listed(page: Page, wall: str, key: str) -> list[str]:
     """由程式最佳化那一區的清單，照畫出來的順序：舊做法表那一格的方塊（`#zone-allowed-chips-<牆>-<區> .zone-chip`）
     → 小框的候選列（`.zv-candidate` 的 data-choice）。"""
-    return cast(list[str], _peek(page, wall, key, "panel => [...panel.querySelectorAll('#zone-panel-list .zv-candidate')].map(row => row.dataset.choice)"))
+    return cast(list[str], _peek(page, wall, key, "panel => [...panel.querySelectorAll('#zone-panel-list .zv-candidate[data-choice]')].map(row => row.dataset.choice)"))
 
 
 def mode_words(page: Page, wall: str, key: str) -> list[str]:

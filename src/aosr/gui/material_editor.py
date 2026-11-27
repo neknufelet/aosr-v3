@@ -209,7 +209,7 @@ class MaterialStore:
         except MaterialEditError as exc:
             user, problem = (), str(exc)
         rows = [{"entry": entry.model_dump(mode="json"), "builtin": builtin, "basis": basis_label(entry),
-                 "placement": placement(entry).to_json()}
+                 "placement": placement(entry, builtin=builtin).to_json()}
                 for entries, builtin in ((builtin_entries(), True), (user, False)) for entry in entries]
         # 「鋼板直接貼在棉上」的固定材料（#1208）：命中的代號與畫面要的字另放一格、不塞進每一筆材料裡（分區頁會把材料那一筆
         # 原樣送回曲線介面，這一頁會把它存回材料庫檔）；一筆都沒有就不多這一格，回覆跟之前逐位相同。

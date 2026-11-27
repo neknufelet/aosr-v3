@@ -357,13 +357,14 @@ def test_combined_search_holds_selection_until_check_finishes(tmp_path: Path, br
         _settled(page)
         _click_zone(page, "yL/z1")
         page.locator("#zone-panel-mode-search").check()
-        other = page.locator("#zone-map [data-wall=yL][data-zone=z2] .zv-fill").bounding_box()
-        assert other is not None
         held = _hold(page, f"**/api/{endpoint}")
         saved = []
         page.on("request", lambda r: saved.append(r.url) if r.method == "PUT" else None)
         page.get_by_role("button", name="套用並拿去搜尋").click()
         _wait_held(page, held, 1)
+        # 核對已卡住後才量此刻地圖上的第二區，點擊實際顯示的位置。
+        other = page.locator("#zone-map [data-wall=yL][data-zone=z2] .zv-fill").bounding_box()
+        assert other is not None and other["width"] > 0 and other["height"] > 0
         page.mouse.click(other["x"] + other["width"] / 2, other["y"] + other["height"] / 2)
         expect(page.locator("#zone-panel")).to_have_count(0)
         assert page.locator("#zone-map").evaluate("map => Boolean(map.closest('[inert]'))")

@@ -16,7 +16,7 @@ let zoneDesignGeneration = 0;
 let zoneLibrary = null;
 let zoneLibraryProblem = "";
 // 每一組材料的標題（伺服器 material_surfaces.GROUP_WORDS）；小框「顯示全部材料」打開才列不是這一面用的那幾組。
-let zoneSurfaceGroups = {};
+
 let zoneNoteText = "";
 let zoneNoteKind = "";
 // 「拿去搜尋」（sendToSearch）沒送出去的那一句：{text, kind, generation}。輸入頁寫在頁底那顆鈕底下（zone-to-search-note，
@@ -319,28 +319,31 @@ async function fetchZoneLibrary() {
     // 可調多層構造（現在只有可調 VPR，#1200 第 1 支）先不進分區頁：電腦挑它還沒接上，選單、勾選表、不列的那幾組都不出現。
     return {library: data.materials.filter(row => row.entry.kind !== "tunable_layers")
               .map(row => ({...row.entry, basis: row.basis, placement: row.placement})),
-            groups: data.surface_groups, reference: data.reference_only ?? null,
+            reference: data.reference_only ?? null,
             problem: data.user_file_problem ? `使用者材料庫讀不進來，選單只列內建材料：${data.user_file_problem}` : ""};
   } catch (error) {
-    return {library: [], groups: {}, reference: null, problem: `材料庫讀不到：${errorText(error)}`};
+    return {library: [], reference: null, problem: `材料庫讀不到：${errorText(error)}`};
   }
 }
 function applyZoneLibrary(state) {
-  zoneLibrary = state.library; zoneSurfaceGroups = state.groups; zoneLibraryProblem = state.problem;
+  zoneLibrary = state.library; zoneLibraryProblem = state.problem;
   zoneReference = state.reference ?? null;
 }
 async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
 function libraryEntries(kind) { return (zoneLibrary || []).filter(entry => entry.kind === kind); }
 function assignableEntries() { return (zoneLibrary || []).filter(entry => entry.kind === "fixed" || entry.kind === "construction"); }
 function fixedCandidate(entry) { return entry?.kind === "fixed" || (entry?.kind === "construction" && entry.backing !== "zone_wall"); }
-function appendFixedCandidateNote(container, allowed) {
+function appendFixedCandidateNote(container, details, allowed) {
   if (!allowed.some(id => fixedCandidate(libraryEntry(id)))) return;
   const note = document.createElement("p");
   note.className = "zone-candidate-cost";
   note.textContent = "清單裡有整塊貼上去的材料。建替身時，每筆都要放進訓練，再多核對一次。"
     + "之後只要清單、深度上限、裝法或方案有改，就要重建替身。"
     + "存檔後，開跑前到第三階段搜尋頁按「預覽轉好的參數」，就能看到是否需要重建及原因。";
-  container.append(note);
+  const summary = document.createElement("p");
+  summary.textContent = "固定款會多花訓練時間";
+  container.append(summary);
+  details.append(note);
 }
 function fixedSurface(entry) {
   if (entry.kind === "construction") {
@@ -352,14 +355,7 @@ function fixedLayers(entry) { return entry.kind === "construction" ? entry.layer
 function libraryEntry(id) { return (zoneLibrary || []).find(entry => entry.id === id) ?? null; }
 // 這一筆列不列在這一面（伺服器每一筆都帶分組，跟網頁一起出貨）。
 function usableHere(entry, wall) { return entry.placement.surfaces.includes(wall); }
-// 不列在這一面的，照組排（組的順序同伺服器標題表）：[[組的代號, [材料…]]…]。walls 是一面或幾面（「這間房貼什麼」小框一次選
-// 好幾面，#1265）：小框只列每一面都能貼的，所以有任何一面不能貼就算不列的（照 usableHere 反過來列）。
-function hiddenGroups(walls, entries) {
-  const faces = [walls].flat();
-  const groups = new Map(Object.keys(zoneSurfaceGroups).map(group => [group, []]));
-  for (const entry of entries) if (!faces.every(wall => usableHere(entry, wall))) groups.get(entry.placement.group).push(entry);
-  return [...groups].filter(([, items]) => items.length);
-}
+
 // 可調材料的顯示名拿掉尾巴的「（可調厚度與空腔）」：能調什麼另外照條目寫（24K、96K 空腔其實不調）。
 function shortLabel(entry) { return entry.kind === "optimizable" ? entry.label.replace(/（可調[^）]*）$/, "") : entry.label; }
 function centimetres(metres) { return shownNumber(Math.round(metres * 1000) / 10); }
@@ -509,8 +505,6 @@ function allowedProblem(allowed) {
 }
 
 // 「顯示全部材料」那幾組的組標題、開關的字、「不是這一面用的」那一句：「這間房貼什麼」小框（#1265）用。
-function hiddenGroupLabel(group) { return `不列的：${zoneSurfaceGroups[group]}`; }
-const SHOW_ALL_WORDS = "顯示全部材料";
 function awayWords(entry, wall) { return `「${entry.label}」不是${wallNames[wall]}用的：${entry.placement.reason}`; }
 function sameList(left, right) { return left.length === right.length && left.every(id => right.includes(id)); }
 function originalSchemeRow() {
