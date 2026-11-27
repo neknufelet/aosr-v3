@@ -14,6 +14,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, Page, expect
 
+from tests.engine._zone_material_steps import pick_fixed_row
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine._surface_zone_cases import room109_document
@@ -51,25 +52,25 @@ def test_the_panel_lists_only_what_this_face_can_take_and_show_all_reveals_the_r
         page = watched.page
         _open_scheme(page, "room109")
         _fixed_panel(page, "x0")
-        fixed = _values(page, "#zone-panel-material option")
+        fixed = _values(page, "#zone-panel-material [role=radio]")
         assert "glass_wool_48k_50mm" in fixed and "pet60_vpr_steel1p2mm_foam90_sample" in fixed
         assert not set(HIDDEN_ON_WALLS) & set(fixed)
         expect(page.locator("#zone-page label.zv-show-all")).to_have_text(SHOW_ALL)
         page.locator("#zone-panel-show-all").check()
-        assert set(HIDDEN_ON_WALLS) - {"demo109_rockwool60k_capped"} <= set(_values(page, "#zone-panel-material option"))
+        assert set(HIDDEN_ON_WALLS) - {"demo109_rockwool60k_capped"} <= set(_values(page, "#zone-panel-material [role=radio]"))
         page.locator("#zone-panel-show-all").uncheck()
-        assert not set(HIDDEN_ON_WALLS) & set(_values(page, "#zone-panel-material option"))
+        assert not set(HIDDEN_ON_WALLS) & set(_values(page, "#zone-panel-material [role=radio]"))
         # 開關開著換成由程式最佳化：加候選的挑選框不跟著列不列的那幾筆。
         page.locator("#zone-panel-show-all").check()
         page.locator("#zone-panel-mode-search").check()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         for choice in HIDDEN_ON_WALLS:
             expect(page.locator(f"#zone-panel-pick-{choice}")).to_have_count(0)
         page.locator("#zone-panel-cancel").click()
         page.locator("#zone-page-close").click()
         _fixed_panel(page, "floor")
         page.locator("#zone-panel-show-all").uncheck()
-        assert _values(page, "#zone-panel-material option") == ["", "carpet_on_concrete"]
+        assert _values(page, "#zone-panel-material [role=radio]") == ["", "carpet_on_concrete"]
         # 小框一次選好幾面時（zone_overview.js 下拉那一段傳的是選中的每一面）：有任何一面不能貼就算不列的。
         hidden = "walls => hiddenGroups(walls, assignableEntries()).flatMap(([, entries]) => entries.map(entry => entry.id))"
         assert "glass_wool_48k_50mm" not in page.evaluate(hidden, ["x0"])
@@ -90,10 +91,10 @@ def test_a_zone_holding_a_material_from_another_group_still_shows_it(tmp_path: P
         _open_scheme(page, "room109")
         _fixed_panel(page, "x0")
         page.locator("#zone-panel-show-all").check()
-        expect(page.locator(f"#zone-panel-material optgroup[label='不列的：門、窗'] option[value={DOOR}]")).to_have_count(1)
-        page.locator("#zone-panel-material").select_option(DOOR)
+        expect(page.locator(f"#zone-panel-material [role=group][aria-label='不列的：門、窗'] [role=radio][value={DOOR}]")).to_have_count(1)
+        pick_fixed_row(page, DOOR)
         page.locator("#zone-panel-show-all").uncheck()
-        expect(page.locator("#zone-panel-material")).to_have_value(DOOR)
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", DOOR)
         _apply(page)
         assert page.evaluate("scheme.scene.surface_zones_by_wall.x0[0].material.kind") == "mounted_on_wall"
         page.locator("#zone-map [data-wall='x0'][data-zone='whole_wall'] .zv-fill").click()
@@ -119,9 +120,9 @@ def test_picking_what_the_ceiling_already_is_turns_into_keep_original(tmp_path: 
         _open_scheme(page, "room109")
         _fixed_panel(page, "ceiling")
         # 整片天花構造平常不列成貼上去的處理。
-        assert CEILING not in _values(page, "#zone-panel-material option")
+        assert CEILING not in _values(page, "#zone-panel-material [role=radio]")
         page.locator("#zone-panel-show-all").check()
-        page.locator("#zone-panel-material").select_option(CEILING)
+        pick_fixed_row(page, CEILING)
         _apply(page)
         expect(page.locator("#zone-page-note")).to_contain_text("選的跟原本一樣，當成不貼")
         expect(page.locator("#zone-page-note")).not_to_contain_text("改成「指定貼一種")
@@ -140,7 +141,7 @@ def test_an_unreadable_depth_stays_refused_and_says_so_after_show_all_redraws_th
         page = watched.page
         _open_scheme(page, "room109")
         _fixed_panel(page, "x0")
-        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        pick_fixed_row(page, "glass_wool_48k_50mm")
         page.locator("#zone-panel-depth").press_sequentially("--1")
         problem = page.locator("#zone-panel-problem")
         expect(problem).to_contain_text("「最深」要填大於 0 的數字（公分，最少 0.1）")
@@ -171,7 +172,7 @@ def test_an_unreadable_depth_lost_in_a_redraw_can_be_cleared_back_to_blank_with_
         page = watched.page
         _open_scheme(page, "room109")
         _fixed_panel(page, "x0")
-        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        pick_fixed_row(page, "glass_wool_48k_50mm")
         depth = page.locator("#zone-panel-depth")
         depth.press_sequentially("--1")
         page.locator("#zone-panel-show-all").check()

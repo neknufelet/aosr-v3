@@ -15,6 +15,7 @@ from pydantic import TypeAdapter
 from aosr.materials.library import LibraryEntry, dump_user_library
 import re
 
+from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._input_page_steps import new_from_template
 from tests.engine._zone_panel_steps import (apply_and_return, choose_fixed, choose_mode, edit_candidates, expect_mode, fixed_value,
                                             listed, material_values, mode_words, open_alone, open_panel)
@@ -77,7 +78,7 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         # test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chose_differently，乙）；96K 那一句、
         # 「不含（可調厚度與空腔）」沒有題逐字考（丙，回報第 5 節）。
         open_panel(page, "x0", "whole_wall")
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         for choice in HIDDEN_ON_WALLS:
             expect(page.locator(f"#zone-panel-pick-{choice}")).to_have_count(0)
         expect(page.locator("#zone-panel-pick-fabric_pet_a_gap100 .zv-description")).to_have_text("整塊貼、固定 10 cm")
@@ -91,7 +92,7 @@ def test_menus_list_only_what_this_face_can_take_and_show_all_reveals_the_rest(t
         assert _chips(page, "floor", "whole_wall") == ["none"]
         open_panel(page, "floor", "whole_wall")
         expect(page.locator("#zone-panel-form")).to_contain_text("這裡沒有可調的材料：程式只能從「不貼」開始")
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         expect(page.locator("#zone-panel-picker button")).to_have_count(1)
         expect(page.locator("#zone-panel-pick-carpet_on_concrete")).to_be_enabled()
         assert watched.page_errors == [] and watched.console_errors == []
@@ -343,7 +344,7 @@ def test_a_fixed_only_list_points_to_the_panel_for_all_three_repairs(tmp_path: P
         _open_only_fixed(page, "x0")
         page.locator("#elevation-wall-x0").click()
         open_panel(page, "x0", "whole_wall")
-        page.locator("#zone-panel-material").select_option(PLAIN_PRODUCT)
+        pick_fixed_row(page, PLAIN_PRODUCT)
         apply_and_return(page)
         expect_mode(page, "x0", "whole_wall", "fixed")
         assert fixed_value(page, "x0", "whole_wall") == PLAIN_PRODUCT
@@ -353,9 +354,10 @@ def test_a_fixed_only_list_points_to_the_panel_for_all_three_repairs(tmp_path: P
         page.locator("#elevation-wall-floor").click()
         expect(page.locator("#zone-to-search-note")).to_contain_text("的紅框（只放了固定成品，程式沒得選）")
         open_panel(page, "floor", "whole_wall")
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         expect(page.locator("#zone-panel-pick-glass_wool_48k")).to_have_count(0)
         page.locator("#zone-panel-picker-search").press("Escape")
+        row_options(page, "none")
         page.locator("#zone-panel-addto-none").click()
         apply_and_return(page)
         assert _modes(page, "floor")["whole_wall"]["allowed"] == ["carpet_on_concrete", "none"]
@@ -424,6 +426,7 @@ def test_an_unknown_name_in_the_list_is_not_counted_as_a_fixed_product(tmp_path:
             expect(page.locator("#zone-to-search")).to_be_enabled()
         page.locator("#elevation-wall-x0").click()
         open_panel(page, "x0", "whole_wall")
+        row_options(page, "ghost_material")
         page.locator("#zone-panel-remove-ghost_material").click()
         expect(page.locator("#zone-panel-problem")).to_contain_text("只放了固定成品，程式沒得選")
         expect(page.locator("#zone-panel-apply")).to_be_disabled()

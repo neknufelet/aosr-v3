@@ -9,6 +9,7 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.materials.construction_models import Assembly
 from aosr.materials.library import FixedEntry, builtin_entries
+from tests.engine._zone_material_steps import row_options
 from tests.engine._input_page_steps import limits_all_clear, open_example_scheme, recheck, reveal, scheme_open_button, scripted_open_scheme
 from tests.engine._zone_panel_steps import (apply_and_return, choose_fixed, choose_mode, edit_candidates, expect_mode, fixed_value,
                                             listed, open_alone, open_panel)
@@ -77,11 +78,12 @@ def _first_cut(page: Page, tmp_path: Path) -> tuple[dict[str, dict[str, object]]
     open_panel(page, "x0", "auto1")
     # 48K 固定成品在可調 48K 已列入時不能新增。先拿掉，再把可調那筆加回。
     for wool in ("glass_wool_96k", "glass_wool_48k"):
+        row_options(page, wool)
         page.locator(f"#zone-panel-remove-{wool}").click()
-    page.locator("#zone-panel-add").click()
+    page.locator("#zone-panel-picker-search").focus()
     expect(page.locator("#zone-panel-pick-carpet_on_concrete")).to_have_count(0)
     page.locator(f"#zone-panel-pick-{WALL_FIXED}").click()
-    page.locator("#zone-panel-add").click()
+    page.locator("#zone-panel-picker-search").focus()
     page.locator("#zone-panel-pick-glass_wool_48k").click()
     # 舊做法表底下那一行（#zone-note）講的那一句，表拆了改看那一頁結果列上面那一行（#zone-page-note），回輸入頁前讀。
     apply_and_return(page, said="1 區改成「由程式最佳化」")
@@ -146,6 +148,7 @@ def test_each_zone_picks_a_mode_survives_a_recut_and_a_reopen(tmp_path: Path, br
         # 清單拿到只剩固定材料：照實提醒（程式沒得選），開跑時伺服器再擋一次。
         open_panel(page, "x0", right)
         for choice in ("glass_wool_48k", "glass_wool_24k", "none"):
+            row_options(page, choice)
             page.locator(f"#zone-panel-remove-{choice}").click()
         expect(page.locator("#zone-panel-problem")).to_contain_text("只放了固定成品，程式沒得選")
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
@@ -438,6 +441,7 @@ def test_stored_allowed_list_comes_back_as_is_through_open_edit_and_save(tmp_pat
         edit_candidates(page, "x0", "whole_wall", remove=("glass_wool_24k",))
         assert _modes(page, "x0")["whole_wall"]["allowed"] == ["none"]
         open_panel(page, "x0", "whole_wall")
+        row_options(page, "none")
         page.locator("#zone-panel-remove-none").click()
         expect(page.locator("#zone-panel-problem")).to_contain_text("至少勾一種材料")
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
@@ -657,7 +661,7 @@ def test_a_save_failure_reply_goes_also_when_the_save_writes_no_design_file(tmp_
         _drag(page, LY, LZ, (0.02, 0.02), (0.8, 1.0))
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
         page.locator("#zone-goto-x0-z1").click()
-        page.locator("#zone-panel").get_by_role("radio", name="由程式最佳化").check()
+        page.locator("#zone-panel").get_by_role("radio", name="程式挑").check()
         page.locator("#zone-panel-apply").click()
         page.locator("#zone-page-close").click()
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")

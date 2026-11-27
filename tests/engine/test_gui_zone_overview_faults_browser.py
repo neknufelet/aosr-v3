@@ -12,6 +12,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, Route, expect
 
+from tests.engine._zone_material_steps import pick_fixed_row
 from tests.engine._input_page_steps import archive_then_recreate, open_example_scheme, open_save_as, open_scheme, reveal
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
@@ -75,7 +76,7 @@ def _modes(page: Page, zones: list[str]) -> dict[str, str]:
 def _minority_rule(page: Page) -> None:
     """規則是「不貼，保留原樣」但照著它的只剩 4 區，由程式最佳化的另外指定有 8 區（比規則那一組多）。"""
     _click_zone(page, "yL/auto1")
-    page.locator("#zone-panel-material").select_option(VPR)
+    pick_fixed_row(page, VPR)
     _apply(page)
     for zones in (["xL/auto1", "xL/auto2", "xL/auto3"], ["xL/auto4", "xL/auto5", "xL/auto6"], ["y0/auto1", "y0/auto2"]):
         for zone in zones:
@@ -195,7 +196,7 @@ def test_a_refused_save_from_send_to_search_is_explained_on_the_page(tmp_path: P
         _settled(page)
         # 再指定貼一區：方案跟資料夾裡那一份真的不一樣了（一樣的話存檔算沒變動、不會被擋）。
         _click_zone(page, "x0/whole_wall")
-        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        pick_fixed_row(page, "glass_wool_48k_50mm")
         _apply(page)
         expect(page.locator("#zone-page-search")).to_be_enabled()
         page.locator("#zone-page-search").click()
@@ -529,7 +530,7 @@ def test_a_pick_that_is_the_wall_itself_writes_no_depth(tmp_path: Path, browser:
         expect(page.locator("#zone-map")).to_be_visible()
         _settled(page)
         _click_zone(page, "xL/auto1")
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         page.locator("#zone-panel-depth").fill("12")
         _apply(page)
         assert page.evaluate("structuredClone(zoneDesign.zones.xL.auto1)") == {"mode": "keep_original"}
@@ -557,7 +558,7 @@ def test_picking_what_the_wall_already_is_becomes_keep_original_and_says_so_on_t
         _settled(page)
         # 新頁：另一塊空牆旁邊那塊（auto1）再選同一筆 → 照樣當成不貼。
         _click_zone(page, "xL/auto1")
-        page.locator("#zone-panel-material").select_option(VPR)
+        pick_fixed_row(page, VPR)
         _apply(page)
         assert _modes(page, ["xL/auto1"]) == {"xL/auto1": "keep_original"}
         expect(page.locator("#zone-map [data-wall='xL'][data-zone='auto1']")).to_have_attribute("data-shown", "still")
@@ -643,8 +644,8 @@ def test_keeping_what_is_pasted_now_applies_without_asking_the_server_to_change_
         _click_zone(page, "xL/auto1")
         _click_zone(page, "xL/auto2")
         page.locator("#zone-panel-mode-fixed").check()
-        expect(page.locator("#zone-panel-material")).to_have_value("")
-        expect(page.locator("#zone-panel-material option").first).to_have_text("照現在貼的，不換")
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", "")
+        expect(page.locator("#zone-panel-material [role=radio]").first).to_have_text("照現在貼的，不換")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
         _apply(page)
         expect(page.locator("#zone-page-note")).to_have_text("2 區改成「指定貼一種」")
@@ -713,7 +714,7 @@ def test_editing_the_list_keeps_other_walls_handed_to_the_computer(tmp_path: Pat
         followers = [zone for zone, mode in cast(dict[str, str], page.evaluate(_MODES)).items() if mode == "search"]
         assert len(followers) == 3
         page.locator("#zone-list-select").click()
-        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        page.locator("#zone-panel-pick-glass_wool_96k").click()
         _apply(page)
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         expect(page.locator("#zone-rule-mode")).to_have_value("search")
@@ -814,7 +815,7 @@ def test_a_line_says_changes_are_not_in_the_file_yet_until_they_are_saved(tmp_pa
         expect(line).to_have_count(0)
         # 改清單也算改動；存過之後再改，那一句再出現。
         page.locator("#zone-list-select").click()
-        page.locator("#zone-panel-remove-glass_wool_96k").click()
+        page.locator("#zone-panel-pick-glass_wool_96k").click()
         _apply(page)
         expect(line).to_be_visible()
         page.locator("#zone-page-close").click()

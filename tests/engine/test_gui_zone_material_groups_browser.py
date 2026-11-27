@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 import pytest
 from playwright.sync_api import Browser, Locator, expect
+from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._zone_panel_steps import choose_fixed, choose_mode
 from tests.engine._construction_cases import construction
 from tests.engine._construction_gui_server import real_server
@@ -42,10 +43,12 @@ def test_a_tick_is_added_only_to_the_zones_whose_face_can_take_it(tmp_path: Path
         choice = WOOLS[0]
         _expect_candidate_states(page, {choice: "all"})
         expect(page.locator(f"#zone-panel-row-{choice}")).to_contain_text("選中的 2 區裡 1 區那一面貼不了這一種，不會加")
+        row_options(page, choice)
         page.locator(f"#zone-panel-remove-{choice}").click()
         _expect_candidate_states(page, {choice: "none"})
         page.locator("#zone-panel-undo").click()
         _expect_candidate_states(page, {choice: "all"})
+        row_options(page, choice)
         page.locator(f"#zone-panel-remove-{choice}").click()
         _expect_candidate_states(page, {choice: "none"})
         _apply(page)
@@ -81,8 +84,10 @@ def test_a_half_ticked_material_follows_each_click_and_can_be_taken_off(tmp_path
         _click_zone(page, "y0/auto2")
         choice = WOOLS[1]
         _expect_candidate_states(page, {choice: "some"})
+        row_options(page, choice)
         page.locator(f"#zone-panel-addto-{choice}").click()
         _expect_candidate_states(page, {choice: "all"})
+        row_options(page, choice)
         page.locator(f"#zone-panel-remove-{choice}").click()
         _expect_candidate_states(page, {choice: "none"})
         expect(page.locator(f"#zone-panel-row-{choice}")).to_have_count(0)
@@ -131,6 +136,7 @@ def test_cards_show_their_choices_depth_and_only_a_group_selection_button(tmp_pa
             expect(cards.locator("input,select")).to_have_count(0)
             expect(cards.locator("button")).to_have_count(2)
             expect(page.get_by_text(CARD_HINT + "；寫「正在改」的那一組，就在上面的小框改", exact=True)).to_have_count(1)
+        row_options(page, "glass_wool_96k")
         page.locator("#zone-panel-remove-glass_wool_96k").click()
         _apply(page)
         page.locator("#zone-page-close").click()
@@ -183,7 +189,7 @@ def test_two_zones_pasted_with_different_materials_keep_their_own_when_picked_to
         for zone, material in (("yL/z1", options[0]), ("ceiling/z2", options[1])):
             _click_zone(page, zone)
             page.locator("#zone-panel-mode-fixed").check()
-            page.locator("#zone-panel-material").select_option(material)
+            pick_fixed_row(page, material)
             _apply(page)
         before = cast(list[str], page.evaluate(pasted))
         assert before[0] != before[1]
@@ -194,7 +200,7 @@ def test_two_zones_pasted_with_different_materials_keep_their_own_when_picked_to
         assert cast(list[str], page.evaluate(pasted)) == before
         _click_zone(page, "yL/z1")
         _click_zone(page, "ceiling/z2")
-        expect(page.locator("#zone-panel-material")).to_have_value("")
+        expect(page.locator("#zone-panel-material [aria-checked=true]")).to_have_attribute("value", "")
         page.locator("#zone-panel-cancel").click()
         assert cast(list[str], page.evaluate(pasted)) == before
         assert watched.page_errors == [] and watched.console_errors == []
@@ -209,11 +215,13 @@ def test_apply_is_blocked_when_one_of_the_picked_zones_would_be_left_with_nothin
         _click_zone(page, "yL/auto1")
         _click_zone(page, "yL/auto2")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
         number = int(cast(str, page.locator("#zone-panel .zv-chip[data-zone='yL/auto1'] .zv-num").text_content()))
         expect(page.locator("#zone-panel-problem")).to_contain_text(f"前牆 {'①②③④⑤'[number - 1]} ")
         expect(page.locator("#zone-panel-problem")).to_contain_text("至少勾一種材料")
+        row_options(page, "none")
         page.locator("#zone-panel-addto-none").click()
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
         _apply(page)
@@ -232,7 +240,9 @@ def test_the_front_wall_is_set_to_48k_only_and_no_zone_on_another_face_changes(t
         expect(page.locator("#zone-special")).to_have_attribute("data-count", "4")
         page.locator("#zone-whole-yL").click()
         _pick_search(page)
+        row_options(page, "glass_wool_24k")
         page.locator("#zone-panel-remove-glass_wool_24k").click()
+        row_options(page, "glass_wool_96k")
         page.locator("#zone-panel-remove-glass_wool_96k").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, **dict.fromkeys(FRONT, ONLY_48K)}
@@ -279,6 +289,7 @@ def test_the_panel_opens_on_the_picked_zones_own_lists_and_a_half_ticked_materia
         # 把只有一區有的那一種勾下去：兩區都有；另一種沒動，照舊只有一區有。
         _click_zone(page, "y0/auto1")
         _click_zone(page, "y0/auto2")
+        row_options(page, "glass_wool_24k")
         page.locator("#zone-panel-addto-glass_wool_24k").click()
         _expect_candidate_states(page, dict(zip(WOOLS, ["all", "all", "some", "all"], strict=True)))
         _apply(page)
@@ -306,10 +317,12 @@ def test_zones_with_different_lists_get_one_list_card_each_and_a_tick_on_a_card_
         assert page.locator("#zone-list-2-choices > [data-choice]").evaluate_all(choices) == WOOLS
         # 前牆那張拿掉「也可以不貼」：只有前牆五區少一種，天花那一區的「不貼」還在；再加回去。
         page.locator("#zone-list-select").click()
+        row_options(page, "none")
         page.locator("#zone-panel-remove-none").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, ["glass_wool_48k"]), "ceiling/z1": WOOLS}
         page.locator("#zone-list-select").click()
+        row_options(page, "none")
         page.locator("#zone-panel-addto-none").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, ONLY_48K), "ceiling/z1": WOOLS}
@@ -321,6 +334,7 @@ def test_zones_with_different_lists_get_one_list_card_each_and_a_tick_on_a_card_
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, longer), "ceiling/z1": WOOLS}
         # 天花那張拿掉 96K：只有天花那一區少一種；兩邊變成同樣三種，併回一張卡，這時才寫「都從這幾種裡選」。
         page.locator("#zone-list-2-select").click()
+        row_options(page, "glass_wool_96k")
         page.locator("#zone-panel-remove-glass_wool_96k").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**dict.fromkeys(FRONT, longer), "ceiling/z1": ["glass_wool_48k", "glass_wool_24k", "none"]}
@@ -328,6 +342,7 @@ def test_zones_with_different_lists_get_one_list_card_each_and_a_tick_on_a_card_
         expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的 6 區每一區各自最佳化，都從這幾種裡選")
         # 併成一張之後，在那一張拿掉 24K：六區一起少一種。
         page.locator("#zone-list-select").click()
+        row_options(page, "glass_wool_24k")
         page.locator("#zone-panel-remove-glass_wool_24k").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == dict.fromkeys([*FRONT, "ceiling/z1"], ONLY_48K)
@@ -399,23 +414,23 @@ def test_constructions_can_be_assigned_but_only_standalone_ones_can_be_checked(t
         select = page.locator("#zone-panel-material")
         assert not any(identifier.startswith("panel_") for identifier in page.evaluate("serverDefaultAllowed()"))
         for backing in ("zone_wall", "rigid", "air"):
-            expect(select.locator(f"option[value='panel_{backing}']")).to_have_count(1)
+            expect(select.locator(f"[role=radio][value='panel_{backing}']")).to_have_count(1)
             with page.expect_response(lambda response: response.url.endswith("/api/material-curve")) as curve:
-                select.select_option(f"panel_{backing}")
+                select.locator(f"#zone-panel-material-panel_{backing}").click()
             assert curve.value.json()["status"] == "drawn"
         _apply(page)
         _click_zone(page, "yL/z3")
         expect(page.locator("#zone-panel")).to_contain_text("自編面板 air")
         expect(page.locator("#zone-panel-now-fixed")).to_have_count(1)
-        expect(select).to_have_value("panel_air")
+        expect(select.locator("[aria-checked=true]")).to_have_attribute("value", "panel_air")
         _pick_search(page)
         for backing in ("rigid", "air"):
-            page.locator("#zone-panel-add").click()
+            page.locator("#zone-panel-picker-search").focus()
             choice = page.locator(f"#zone-panel-pick-panel_{backing}")
             expect(choice).to_be_enabled()
             expect(page.locator(f"#zone-panel-row-panel_{backing}")).to_have_count(0)
             choice.click()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         expect(page.locator("#zone-panel-pick-panel_zone_wall")).to_have_count(0)
         assert watched.page_errors == [] and watched.console_errors == []
 
@@ -439,7 +454,7 @@ def test_zone_map_uses_the_saved_original_to_identify_a_bare_copy(tmp_path: Path
         expect(shown("ceiling", "auto1")).to_have_attribute("data-shown", "still" if with_original else "unknown")
         _click_zone(page, "yL/z3")
         page.locator("#zone-panel-mode-fixed").check()
-        page.locator("#zone-panel-material").select_option("ceiling_copy")
+        pick_fixed_row(page, "ceiling_copy")
         _apply(page)
         for reopened in (False, True):
             if reopened:

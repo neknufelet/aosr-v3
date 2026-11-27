@@ -9,6 +9,7 @@ from typing import cast
 from playwright.sync_api import Browser, Locator, Page, expect
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+from tests.engine._zone_material_steps import row_options
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme
@@ -90,7 +91,7 @@ def _boss_room(tmp_path: Path) -> None:
 
 
 def _add_candidate(page: Page, choice: str) -> None:
-    page.locator("#zone-panel-add").click()
+    page.locator("#zone-panel-picker-search").focus()
     page.locator(f"#zone-panel-pick-{choice}").click()
 
 
@@ -249,6 +250,7 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         cells = page.locator("#zone-panel-list input, #zone-panel-list select, #zone-panel-list textarea")
         expect(cells).to_have_count(0)
         for choice in WOOLS[:-1]:
+            row_options(page, choice)
             page.locator(f"#zone-panel-range-toggle-{choice}").click()
         assert cells.evaluate_all("cells => cells.map(cell => cell.id)") == [
             f"zone-panel-range-{choice}-{part}-{end}" for choice, parts in (
@@ -264,11 +266,14 @@ def test_allowed_materials_are_laid_out_one_per_row_with_their_ranges_as_plain_t
         _click_zone(page, "yL/auto2")
         expect(page.locator("#zone-panel-deepest")).to_contain_text("這幾區最深")
         # 「材料的勾全拿掉」不動「也可以不貼」；一種都沒勾（連不貼也拿掉）就不能套用。
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-only-glass_wool_48k").click()
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         assert page.locator("#zone-panel-list > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == ["none"]
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        row_options(page, "none")
         page.locator("#zone-panel-remove-none").click()
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
         expect(page.locator("#zone-panel-problem")).to_contain_text("至少勾一種")
@@ -287,7 +292,7 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
         assert len(covered["glass_wool_48k"]) == 4 and len(covered["glass_wool_24k"]) == 1 and len(covered["glass_wool_96k"]) == 1
         _click_zone(page, "yL/auto1")
         _pick_search(page)
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         for family, name in (("glass_wool_48k", "48K 玻璃棉"), ("glass_wool_24k", "24K 玻璃棉"), ("glass_wool_96k", "96K 玻璃棉")):
             for product in covered[family]:
                 row = page.locator(f"#zone-panel-pick-{product}")
@@ -298,8 +303,9 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
         expect(page.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}")).to_be_enabled()
         assert page.locator(f"#zone-panel-pick-{PLAIN_PRODUCT}").get_attribute("data-covered") is None
         # 取消 48K：它那四筆勾得到了，24K、96K 的照舊灰著。
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         for product in covered["glass_wool_48k"]:
             expect(page.locator(f"#zone-panel-pick-{product}")).to_be_enabled()
             expect(page.locator(f"#zone-panel-pick-{product} .zv-covered-why")).to_have_count(0)
@@ -310,7 +316,7 @@ def test_products_a_ticked_tunable_material_already_covers_are_greyed_out_with_t
             "glass_wool_24k", "glass_wool_96k", "none", covered["glass_wool_48k"][0]]
         # 從清單卡重新打開小框，也遵守同一條規則：清單裡的 24K 已經包含的那一筆灰著、勾不了、寫為什麼；48K 不在清單裡，它那幾筆勾得到。
         page.locator("#zone-list-select").click()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         inside = covered["glass_wool_24k"][0]
         expect(page.locator(f"#zone-panel-pick-{inside}")).to_be_disabled()
         expect(page.locator(f"#zone-panel-pick-{inside}")).to_have_attribute("data-covered", "glass_wool_24k")
@@ -333,12 +339,12 @@ def test_fixed_products_stay_folded_and_the_line_says_how_many_there_are_and_how
         _pick_search(page)
         expect(page.locator("#zone-panel-picker")).to_have_count(0)
         expect(page.locator(f"#zone-panel-row-{vpr}")).to_have_count(0)
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         assert page.locator("#zone-panel-picker [data-kind='fixed']").count() == count
         page.locator(f"#zone-panel-pick-{vpr}").click()
         expect(page.locator("#zone-panel-picker")).to_have_count(0)
         expect(page.locator(f"#zone-panel-row-{vpr}")).to_be_visible()
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         assert page.locator("#zone-panel-picker [data-kind='fixed']").count() == count - 1
         expect(page.locator("#zone-panel-search-from")).to_have_text("程式從下面勾的 5 種裡選，每一區各自最佳化。")
         assert watched.page_errors == [] and watched.console_errors == []
@@ -386,7 +392,7 @@ def test_nothing_new_on_the_panel_is_smaller_than_thirteen_pixels_or_too_pale_to
         card = cast(list[dict[str, object]], page.locator("#zone-list").evaluate(_TEXT_STYLES))
         page.locator("#zone-whole-yL").click()
         _pick_search(page)
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         expect(page.locator("#zone-panel-picker .zv-covered-why").first).to_be_visible()
         panel = cast(list[dict[str, object]], page.locator("#zone-panel").evaluate(_TEXT_STYLES))
         assert len(panel) > 30 and len(card) > 5
@@ -432,7 +438,9 @@ def test_picking_a_whole_face_changing_the_draft_then_cancelling_stores_both_fil
             expect(page.locator("#zone-map")).to_be_visible()
             page.locator("#zone-whole-yL").click()
             _pick_search(page)
+            row_options(page, "glass_wool_24k")
             page.locator("#zone-panel-remove-glass_wool_24k").click()
+            row_options(page, "none")
             page.locator("#zone-panel-remove-none").click()
             page.locator("#zone-panel-depth").fill("12")
             page.locator("#zone-panel-depth").press("Tab")
@@ -481,8 +489,10 @@ def test_unticking_and_ticking_back_on_the_floor_changes_no_other_zone(tmp_path:
         before = cast(dict[str, list[str]], page.evaluate(_ALLOWED))
         _click_zone(page, "floor/auto1")
         _pick_search(page)
+        row_options(page, "none")
         page.locator("#zone-panel-remove-none").click()
         expect(page.locator("#zone-panel-apply")).to_be_disabled()
+        row_options(page, "none")
         page.locator("#zone-panel-addto-none").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {**before, "floor/auto1": ["none"]}
@@ -537,6 +547,7 @@ def test_applying_the_panel_only_adds_and_removes_what_was_ticked_and_keeps_the_
         expect(page.locator("#zone-panel-mode-search")).to_be_checked()
         _expect_candidate_states(page, {WOOLS[0]: "all", WOOLS[1]: "none"})
         _add_candidate(page, "glass_wool_24k")
+        row_options(page, "glass_wool_48k")
         page.locator("#zone-panel-remove-glass_wool_48k").click()
         _apply(page)
         assert cast(dict[str, list[str]], page.evaluate(_ALLOWED)) == {"yL/auto1": [FLOOR_ONLY, "none", "glass_wool_24k"], "floor/auto1": on_floor}

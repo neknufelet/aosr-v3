@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, expect
 from aosr.gui import reference_only
+from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._zone_panel_steps import choose_mode, edit_candidates
 from tests.engine._construction_gui_server import real_server
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -135,7 +136,7 @@ def test_a_plain_product_pasted_on_an_original_wall_that_is_such_a_construction_
         _open_page(page)
         _click_zone(page, "x0/a")
         _click_zone(page, "x0/b")
-        page.locator("#zone-panel-material").select_option(PLAIN_ID)
+        pick_fixed_row(page, PLAIN_ID)
         _apply(page)
         pasted = cast(dict[str, dict[str, object]], page.evaluate(
             "Object.fromEntries(scheme.scene.surface_zones_by_wall.x0.filter(zone => zone.id).map(zone => [zone.id, zone.material]))"))
@@ -265,6 +266,7 @@ def test_a_sentence_for_a_list_that_no_longer_has_it_is_hidden_until_the_new_che
         expect(page.locator(_CARD_SENTENCES)).to_have_text([_refused(page, "x0/a")])
         limits = _HeldLimits(page)
         _click_zone(page, "x0/a")
+        row_options(page, HIT)
         page.locator(f"#zone-panel-remove-{HIT}").click()
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
@@ -403,6 +405,7 @@ def test_a_sentence_naming_a_zone_that_no_longer_lists_it_is_hidden_until_the_ne
         expect(page.locator("#zone-page-blocked")).to_have_text(both)
         limits = _HeldLimits(page)
         _click_zone(page, "x0/a")
+        row_options(page, HIT)
         page.locator(f"#zone-panel-remove-{HIT}").click()
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
@@ -455,14 +458,14 @@ def test_the_panel_curve_keeps_the_band_inside_the_chart_and_folds_the_reason_ag
         page = watched.page
         _open_page(page)
         _click_zone(page, "x0/a")
-        page.locator("#zone-panel-material").select_option(HIT)
+        pick_fixed_row(page, HIT)
         expect(page.locator("#zone-panel .zv-ref-band")).to_have_count(1, timeout=COMPUTED_MS)
         page.locator("#zone-panel-ref-note summary").click()
         expect(page.locator("#zone-panel-ref-note details p")).to_be_visible()
         page.locator("#zone-panel-cancel").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
         _click_zone(page, "x0/b")
-        page.locator("#zone-panel-material").select_option(HIT)
+        pick_fixed_row(page, HIT)
         expect(page.locator("#zone-panel-ref-note")).to_have_count(1, timeout=COMPUTED_MS)
         assert page.locator("#zone-panel-ref-why").evaluate("fold => fold.open") is False
         expect(page.locator("#zone-panel-ref-note details p")).to_be_hidden()
@@ -478,7 +481,7 @@ def test_the_panel_curve_keeps_the_band_inside_the_chart_and_folds_the_reason_ag
             _band_at(page, hz)
             _open_page(page)
             _click_zone(page, "x0/a")
-            page.locator("#zone-panel-material").select_option(HIT)
+            pick_fixed_row(page, HIT)
             expect(page.locator("#zone-panel-ref-note .ref-say")).to_have_text(cast(str, WORDS["sentence"]), timeout=COMPUTED_MS)
             seen = cast(dict[str, float | None], page.evaluate(edge))
             if drawn:
