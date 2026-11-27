@@ -13,6 +13,7 @@ from pathlib import Path
 
 from playwright.sync_api import Browser, Page, Route, expect
 
+from tests.engine._zone_material_steps import pick_fixed_row
 from tests.engine.test_gui_input_clear_undo_browser import _release
 
 from tests.engine._input_page_steps import new_from_template, open_fact_editor, open_scheme
@@ -83,7 +84,7 @@ def test_a_thousand_centimetres_stays_in_the_box_without_a_comma(tmp_path: Path,
         page.locator("#zone-goto-x0-whole_wall").click()
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "x0/whole_wall")
         page.locator("#zone-panel-mode-fixed").check()
-        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        pick_fixed_row(page, "glass_wool_48k_50mm")
         page.locator("#zone-panel-depth").fill("1000")
         page.locator("#zone-panel-apply").click()
         expect(page.locator("#zone-panel")).to_have_count(0)
@@ -117,7 +118,7 @@ def test_a_box_the_browser_cannot_read_is_refused_and_keeps_the_saved_cap(tmp_pa
         # 小框「最深」打同樣讀不出來的字：同一句的小框版（主詞與空白的意思各自的，中間那一段同一支）。
         page.locator("#zone-goto-x0-whole_wall").click()
         page.locator("#zone-panel-mode-fixed").check()
-        page.locator("#zone-panel-material").select_option("glass_wool_48k_50mm")
+        pick_fixed_row(page, "glass_wool_48k_50mm")
         page.locator("#zone-panel-depth").click()
         page.keyboard.type("--1")
         expect(page.locator("#zone-panel-problem")).to_have_text(PANEL_REFUSED)

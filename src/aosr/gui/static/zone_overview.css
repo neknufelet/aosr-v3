@@ -152,7 +152,7 @@ body.zone-page-open{background:#f2f4f1}
 #zone-page .zv-show-all input{margin-top:2px}
 #zone-page .zv-away{margin:6px 0 0;font-size:13px;color:#a33;line-height:1.4}
 #zone-page .zv-same{display:inline-block;margin-left:8px;padding:0 7px;border:1.2px solid var(--ink);border-radius:9px;font-size:12.5px;line-height:18px;
-  vertical-align:2px;background:#fff;white-space:nowrap}
+  vertical-align:2px;background:#fff;color:var(--ink);white-space:nowrap}
 #zone-page .zv-show{margin:5px 0 3px;padding:7px 10px 3px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}
 #zone-page .zv-fullname{font-size:13px;line-height:1.45;margin:0 0 7px}
 #zone-page .zv-show h4{margin:0 0 5px;font-size:13px;font-weight:600}
@@ -362,3 +362,97 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-pick-option small,#zone-page .zv-picker-foot{display:block}
 #zone-page .zv-owned{margin-left:6px}
 #zone-page .zv-picker-foot,#zone-page .zv-picker-results > p{margin:0;padding:6px 9px;color:#46545b}
+
+/* 視窗高度先留給標題、狀態與結果列，中間兩欄各自捲動。 */
+#zone-page:not([hidden]){height:100dvh;min-height:0;display:flex;flex-direction:column}
+#zone-page .zv-head,#zone-page .zv-foot{flex:none}
+#zone-page .zv-main{flex:1;min-height:0;grid-template-rows:minmax(0,1fr)}
+#zone-page .zv-mapwrap{overflow:auto}
+#zone-page .zv-side{min-height:0;padding:0}
+#zone-page .zv-notes{min-height:0;max-height:15vh;overflow:auto}
+#zone-page .zv-foot{position:static;min-height:64px;margin:8px 24px 12px}
+#zone-page .zv-edit{height:100%;min-height:0;display:flex;flex-direction:column;padding:0;overflow:hidden;border-width:1.5px}
+#zone-page .zv-panel-head{padding:12px 16px 10px;border-bottom:1px solid var(--line)}
+#zone-page .zv-ehead small{font-size:13px;font-weight:400;color:var(--soft);margin-left:.6em}
+#zone-page .zv-modes{display:flex;border:1px solid var(--ink);border-radius:7px;overflow:hidden;margin-top:7px}
+#zone-page .zv-segment{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;position:relative;margin:0;padding:6px 0;color:var(--ink);cursor:pointer}
+#zone-page .zv-segment+.zv-segment{border-left:1px solid var(--ink)}
+#zone-page .zv-segment:has(:checked){background:var(--ink);color:white}
+#zone-page .zv-segment input{position:absolute;width:1px;height:1px;left:4px;top:4px;margin:0;padding:0;border:0;opacity:0;z-index:1}
+#zone-page .zv-segment:focus-within{outline:2px solid var(--search);outline-offset:-3px}
+#zone-page .zv-depth::placeholder{color:#495c66;opacity:1}
+#zone-page .zv-panel-body{flex:1;min-height:0;overflow:auto;padding:10px 16px}
+#zone-page .zv-editfoot{flex:none;margin:0;border-top:1px solid var(--line);padding:10px 16px}
+#zone-page .zv-empty{margin:0;color:var(--soft)}
+#zone-page .zv-form{border:0;background:white;padding:0;margin:0}
+#zone-page .zv-form .zv-deepest,#zone-page .zv-deepest{border:0;margin:4px 0 8px}
+#zone-page .zv-find{width:100%;font:inherit;padding:6px 9px;border:1px solid #97aeb8;border-radius:6px}
+#zone-page .zv-candidate{display:block;border:0;padding:0}
+#zone-page .zv-material{width:100%;display:grid;grid-template-columns:16px 34px minmax(0,1fr) 72px;gap:8px;align-items:center;
+  text-align:left;padding:7px 5px;background:#fff;color:var(--ink);border:0;border-bottom:1px solid #dce3e3;border-radius:0;font:inherit;font-size:14px}
+#zone-page .zv-material[hidden],#zone-page .zv-candidate[hidden]{display:none}
+#zone-page .zv-material:hover,#zone-page .zv-material:focus-visible{background:#eef5f7}
+#zone-page .zv-material[aria-checked=true],#zone-page .zv-material[aria-checked=mixed]{background:#fff8e6}
+#zone-page .zv-mark{width:16px;height:16px;border:1.5px solid var(--ink);border-radius:3px;display:grid;place-content:center}
+#zone-page .zv-material[role=radio] .zv-mark{border-radius:50%}
+#zone-page .zv-material[aria-checked=true] .zv-mark{background:var(--ink);color:white}
+#zone-page .zv-material[role=radio][aria-checked=true] .zv-mark{box-shadow:inset 0 0 0 3px #fff}
+#zone-page .zv-material[role=checkbox][aria-checked=true] .zv-mark::after{content:"✓"}
+#zone-page .zv-material[aria-checked=mixed] .zv-mark::after{content:"−"}
+#zone-page .zv-material .zv-cutaway{grid-area:auto;margin:0;align-self:center}
+#zone-page .zv-material-text{line-height:1.35;overflow-wrap:anywhere}
+#zone-page .zv-material-text strong{font-weight:550}
+#zone-page .zv-material-text small{display:block;font-size:13px;color:#495c66}
+#zone-page .zv-material-text .zv-kind{margin-left:5px}
+#zone-page svg.zv-spark{width:72px;height:26px;border:0;background:none;color:#15617b}
+#zone-page .zv-form details.zv-row-options{border:0;margin:0;padding:0 5px 2px 63px;background:#fff8e6}
+#zone-page .zv-form .zv-row-options summary{font-size:13px;font-weight:400}
+#zone-page .zv-build{width:100%;margin:10px 0;padding:9px 12px;border:1px dashed #15617b;border-radius:8px;color:#155972;background:#f2f8fa;text-align:left;font:inherit}
+#zone-builder{position:fixed;inset:56px 0 0 auto;margin:0;width:min(700px,100vw);height:calc(100dvh - 56px);
+  max-width:100%;max-height:none;box-sizing:border-box;padding:0;border:0;border-left:1px solid #344750;background:white;box-shadow:-12px 0 30px #17212a22}
+#zone-builder[open]{display:flex;flex-direction:column}
+#zone-builder::backdrop{background:#17212a44}
+#zone-builder .zv-drawer-head{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid #d5e0e4}
+#zone-builder .zv-drawer-head[hidden]{display:none}
+#zone-builder iframe{width:100%;flex:1;min-height:0;border:0}
+#zone-page .zv-main{grid-template-columns:minmax(0,1fr) clamp(350px,31vw,440px)}
+#zone-page .zv-mapwrap{max-width:100%}
+#zone-page .zv-row-options summary{width:fit-content;margin-left:auto}
+#zone-page .zv-material .zv-covered-why{grid-column:3/-1;font-size:13px}
+#zone-page .zv-candidate:has(.zv-row-options:not([open])){padding-right:38px;background:#fff8e6}
+#zone-page .zv-form details.zv-row-options:not([open]){position:absolute;right:3px;top:8px;padding:0}
+#zone-page .zv-slab.porous{background:repeating-linear-gradient(35deg,transparent 0 4px,#c5a75a 4px 5px,transparent 5px 9px),#f6e7b0}
+#zone-page .zv-edit > .zv-build{flex:none;width:calc(100% - 32px);margin:4px 16px 8px}
+
+#zone-page .zv-candidate:not(:hover):not(:focus-within) .zv-row-options:not([open]) summary{clip-path:inset(50%);pointer-events:none}
+
+#zone-page #zone-groups {font-size:14px;color:var(--ink)}
+#zone-page #zone-groups > summary {cursor:pointer}
+#zone-page .zv-search-group, #zone-page .zv-group-rule, #zone-page .zv-group-exceptions {border-top:1px solid var(--line);padding:6px 0}
+#zone-page .zv-group-choices {margin:4px 0;padding-left:18px}
+#zone-page .zv-group-choices small {display:block;font-size:13px}
+#zone-page .zv-owned {font-size:13px}
+
+#zone-page .zv-material:disabled {opacity:1;background:#f2f4f4;color:#46545b}
+#zone-page .zv-material[data-covered]{cursor:default}
+#zone-page #zone-groups .zv-num {font-size:13px}
+
+/* 分區頁借用輸入頁的立面圖；左欄可捲，完成鈕在同一欄頂端。 */
+#zone-page :is(.zv-side,.zv-foot)[inert]{opacity:.55}
+#zone-page #elevation-panel{overflow:auto;min-width:0}
+#zone-page .cutrow{display:block}
+#zone-page #elevation-walls,#zone-page #elevation-list,#zone-page .fact-editor,
+#zone-page #elevation-original-line,#zone-page #elevation-depth-line{display:none}
+#zone-page .walls-row{position:sticky;top:0;z-index:2;align-items:center;gap:10px;padding:2px 0 8px;background:var(--paper)}
+#zone-page .zv-cut-title{font-size:17px}
+#zone-page #elevation-symmetry{margin:0}
+#zone-page #elevation-axis-words{display:none}
+#zone-page #elevation-clear,#zone-page .zv-cut-done{padding:5px 12px;border-radius:7px;font-size:14px}
+#zone-page #elevation-clear{background:white;color:var(--ink);border:1px solid #97aeb8;text-decoration:none}
+#zone-page .zv-cut-done{margin-left:auto;background:var(--ink);color:white}
+#zone-page .wallline{margin:2px 0;color:var(--soft)}
+#zone-page #elevation svg{width:100%;height:auto;max-height:65dvh;margin:2.75rem 0 0;border:0;background:transparent}
+/* 提示與圖疊在同一格，拖曳中提示出現或收起都不能推動滑鼠下的牆面。 */
+#zone-page #elevation-banner{position:relative}
+#zone-page #elevation-note{margin:4px 0}
+#zone-page #elevation-note[data-repeated]{display:none}
