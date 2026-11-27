@@ -137,33 +137,62 @@ def solve_shell_responses(
     from pydiso.mkl_solver import MKLPardisoSolver
 
     result = np.zeros((len(frequencies_hz), len(receivers)), dtype=np.complex128)
+    pattern = _Pattern(operators.stiffness, operators.mass, operators.layer_mass)
     solver = None
-    anchor = None
     for row_index, frequency in enumerate(frequencies_hz):
         row_impedances = {name: row[row_index] for name, row in impedances.items()}
-        system = _system(operators, row_impedances, float(frequency), density_kg_m3, sound_speed_m_s)
-        if solver is None or anchor is None:
+        system = pattern.system(row_impedances, float(frequency), density_kg_m3, sound_speed_m_s)
+        if solver is None:
             solver = MKLPardisoSolver(system, matrix_type="complex_symmetric", factor=False)
-            anchor = system
-        # pydiso 只比非零個數，非零位置要自己核，跟長方體那一路同一道關。
-        if not (np.array_equal(system.indptr, anchor.indptr) and np.array_equal(system.indices, anchor.indices)):
-            raise ValueError("有限元素矩陣非零位置與第一個頻點不同")
         solver.refactor(system)
         pressure = solver.solve(load)
         result[row_index] = [complex((probe @ pressure)[0]) for probe in probes]
     return result
 
 
-def _system(operators: ShellOperators, impedances: Mapping[str, complex | None], frequency_hz: float,
-            density_kg_m3: float, sound_speed_m_s: float) -> csr_matrix[np.complex128]:
-    """一個頻點的 ``K - k²M + jωρ Σ B_l/Z_l``；每個圖層矩陣都疊上去（硬牆乘 0），非零位置每頻一樣。"""
-    omega = 2.0 * math.pi * frequency_hz
-    system = (operators.stiffness - (omega / sound_speed_m_s) ** 2 * operators.mass).astype(np.complex128)
-    for name, z in impedances.items():
-        coefficient = 0.0 if z is None else 1j * omega * density_kg_m3 / z
-        system = system + operators.layer_mass[name].astype(np.complex128) * coefficient
-    result = csr_matrix(system, dtype=np.complex128)
-    result.sum_duplicates()
-    result.sort_indices()
-    return csr_matrix((np.array(result.data, order="C"), np.array(result.indices, order="C"),
-                       np.array(result.indptr, order="C")), shape=result.shape)
+class _Pattern:
+    """每頻系統矩陣共用一個固定的非零位置（K、M、全部圖層的聯集）。
+
+    pydiso 的 refactor 只比非零個數；若某頻剛好有一格加起來精確為零，scipy 相加會把它丟掉，
+    位置就跟第一頻不同。所以先把每個運算子的每一格對到聯集裡的位置，每頻只填數值、不重排位置。
+    圖層照名字排序後依序疊加，呼叫端字典的次序不影響末位。
+    """
+
+    def __init__(self, stiffness: csr_matrix[np.float64], mass: csr_matrix[np.float64],
+                 layer_mass: Mapping[str, csr_matrix[np.float64]]) -> None:
+        union = abs(stiffness) + abs(mass)
+        for name in sorted(layer_mass):
+            union = union + abs(layer_mass[name])
+        union = _csr(union)
+        # PARDISO 吃 32 位元索引；超過就明說，不讓索引溢位成負數。
+        if union.nnz >= np.iinfo(np.int32).max:
+            raise ValueError(f"系統矩陣非零格數 {union.nnz} 超過 PARDISO 32 位元索引的上限")
+        self.indices = np.array(union.indices, dtype=np.int32, order="C")
+        self.indptr = np.array(union.indptr, dtype=np.int32, order="C")
+        self.shape = union.shape
+        position = csr_matrix((np.arange(1, union.nnz + 1, dtype=np.float64), union.indices, union.indptr),
+                              shape=union.shape)
+
+        def slots(matrix: csr_matrix[np.float64]) -> tuple[NDArray[np.int64], NDArray[np.float64]]:
+            coo = matrix.tocoo()
+            if not coo.nnz:
+                return np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.float64)
+            where = np.asarray(position[coo.row, coo.col], dtype=np.float64).ravel().astype(np.int64) - 1
+            return where, np.asarray(coo.data, dtype=np.float64)
+
+        self.stiffness = slots(stiffness)
+        self.mass = slots(mass)
+        self.layers = {name: slots(layer_mass[name]) for name in sorted(layer_mass)}
+
+    def system(self, impedances: Mapping[str, complex | None], frequency_hz: float,
+               density_kg_m3: float, sound_speed_m_s: float) -> csr_matrix[np.complex128]:
+        """一個頻點的 ``K - k²M + jωρ Σ B_l/Z_l``，非零位置每頻一樣。"""
+        omega = 2.0 * math.pi * frequency_hz
+        data = np.zeros(len(self.indices), dtype=np.complex128)
+        np.add.at(data, self.stiffness[0], self.stiffness[1])
+        np.add.at(data, self.mass[0], -((omega / sound_speed_m_s) ** 2) * self.mass[1])
+        for name, (where, values) in self.layers.items():
+            z = impedances[name]
+            if z is not None:
+                np.add.at(data, where, (1j * omega * density_kg_m3 / z) * values)
+        return csr_matrix((data, self.indices.copy(), self.indptr.copy()), shape=self.shape)
