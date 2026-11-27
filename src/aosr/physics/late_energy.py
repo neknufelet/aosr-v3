@@ -356,40 +356,32 @@ def _form_factors(patches: _Patches) -> NDArray[np.float64]:
     cosine_j = np.einsum("jk,ijk->ij", patches.normals, -direction)
     raw = cosine_i * cosine_j * patches.areas[None, :] / (np.pi * safe_distance_squared)
     raw = np.where(valid_distance & (raw > 0.0), raw, 0.0)
-    return _normalized_form_factors(raw, patches.areas)
-
-
-def _normalized_form_factors(raw: NDArray[np.float64], areas: NDArray[np.float64]) -> NDArray[np.float64]:
-    """原始形狀因子逐列正規化，再對稱化成交換矩陣並雙邊縮放到列和等於面積（守互易與列和）。
-
-    長方體那一路（中心點）與房間殼那一路（多點積分、含遮擋）共用這一份，兩邊不各寫一份。
-    """
     raw_row_sum = np.sum(raw, axis=1)
     if np.any(raw_row_sum <= 0.0):
         raise ValueError("形狀因子有無法正規化的空列")
     original = raw / raw_row_sum[:, None]
-    exchange = areas[:, None] * original
+    exchange = patches.areas[:, None] * original
     balanced = (exchange + exchange.T) / 2.0
     deviation = float(
-        np.max(np.abs(np.sum(balanced, axis=1) - areas) / areas)
+        np.max(np.abs(np.sum(balanced, axis=1) - patches.areas) / patches.areas)
     )
     while True:
         row_sum = np.sum(balanced, axis=1)
         if np.any(row_sum <= 0.0):
             raise ValueError("交換矩陣有無法平衡的空列")
-        scale = np.sqrt(areas / row_sum)
+        scale = np.sqrt(patches.areas / row_sum)
         candidate = balanced * np.multiply.outer(scale, scale)
         candidate_deviation = float(
             np.max(
-                np.abs(np.sum(candidate, axis=1) - areas)
-                / areas
+                np.abs(np.sum(candidate, axis=1) - patches.areas)
+                / patches.areas
             )
         )
         if not candidate_deviation < deviation:
             break
         balanced = candidate
         deviation = candidate_deviation
-    return np.asarray(balanced / areas[:, None], dtype=np.float64)
+    return np.asarray(balanced / patches.areas[:, None], dtype=np.float64)
 
 
 def _wall_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
