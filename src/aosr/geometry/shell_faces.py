@@ -20,7 +20,7 @@ from typing import TypeAlias
 import numpy as np
 from numpy.typing import NDArray
 
-from aosr.geometry.room_shell import LayerTriangle, RoomShell
+from aosr.geometry.room_shell import LayerTriangle, RoomShell, _inside_mask
 
 
 FloatArray: TypeAlias = NDArray[np.float64]
@@ -35,13 +35,15 @@ _BARYCENTRIC_SLACK = 1e-9
 
 @dataclass(frozen=True)
 class Occluders:
-    """會擋線段的三角形，分成一組一組（一個造型一組、外殼凹凸的每個平面一組），每組帶外接盒。
+    """會擋線段的三角形，一個平面一組（造型的每一面、外殼凹凸的每一面），每組帶外接盒與平面序號。
 
     先用外接盒篩：線段碰不到盒子就不必跟那一組的三角形一個一個比，答案不變、只是快。
+    平面序號讓線段跳過「自己兩端所在的那個平面」：從一個平面出發的線段不可能再穿過同一個平面。
     """
 
     groups: tuple[FloatArray, ...]
     boxes: FloatArray
+    planes: IntArray
 
     @property
     def triangle_count(self) -> int:
@@ -49,12 +51,13 @@ class Occluders:
         return sum(len(group) for group in self.groups)
 
 
-def make_occluders(groups: tuple[FloatArray, ...]) -> Occluders:
-    """把幾組三角形包成 :class:`Occluders`；空的組丟掉。"""
-    kept = tuple(group for group in groups if len(group))
-    boxes = np.array([(group.reshape(-1, 3).min(axis=0), group.reshape(-1, 3).max(axis=0)) for group in kept],
+def make_occluders(groups: tuple[tuple[int, FloatArray], ...]) -> Occluders:
+    """把幾組（平面序號, 三角形）包成 :class:`Occluders`；空的組丟掉。"""
+    kept = tuple((plane, group) for plane, group in groups if len(group))
+    boxes = np.array([(group.reshape(-1, 3).min(axis=0), group.reshape(-1, 3).max(axis=0)) for _plane, group in kept],
                      dtype=np.float64).reshape(-1, 2, 3)
-    return Occluders(kept, boxes)
+    planes = np.array([plane for plane, _group in kept], dtype=np.int64)
+    return Occluders(tuple(group for _plane, group in kept), boxes, planes)
 
 
 @dataclass(frozen=True)
@@ -64,7 +67,9 @@ class ShellFaces:
     ``layers`` 是排序後的材料圖層名，``layer_of`` 是每個三角形在 ``layers`` 裡的序號；
     ``plane_of`` 是每個三角形所屬平面；平面 ``p`` 是 ``plane_normals[p]·x = plane_offsets[p]``，
     法線朝空氣。``occluders`` 是會擋線段的三角形（造型全部；外殼只有不在支撐平面上的那些）。
-    ``corners`` 前 ``shell_triangles`` 個是外殼，其餘是房內造型。
+    同一個平面只收同一個物件（外殼、或某一個造型）的三角形。
+    ``corners`` 前 ``shell_triangles`` 個是外殼，其餘是房內造型；``supporting`` 是每個平面是不是
+    整個外殼都在它朝空氣那一側（:func:`_supporting_planes`）。
     """
 
     corners: FloatArray
@@ -76,6 +81,7 @@ class ShellFaces:
     occluders: Occluders
     shell_convex: bool
     shell_triangles: int
+    supporting: BoolArray
 
     @property
     def plane_count(self) -> int:
@@ -111,19 +117,24 @@ def _unit_normals(corners: FloatArray) -> tuple[FloatArray, FloatArray]:
     return normals, twice / 2.0
 
 
-def _group_planes(corners: FloatArray, angle_deg: float, offset_m: float) -> IntArray:
-    """大的三角形先開組；夾角與到該組平面的距離都在界內就併進去（同 room_shell.plane_groups 的判法）。"""
+def _group_planes(corners: FloatArray, objects: IntArray, angle_deg: float, offset_m: float) -> IntArray:
+    """大的三角形先開組；夾角與到該組平面的距離都在界內就併進去（同 room_shell.plane_groups 的判法）。
+
+    只在同一個物件（外殼、或同一個造型）裡面合併：貼牆幾毫米的薄板正面若跟牆併成一面，擬合出來的
+    平面會落在板子正面後面，反射點就被板子自己擋掉。
+    """
     normals, areas = _unit_normals(corners)
     centers = corners.mean(axis=1)
     cos_limit = math.cos(math.radians(angle_deg))
     group_normals: list[FloatArray] = []
     group_points: list[FloatArray] = []
+    group_objects: list[int] = []
     plane_of = np.full(len(corners), -1, dtype=np.int64)
     for index in np.argsort(-areas, kind="stable"):
         if areas[index] == 0.0:
             raise ValueError("房間殼裡有面積為零的三角形，請先過匯入檢查")
-        for group, (normal, point) in enumerate(zip(group_normals, group_points, strict=True)):
-            if (float(normal @ normals[index]) >= cos_limit
+        for group, (normal, point, owner) in enumerate(zip(group_normals, group_points, group_objects, strict=True)):
+            if (owner == objects[index] and float(normal @ normals[index]) >= cos_limit
                     and abs(float(normal @ (centers[index] - point))) <= offset_m):
                 plane_of[index] = group
                 break
@@ -131,6 +142,7 @@ def _group_planes(corners: FloatArray, angle_deg: float, offset_m: float) -> Int
             plane_of[index] = len(group_normals)
             group_normals.append(normals[index])
             group_points.append(centers[index])
+            group_objects.append(int(objects[index]))
     return plane_of
 
 
@@ -172,17 +184,36 @@ def shell_faces(room: RoomShell, angle_deg: float, offset_m: float, tol_m: float
         raise ValueError("房間殼有無效的頂點座標，請先過匯入檢查")
     layers = tuple(sorted({t.layer for t in every}))
     layer_of = np.array([layers.index(t.layer) for t in every], dtype=np.int64)
-    plane_of = _group_planes(corners, angle_deg, offset_m)
+    objects = np.concatenate([np.zeros(len(shell), dtype=np.int64)]
+                             + [np.full(len(solid.triangles), number, dtype=np.int64)
+                                for number, solid in enumerate(room.solids, start=1)])
+    plane_of = _group_planes(corners, objects, angle_deg, offset_m)
     count = int(plane_of.max()) + 1
     plane_normals, plane_offsets = _fit_planes(corners, plane_of, count)
     supporting = _supporting_planes(shell, plane_normals, plane_offsets, offset_m)
     convex = bool(supporting[np.unique(plane_of[:len(shell)])].all())
     # 擋得到東西的：造型的全部三角形，加上外殼躺在「非支撐平面」上的那些（凹進去、凸出來的部分）。
-    shell_planes = plane_of[:len(shell)]
-    groups = [shell[shell_planes == plane] for plane in np.unique(shell_planes) if not supporting[plane]]
-    groups.extend(corner_array(solid.triangles) for solid in room.solids)
+    shell_planes = set(plane_of[:len(shell)].tolist())
+    groups = [(int(plane), corners[plane_of == plane]) for plane in np.unique(plane_of)
+              if int(plane) not in shell_planes or not supporting[plane]]
     return ShellFaces(corners, layers, layer_of, plane_of, plane_normals, plane_offsets,
-                      make_occluders(tuple(groups)), convex, len(shell))
+                      make_occluders(tuple(groups)), convex, len(shell), supporting)
+
+
+def points_inside_shell(points: FloatArray, faces: ShellFaces, tol_m: float) -> BoolArray:
+    """每個點是不是在外殼裡面、而且離外殼每一面都超過 ``tol_m``。
+
+    先看支撐平面（整個外殼都在它同一側的那些）：在任何一個的背面或貼著它就不在房內。外殼不是凸的
+    時候再用匯入檢查同一支射線奇偶判斷補上凹進去的那幾塊。
+    """
+    shell_planes = np.unique(faces.plane_of[:faces.shell_triangles])
+    support = shell_planes[faces.supporting[shell_planes]]
+    heights = points @ faces.plane_normals[support].T - faces.plane_offsets[support][None, :]
+    inside = np.asarray((heights > tol_m).all(axis=1), dtype=np.bool_)
+    if faces.shell_convex or not inside.any():
+        return inside
+    triangles = [LayerTriangle("", tuple(a), tuple(b), tuple(c)) for a, b, c in faces.corners[:faces.shell_triangles]]
+    return np.asarray(inside & _inside_mask(points, triangles, tol_m), dtype=np.bool_)
 
 
 def locate_on_planes(points: FloatArray, planes: IntArray, faces: ShellFaces, tol_m: float) -> IntArray:
@@ -231,7 +262,11 @@ def _boxes_touched(starts: FloatArray, ends: FloatArray, box: FloatArray, tol_m:
 
 
 def segments_hit_triangles(starts: FloatArray, ends: FloatArray, triangles: FloatArray, tol_m: float) -> BoolArray:
-    """Möller–Trumbore：每條線段是不是從中間穿過這幾個三角形之一。"""
+    """Möller–Trumbore：每條線段（含兩端外 ``tol_m`` 以內）有沒有碰到這幾個三角形之一。
+
+    兩端剛好落在別的面上也算碰到（例如落地柱子底面正下方的地板點）；線段自己兩端所在的平面由
+    呼叫端先排除，不靠這裡的容差。
+    """
     blocked = np.zeros(len(starts), dtype=np.bool_)
     e1 = triangles[:, 1] - triangles[:, 0]
     e2 = triangles[:, 2] - triangles[:, 0]
@@ -252,21 +287,26 @@ def segments_hit_triangles(starts: FloatArray, ends: FloatArray, triangles: Floa
         t = inv * np.einsum("tk,stk->st", e2, q)
         margin = (tol_m / np.maximum(length, tol_m))[:, None]
         hit = (usable & (u >= -_BARYCENTRIC_SLACK) & (v >= -_BARYCENTRIC_SLACK)
-               & (u + v <= 1.0 + _BARYCENTRIC_SLACK) & (t > margin) & (t < 1.0 - margin))
+               & (u + v <= 1.0 + _BARYCENTRIC_SLACK) & (t > -margin) & (t < 1.0 + margin))
         blocked[begin:begin + step] = hit.any(axis=1)
     return blocked
 
 
-def segments_blocked(starts: FloatArray, ends: FloatArray, occluders: Occluders, tol_m: float) -> BoolArray:
-    """每條線段是不是從中間穿過任何一個擋的三角形。
+def segments_blocked(starts: FloatArray, ends: FloatArray, occluders: Occluders, tol_m: float,
+                     start_planes: IntArray | None = None, end_planes: IntArray | None = None) -> BoolArray:
+    """每條線段是不是穿過（或一端貼著）任何一個擋的三角形。
 
-    兩端離面不到 ``tol_m`` 的交點不算（反射點本來就在面上）；跟三角形共平面的線段不算擋。
+    ``start_planes``／``end_planes`` 是每條線段兩端所在的平面（聲源、接收點填 -1）；那兩個平面的三角形
+    不拿來擋這一條（從平面上出發的線段不會再穿過同一個平面）。跟三角形共平面的線段不算擋。
     """
     blocked = np.zeros(len(starts), dtype=np.bool_)
-    for group, box in zip(occluders.groups, occluders.boxes, strict=True):
-        candidates = np.flatnonzero(~blocked)
+    none = np.full(len(starts), -1, dtype=np.int64)
+    first = none if start_planes is None else start_planes
+    last = none if end_planes is None else end_planes
+    for group, box, plane in zip(occluders.groups, occluders.boxes, occluders.planes, strict=True):
+        candidates = np.flatnonzero(~blocked & (first != plane) & (last != plane))
         if not len(candidates):
-            break
+            continue
         candidates = candidates[_boxes_touched(starts[candidates], ends[candidates], box, tol_m)]
         if len(candidates):
             blocked[candidates] = segments_hit_triangles(starts[candidates], ends[candidates], group, tol_m)

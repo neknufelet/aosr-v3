@@ -22,7 +22,7 @@ from numpy.typing import NDArray
 
 from aosr.config.shell_lane import SHELL_MAX_IMAGE_SOURCES
 from aosr.geometry.shell_faces import (
-    BoolArray, FloatArray, IntArray, ShellFaces, locate_on_planes, segments_blocked,
+    BoolArray, FloatArray, IntArray, ShellFaces, locate_on_planes, points_inside_shell, segments_blocked,
 )
 
 
@@ -96,6 +96,7 @@ def _trace(level: _Level, receiver: FloatArray, source: FloatArray, faces: Shell
     triangles = np.full((count, order), -1, dtype=np.int64)
     cos = np.zeros((count, order), dtype=np.float64)
     points = np.zeros((count, order, 3), dtype=np.float64)
+    previous = np.full(count, -1, dtype=np.int64)
     for bounce in range(order - 1, -1, -1):
         plane = level.chains[:, bounce]
         image = level.images[:, bounce + 1, :]
@@ -111,14 +112,16 @@ def _trace(level: _Level, receiver: FloatArray, source: FloatArray, faces: Shell
         triangles[live, bounce] = found
         valid[live[found < 0]] = False
         live = np.flatnonzero(valid)
-        stopped = segments_blocked(point[live], hit[live], faces.occluders, tol_m)
+        stopped = segments_blocked(point[live], hit[live], faces.occluders, tol_m, previous[live], plane[live])
         blocked[live[stopped]] = True
         valid[live[stopped]] = False
         cos[:, bounce] = np.abs(along) / np.linalg.norm(toward, axis=1)
         points[:, bounce, :] = hit
         point = np.where(valid[:, None], hit, point)
+        previous = plane
     live = np.flatnonzero(valid)
-    stopped = segments_blocked(point[live], np.repeat(source[None, :], len(live), axis=0), faces.occluders, tol_m)
+    stopped = segments_blocked(point[live], np.repeat(source[None, :], len(live), axis=0), faces.occluders, tol_m,
+                               previous[live], None)
     blocked[live[stopped]] = True
     valid[live[stopped]] = False
     return _Traced(valid, triangles, cos, points, blocked)
@@ -128,9 +131,7 @@ def _check_point(name: str, point: tuple[float, float, float], faces: ShellFaces
     values = np.asarray(point, dtype=np.float64)
     if values.shape != (3,) or not np.isfinite(values).all():
         raise ValueError(f"{name}座標必須是三個有限數")
-    heights = faces.plane_normals @ values - faces.plane_offsets
-    shell_planes = np.unique(faces.plane_of[:faces.shell_triangles])
-    if faces.shell_convex and bool((heights[shell_planes] <= tol_m).any()):
+    if not bool(points_inside_shell(values[None, :], faces, tol_m)[0]):
         raise ValueError(f"{name}不在房間裡面（貼在牆上或在牆外）")
     return values
 
@@ -150,7 +151,7 @@ def shell_path_table(
     src = _check_point("聲源", source, faces, tol_m)
     rcv = _check_point("接收點", receiver, faces, tol_m)
     if bool(segments_blocked(src[None, :], rcv[None, :], faces.occluders, tol_m)[0]):
-        raise ValueError("喇叭到聽位的直線被房內造型擋住了，請挪喇叭或聽位")
+        raise ValueError("喇叭到聽位的直線被擋住了（房內造型或凹進去的牆），請挪喇叭或聽位")
     level = _Level(np.zeros((1, 0), dtype=np.int64), src[None, None, :].copy())
     rows: list[tuple[int, IntArray, IntArray, FloatArray, FloatArray, FloatArray]] = []
     blocked_count = 0
