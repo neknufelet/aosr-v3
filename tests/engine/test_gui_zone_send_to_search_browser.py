@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
 from tests.engine._input_page_steps import scripted_open_scheme
@@ -36,7 +37,7 @@ def _wait_routes(page: Page, held: list[Route], count: int) -> None:
 
 
 def _press_search_with_one_more_zone_ready(page: Page, sent: list[str]) -> tuple[dict[str, float], dict[str, float]]:
-    """一區已經由程式最佳化；面板上再點好一區與做法、先不套用。回圖上另一區與套用鈕的位置（等一下拿真滑鼠去點）。"""
+    """一區已經由程式最佳化；另一區切換做法後又選回原樣。回圖上另一區與套用鈕的位置（等一下拿真滑鼠去點）。"""
     _open_overview(page)
     _settled(page)
     _click_zone(page, "yL/z3")
@@ -44,6 +45,8 @@ def _press_search_with_one_more_zone_ready(page: Page, sent: list[str]) -> tuple
     _apply(page)
     _click_zone(page, "y0/auto2")
     page.locator("#zone-panel-mode-search").check()
+    page.locator("#zone-panel-mode-keep_original").check()
+    expect(page.locator("#zone-page-search")).to_have_text("拿去搜尋")
     expect(page.locator("#zone-panel-apply")).to_be_enabled()
     other = page.locator("#zone-map [data-wall='xL'][data-zone='auto1'] .zv-fill").bounding_box()
     button = page.locator("#zone-panel-apply").bounding_box()
@@ -53,6 +56,7 @@ def _press_search_with_one_more_zone_ready(page: Page, sent: list[str]) -> tuple
 
 
 def _mouse_cannot_change_anything(page: Page, boxes: tuple[dict[str, float], dict[str, float]], sent: list[str]) -> None:
+    expect(page.locator("#zone-panel-apply")).to_be_visible()
     for box in boxes:
         page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     page.wait_for_timeout(200)
@@ -154,10 +158,10 @@ def test_the_words_of_a_blocked_send_to_search_are_still_there_after_what_blocke
         page.on("request", lambda request: saved.append(request.url) if request.method == "PUT" else None)
         limits = _hold(page, "**/api/zone-limits")
         _click_zone(page, "y0/auto2")
-        page.locator("#zone-panel-mode-search").check()
         page.evaluate("void refreshZoneLimits()")
         _wait_held(page, limits, 1)
         page.locator("#zone-page-search").click()
+        page.locator("#zone-panel-mode-search").check()
         batch = _hold(page, "**/api/zone-material/batch")
         plan = _hold(page, "**/api/plan")
         page.locator("#zone-panel-apply").click()
@@ -206,10 +210,10 @@ def _blocked_with_the_batch_still_out(page: Page) -> tuple[_Held, _Held]:
     _apply(page)
     limits = _hold(page, "**/api/zone-limits")
     _click_zone(page, "y0/auto2")
-    page.locator("#zone-panel-mode-search").check()
     page.evaluate("void refreshZoneLimits()")
     _wait_held(page, limits, 1)
     page.locator("#zone-page-search").click()
+    page.locator("#zone-panel-mode-search").check()
     batch = _hold(page, "**/api/zone-material/batch")
     plan = _hold(page, "**/api/plan")
     page.locator("#zone-panel-apply").click()
@@ -293,9 +297,7 @@ def test_the_blocked_words_do_not_follow_into_another_scheme(tmp_path: Path, bro
 
 def test_a_scheme_swapped_in_by_the_page_itself_before_the_jump_is_not_what_the_search_page_opens(
         tmp_path: Path, browser: Browser) -> None:
-    """「拿去搜尋」存好、結果清單還在重讀（鎖著，真人按不到）：頁面程式自己發的點擊走得到——先發「套用」
-    （那一批做完會把鎖的旗子放掉，#1188 之前就有、這次不修），再發「打開」另一份。清單回來後不准跳去另一份的搜尋頁：
-    留在這一頁照講，原本那一份照樣存好、是按下那一刻那一份。"""
+    """存檔完成、還在等結果清單時，由頁面載入另一份方案。原方案應只存下已套用的區，並留下取消跳轉的原因。"""
     _prepare(tmp_path)
     _write(tmp_path, ZONE_NAMING_SCHEME | {"scheme_id": OTHER})
     with _serve(tmp_path) as base, _open(browser, base) as watched:
@@ -311,8 +313,10 @@ def test_a_scheme_swapped_in_by_the_page_itself_before_the_jump_is_not_what_the_
         assert design.value.ok
         _wait_routes(page, results, 1)
         assert page.evaluate("[document.getElementById('zone-page').inert, inputBusy]") == [True, True]
-        with page.expect_response("**/api/zone-material/batch"):
+        assert sent == []
+        with page.expect_response("**/api/zone-material/batch") as batch:
             page.locator("#zone-panel-apply").evaluate("node => node.click()")
+        assert batch.value.ok and len(sent) == 1
         page.wait_for_function("!inputBusy")
         scripted_open_scheme(page, OTHER)
         page.wait_for_function("name => scheme.scheme_id === name && !inputBusy", arg=OTHER)
@@ -324,3 +328,69 @@ def test_a_scheme_swapped_in_by_the_page_itself_before_the_jump_is_not_what_the_
     stored = json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text(encoding="utf-8"))["zones"]
     assert stored == {"yL": {"z3": SEARCH}}
     assert not (tmp_path / "designs" / f"{OTHER}.json").exists()
+
+
+def test_refused_apply_keeps_draft_and_never_sends_search(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _click_zone(page, "yL/z1")
+        page.locator("#zone-panel-mode-search").check()
+        sent = []
+        page.on("request", lambda r: sent.append(r.url) if r.method == "PUT" or "/gradient?" in r.url else None)
+        page.route("**/api/zone-material/batch", lambda route: route.fulfill(status=400, json={"error": "自編材料遭拒"}))
+        page.get_by_role("button", name="套用並拿去搜尋").click()
+        expect(page.locator("#zone-page-note")).to_contain_text("自編材料遭拒")
+        expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "yL/z1")
+        expect(page.locator("#zone-panel-apply")).to_be_enabled()
+        page.wait_for_load_state("networkidle")
+        assert sent == [] and page.url == base + "/"
+
+
+@pytest.mark.parametrize("endpoint", ["plan", "zone-limits"])
+def test_combined_search_holds_selection_until_check_finishes(tmp_path: Path, browser: Browser, endpoint: str) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "yL/z1")
+        page.locator("#zone-panel-mode-search").check()
+        other = page.locator("#zone-map [data-wall=yL][data-zone=z2] .zv-fill").bounding_box()
+        assert other is not None
+        held = _hold(page, f"**/api/{endpoint}")
+        saved = []
+        page.on("request", lambda r: saved.append(r.url) if r.method == "PUT" else None)
+        page.get_by_role("button", name="套用並拿去搜尋").click()
+        _wait_held(page, held, 1)
+        page.mouse.click(other["x"] + other["width"] / 2, other["y"] + other["height"] / 2)
+        expect(page.locator("#zone-panel")).to_have_count(0)
+        assert page.locator("#zone-map").evaluate("map => Boolean(map.closest('[inert]'))")
+        assert saved == []
+        held.release()
+        page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
+        assert len(saved) == 2 and watched.page_errors == []
+    assert json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text())["zones"] == {"yL": {"z1": SEARCH}}
+
+
+def test_combined_batch_reply_cannot_write_into_replacement_scheme(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    _write(tmp_path, ZONE_NAMING_SCHEME | {"scheme_id": OTHER})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "yL/z1")
+        page.locator("#zone-panel-mode-search").check()
+        batch = _hold(page, "**/api/zone-material/batch")
+        page.get_by_role("button", name="套用並拿去搜尋").click()
+        _wait_held(page, batch, 1)
+        assert page.evaluate("name => openScheme(name, true)", OTHER)
+        state = "() => [scheme.scene.surface_zones_by_wall, zoneDesign.zones]"
+        before = page.evaluate(state)
+        batch.release()
+        page.wait_for_function("!document.body.inert")
+        assert page.evaluate(state) == before
+        assert page.evaluate("scheme.scheme_id") == OTHER and page.url == base + "/"
+        assert not (tmp_path / "designs" / f"{OTHER}.json").exists()

@@ -15,6 +15,8 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page, expect
 
+from tests.engine._input_page_steps import open_zone_page
+from tests.engine._zone_material_steps import open_groups
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -59,8 +61,7 @@ def _rules(page: Page, zones: list[dict[str, object]]) -> dict[str, object]:
 
 def _open_overview(page: Page) -> None:
     _open_scheme(page, SAMPLE)
-    page.locator("#zone-page-open").click()
-    expect(page.locator("#zone-map")).to_be_visible()
+    open_zone_page(page)
 
 
 def _shown(page: Page, kind: str) -> set[str]:
@@ -183,6 +184,7 @@ def test_the_sample_room_opens_as_saved_with_a_rule_its_exceptions_and_nothing_w
         _open_scheme(page, SAMPLE)
         before = page.evaluate(_STATE)
         page.locator("#zone-page-open").click()
+        open_groups(page)
         expect(page.locator("#zone-map")).to_be_visible()
         expect(page.locator("main")).to_be_hidden()
         expect(page.locator("#zone-page h1")).to_have_text("這間房貼什麼")
@@ -202,8 +204,10 @@ def test_the_sample_room_opens_as_saved_with_a_rule_its_exceptions_and_nothing_w
         assert _shown(page, "opening") == {"xL/door", "xL/window"}
         assert _shown(page, "search") == set()
         assert "floor/rug" in _shown(page, "still") and "x0/whole_wall" in _shown(page, "still")
-        expect(page.locator("#zone-others")).to_have_text("天花：指定貼 2 區、保留原樣 4 區地板、門、窗：保留原樣")
-        expect(page.locator("#zone-list")).to_have_text("現在沒有哪一區由程式最佳化")
+        expect(page.locator("#zone-map [data-wall=ceiling][data-shown=fixed]")).to_have_count(2)
+        expect(page.locator("#zone-map [data-wall=ceiling][data-shown=search]")).to_have_count(0)
+        expect(page.locator("#zone-result-still")).to_contain_text("天花 4 區、地板、門 1 扇、窗 1 扇")
+        expect(page.locator("#zone-result-search")).to_have_attribute("data-count", "0")
         assert _dataset_zones(page, "#zone-result-fixed") == _shown(page, "fixed")
         expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 0 區")
         expect(page.locator("#zone-result-still")).to_have_text("保留原樣：牆面 13 區、天花 4 區、地板、門 1 扇、窗 1 扇")
@@ -224,6 +228,14 @@ def test_the_sample_room_opens_as_saved_with_a_rule_its_exceptions_and_nothing_w
     assert (tmp_path / "schemes" / f"{SAMPLE}.json").read_bytes() == scheme_bytes
 
 
+def _check_group_candidate_explanation(page: Page) -> None:
+    page.locator("#zone-group").get_by_role("button", name="選這幾區").click()
+    page.locator("#zone-panel-candidate-info > summary").click()
+    explanation = page.locator("#zone-panel-search-from")
+    expect(explanation).to_be_visible()
+    expect(explanation).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
+
+
 def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chose_differently(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, ZONE_NAMING_SCHEME)
     write_zone_naming_library(tmp_path)
@@ -234,6 +246,7 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         # 規則：由程式最佳化（13 區同一份清單）。另外指定照最先出現的順序：前牆兩塊指定貼、後牆清單不一樣的那一區、左牆不貼。
         expect(page.locator("#zone-rule")).to_have_attribute("data-mode", "search")
         expect(page.locator("#zone-rule-mode")).to_have_value("search")
@@ -249,27 +262,34 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
         assert _shown(page, "opening") == {"xL/door", "xL/window"}
         assert _dataset_zones(page, "#zone-result-search") == searching
         # 清單卡：清單一樣的區一張（#1199 修補 1）。第一張是規則那一份（14 區），清單不一樣的那一區自己一張。
-        expect(page.locator("#zone-page .zv-list")).to_have_count(2)
-        expect(page.locator("#zone-list h2")).to_have_text("由程式最佳化的 15 區裡的 14 區每一區各自最佳化，這 14 區從這幾種裡選")
-        expect(page.locator("#zone-list-who")).to_have_text("這一張管 14 區：沒另外指定的牆區、天花 1 主位上面那塊")
-        assert page.locator("#zone-list-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
-        expect(page.locator("#zone-list-choices > [data-choice]").last).to_have_text("也可以不貼（保留原樣）")
-        expect(page.locator("#zone-list-different")).to_have_count(0)
-        expect(page.locator("#zone-list-2 h2")).to_have_text("由程式最佳化的 15 區裡的 1 區這一區從這幾種裡選")
-        expect(page.locator("#zone-list-2-who")).to_have_text("這一張管 1 區：後牆 5 靠地板那條")
-        assert _dataset_zones(page, "#zone-list-2") == {"y0/auto1"}
-        assert page.locator("#zone-list-2-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == SHORT
+        expect(page.locator("#zone-page .zv-search-group")).to_have_count(2)
+        expect(page.locator("#zone-result-search")).to_have_attribute("data-count", "15")
+        expect(page.locator("#zone-group")).to_have_attribute("data-count", "14")
+        expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 15 區")
+        expect(page.locator("#zone-group-who")).to_be_visible()
+        expect(page.locator("#zone-group-who")).to_have_text("這組有 14 區：沒另外指定的牆區、天花 1 主位上面那塊")
+        assert page.locator("#zone-group-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
+        expect(page.locator("#zone-group-choices > [data-choice]").last).to_have_text("也可以不貼（保留原樣）")
+        assert _dataset_zones(page, "#zone-group") == searching - {"y0/auto1"}
+        expect(page.locator("#zone-result-search")).to_have_attribute("data-count", "15")
+        expect(page.locator("#zone-group-2")).to_have_attribute("data-count", "1")
+        expect(page.locator("#zone-group-2-who")).to_have_text("這組有 1 區：後牆 5 靠地板那條")
+        assert _dataset_zones(page, "#zone-group-2") == {"y0/auto1"}
+        assert page.locator("#zone-group-2-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == SHORT
         # 可調的各自能調多少直接寫在那一列底下（#1199：不再收在「玻璃棉各自能調多厚」後面）。
-        expect(page.locator("#zone-list-ranges")).to_have_count(0)
-        expect(page.locator("#zone-list-choices > [data-choice=glass_wool_48k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
-        expect(page.locator("#zone-list-choices > [data-choice=glass_wool_24k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        expect(page.locator("#zone-group [data-ranged]")).to_have_count(0)
+        expect(page.locator("#zone-group-choices > [data-choice=glass_wool_48k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
+        expect(page.locator("#zone-group-choices > [data-choice=glass_wool_24k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         # 96K 那一句、名字拿掉「（可調厚度與空腔）」：舊做法表方塊上那兩條的新家是這張清單卡（adjustWords、shortLabel；
         # #1265 單元 3 之二收尾追加設計洞：第二趟判成丙，src 裡兩支都還在用，補回來）。
-        expect(page.locator("#zone-list-choices > [data-choice=glass_wool_96k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        expect(page.locator("#zone-group-choices > [data-choice=glass_wool_96k] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         for wool in ("glass_wool_48k", "glass_wool_24k", "glass_wool_96k"):
-            expect(page.locator(f"#zone-list-choices > [data-choice={wool}]")).not_to_contain_text("（可調")
-        expect(page.locator("#zone-others")).to_have_text("天花：由程式最佳化 1 區、指定貼 1 區、保留原樣 4 區地板、門、窗：保留原樣")
+            expect(page.locator(f"#zone-group-choices > [data-choice={wool}]")).not_to_contain_text("（可調")
+        expect(page.locator("#zone-map [data-wall=ceiling][data-shown=fixed]")).to_have_count(1)
+        expect(page.locator("#zone-map [data-wall=ceiling][data-shown=search]")).to_have_count(1)
+        expect(page.locator("#zone-result-still")).to_contain_text("天花 4 區、地板、門 1 扇、窗 1 扇")
         expect(page.locator("#zone-page-search")).to_be_enabled()
         page.screenshot(path=str(tmp_path / "overview-search-rule.png"))
+        _check_group_candidate_explanation(page)
         assert watched.page_errors == [] and watched.console_errors == []
     assert design_file.read_bytes() == design_bytes

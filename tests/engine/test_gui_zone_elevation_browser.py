@@ -11,7 +11,7 @@ from playwright.sync_api import Browser, Page, expect
 
 from aosr.physics.zone_fill import Box, fill_wall
 from aosr.reporting.scheme import Scheme
-from tests.engine._input_page_steps import open_scheme, reveal
+from tests.engine._input_page_steps import open_scheme, reveal, wait_settled
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ASSEMBLY, NEW, ROOM_109, room109_document, room109_quarters
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
@@ -26,10 +26,16 @@ def _write(tmp_path: Path, document: dict[str, object]) -> None:
     (tmp_path / "schemes" / f"{name}.json").write_text(Scheme.model_validate(document).model_dump_json())
 
 
-def _open_scheme(page: Page, name: str) -> None:
+def _open_scheme(page: Page, name: str, *, checks_held: bool = False) -> None:
+    """打開那一份，等到頁面靜下來才回來（_input_page_steps 的 SETTLED：打開後的限制檢查回來會重畫立面圖與分區頁；
+    11-27 雲端在重畫途中量喇叭記號、底列按鈕，量到已拆掉的舊元素、回 None）。
+    checks_held：呼叫的人攔著 /api/plan 或 /api/zone-limits（考檢查還在路上的樣子），檢查回不來，只等整頁沒鎖、忙碌旗落下。"""
     open_scheme(page, name)
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
-    page.wait_for_function("!document.querySelector('main').inert")
+    if checks_held:
+        page.wait_for_function("!document.querySelector('main').inert && !inputBusy")
+    else:
+        wait_settled(page)
     # 以前這裡接著展開舊做法表（#1176 第 C 支）；#1265 單元 3 之二第二趟舊做法表拆了，打開方案就是全部。
 
 
@@ -38,12 +44,14 @@ def _zones(page: Page, wall: str) -> list[dict[str, object]]:
 
 
 def _centre_x(page: Page, selector: str) -> float:
+    expect(page.locator(selector)).to_be_visible()
     box = page.locator(selector).bounding_box()
     assert box is not None
     return box["x"] + box["width"] / 2
 
 
 def _centre_y(page: Page, selector: str) -> float:
+    expect(page.locator(selector)).to_be_visible()
     box = page.locator(selector).bounding_box()
     assert box is not None
     return box["y"] + box["height"] / 2

@@ -13,6 +13,7 @@ import pytest
 from playwright.sync_api import Browser, Error, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
+from tests.engine._zone_material_steps import pick_fixed_row
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._construction_cases import construction
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
@@ -194,7 +195,7 @@ def _hold_limits_and_apply(page: Page, wall: str, key: str, mode: str, material:
     open_alone(page, wall, key)
     page.locator(f"#zone-panel-mode-{mode}").check()
     if material:
-        page.locator("#zone-panel-material").select_option(material)
+        pick_fixed_row(page, material)
     page.locator("#zone-panel-apply").click()
     expect(page.locator("#zone-panel")).to_have_count(0)
     page.wait_for_function("""() => { const zones = document.getElementById('zone-page');
@@ -435,7 +436,7 @@ def test_opening_another_scheme_never_pairs_its_zones_with_the_last_schemes_verd
         page.evaluate(_RECORD_PAIR_MARKS)
         held: list[Route] = []
         page.route("**/api/zone-limits", lambda route: held.append(route))
-        _open_scheme(page, "plain109")
+        _open_scheme(page, "plain109", checks_held=True)
         page.wait_for_function("name => document.getElementById('save-id').value === name", arg="plain109")
         _settled(page)
         seen = cast(list[dict[str, object]], page.evaluate("window.pairMarksSeen"))

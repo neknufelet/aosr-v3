@@ -247,7 +247,7 @@ function renderCurve(reply) {
   if (reply.status !== "drawn") return;
   byId("curve-basis").textContent = reply.basis || "";
   showPlotKey(reply);
-  drawPlot(reply);
+  drawPlot(reply, zoneEmbed ? 155 : 320);
   const warnings = reply.warnings.map(note => note.text);
   byId("curve-notes").querySelector("ul").replaceChildren(...warnings.map(text => el("li", {text})));
   byId("curve-notes").hidden = !warnings.length;
@@ -324,6 +324,24 @@ function newConstructionId() {
   return "construction_" + crypto.getRandomValues(new Uint32Array(2)).join("_");
 }
 
+const zoneParams = new URLSearchParams(location.search);
+const zoneEmbed = zoneParams.get("embed") === "zones" && window.parent !== window;
+const forCandidates = zoneEmbed && zoneParams.get("mode") === "search";
+if (zoneEmbed) {
+  document.body.classList.add("embedded-zones");
+  if (forCandidates) {
+    const label = document.querySelector('.backs input[value="zone_wall"]').closest("label");
+    label.classList.add("unavailable");
+    label.querySelector("small").textContent = "由程式最佳化還不收";
+  }
+  byId("save").textContent = forCandidates ? "存入材料庫並加入候選" : "存入材料庫並選它";
+  const curveConditions = el("details", {class: "curve-conditions"}, el("summary", {text: "曲線條件"}));
+  byId("curve-notes").after(curveConditions);
+  for (const id of ["curve-key", "curve-basis", "condition", "curve-notes"]) curveConditions.append(byId(id));
+  const depth = Number(zoneParams.get("depth"));
+  if (Number.isFinite(depth) && depth > 0) byId("zone-depth").textContent = `貼在 ${zoneParams.get("label")} 只用到 ${depth} cm 以內`;
+}
+
 function freshConstruction() {
   return {id: newConstructionId(), label: freeLabel("未命名構造"), kind: "construction",
     layers: [], backing: "rigid", placement: "wall", product: false, provenance: "model", source: "材料設計器依各層物性推算", links: [], notes: []};
@@ -354,7 +372,7 @@ function renderDesigner() {
   byId("name").disabled = readOnly;
   for (const input of document.querySelectorAll(".backs input, .where input")) {
     input.checked = input.value === draft[input.name];
-    input.disabled = readOnly;
+    input.disabled = readOnly || (forCandidates && input.name === "backing" && input.value === "zone_wall");
   }
   byId("product").checked = draft.product;
   byId("product").disabled = readOnly;
@@ -366,6 +384,7 @@ function renderDesigner() {
   }
   byId("source").title = draft.source;
   byId("workspace").hidden = false;
+  if (zoneEmbed) byId("entry-status").hidden = true;
   byId("entry-status").textContent = isNew ? "從房間側往牆側疊層，儲存後可在分區頁指定。" :
     (readOnly ? (draft.product ? "成品唯讀，可複製到設計器" : "內建材料唯讀，可複製到設計器") : "改這一筆，已經貼在分區上的不會跟著變");
   byId("palette").closest(".add").hidden = readOnly;
@@ -417,6 +436,10 @@ async function initDesigner() {
   if (listing.user_file_problem && (id === null || copying)) throw new Error(listing.user_file_problem);
   if (id === null) {
     draft = freshConstruction();
+    if (zoneEmbed) {
+      draft.backing = forCandidates ? "rigid" : "zone_wall";
+      draft.placement = ["floor", "ceiling_build"].includes(zoneParams.get("placement")) ? zoneParams.get("placement") : "wall";
+    }
   } else {
     const row = listing.materials.find(item => item.entry.id === id);
     if (!row) throw new Error(listing.user_file_problem || "材料庫找不到這一筆材料");
@@ -504,6 +527,8 @@ async function saveConstruction() {
       const problem = missingLayerField() || tuningProblem(document);
       if (problem) throw new Error(problem);
     }
+    if (forCandidates && document.backing === "zone_wall") throw new Error("由程式最佳化整塊構造時，背後須選硬牆或空氣");
+    if (zoneEmbed && !forCandidates && document.kind === "optimizable") throw new Error("指定貼須固定厚度，請關閉「給程式調」");
     const switching = !isNew && document.kind !== openedEntry.kind;
     let copy;
     if (switching) {
@@ -547,8 +572,9 @@ async function saveConstruction() {
     isNew = false;
     savedSnapshot = snapshot();
     readOnly = draft.product;
-    history.replaceState(null, "", designerUrl(draft.id));
+    if (!zoneEmbed) history.replaceState(null, "", designerUrl(draft.id));
     renderDesigner();
+    if (zoneEmbed) parent.postMessage({type: "aosr-material-saved", id: draft.id}, location.origin);
     message.className = "ok";
     message.textContent = `已存到「${draft.product ? "成品" : "參數構造"}」頁。`;
   } catch (error) {
@@ -567,15 +593,18 @@ function snapshot() {
     ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
 }
 
+function hasUnsavedDraft() { return Boolean(draft && !readOnly && snapshot() !== savedSnapshot); }
+function designerSaving() { return byId("workspace").inert; }
+
 window.addEventListener("beforeunload", event => {
-  if (draft && !readOnly && snapshot() !== savedSnapshot) {
+  if (hasUnsavedDraft()) {
     event.preventDefault();
     event.returnValue = true;
   }
 });
 
 window.addEventListener("resize", () => {
-  if (plot) plot.setSize({width: chartWidth(), height: 320});
+  if (plot) plot.setSize({width: chartWidth(), height: zoneEmbed ? 155 : 320});
 });
 
 for (const key of ["source", "links", "notes"]) {

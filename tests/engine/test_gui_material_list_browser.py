@@ -9,11 +9,15 @@ import pytest
 from playwright.sync_api import Browser, Route, expect
 
 from aosr.gui.material_editor import user_library_path
-from aosr.materials.library import SCHEMA_VERSION
+from aosr.materials.library import SCHEMA_VERSION, catalog_entries
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine._construction_cases import construction
 from tests.engine.test_material_library_vpr import _panel, _table, _vpr, _wool
+
+
+# 成品那一頁：內建構造預設＋自編 6 筆裡的成品 19 筆，加文獻硬面（門、窗、木地板…）每筆一行。
+PRODUCTS = 19 + len(catalog_entries())
 
 
 def _sample_library(folder: Path) -> None:
@@ -30,7 +34,7 @@ def test_material_tabs_count_folded_rows_and_show_sections_and_curves(tmp_path: 
         expect(page.get_by_role("tab")).to_have_count(3)
         product = page.get_by_role("tab", name=re.compile("成品"))
         parameters = page.get_by_role("tab", name=re.compile("參數構造"))
-        expect(product).to_have_text(re.compile(r"成品\s*19 筆"))
+        expect(product).to_have_text(re.compile(rf"成品\s*{PRODUCTS} 筆"))
         expect(parameters).to_have_text(re.compile(r"參數構造\s*5 筆"))
         expect(product).to_have_attribute("aria-selected", "true")
         legend = page.get_by_role("group", name="數據來源圖例")
@@ -43,7 +47,7 @@ def test_material_tabs_count_folded_rows_and_show_sections_and_curves(tmp_path: 
             expect(row).to_be_hidden()
             panel.locator("summary").filter(has_text=group).click()
             expect(row).to_be_visible()
-        for tab, count in ((product, 19), (parameters, 5)):
+        for tab, count in ((product, PRODUCTS), (parameters, 5)):
             tab.click()
             expect(legend).to_be_visible()
             rows = panel.locator("[data-id]")

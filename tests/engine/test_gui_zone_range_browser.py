@@ -20,10 +20,14 @@ from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui.zone_design import DesignSettings, write_design
 from aosr.reporting.scheme import Scheme
+from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import row_options
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME as SYMMETRY, symmetry_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
+from tests.engine.test_gui_gradient_browser import _serve as serve_gradient
+from tests.engine.test_gui_gradient_jobs import FakeLauncher
 from tests.engine.test_gui_zone_elevation_browser import _open_scheme, _write
 from tests.engine.test_gui_zone_material_pick_browser import _TEXT_STYLES
 from tests.engine.test_gui_zone_overview_browser import SAMPLE, SAMPLE_DESIGN, WOOLS
@@ -63,6 +67,7 @@ def _shot(page: Page, name: str) -> None:
 
 
 def _cell(page: Page, choice: str, part: str, end: str) -> str:
+    row_options(page, choice)
     toggle = page.locator(f"#zone-panel-range-toggle-{choice}")
     if toggle.get_attribute("aria-expanded") == "false":
         toggle.click()
@@ -89,13 +94,14 @@ def test_a_narrowed_range_is_written_in_metres_into_the_picked_zones_only(tmp_pa
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
         page.locator("#zone-panel-mode-search").check()
-        expect(page.locator("#zone-panel-range-note")).to_have_text("範圍從材料頁帶來，可以改（只改這幾區，不改材料頁）材料頁 ▸")
+        expect(page.locator("#zone-panel-range-note")).to_have_text("範圍只改這幾區，不改材料頁材料頁 ▸")
         expect(page.locator("#zone-panel-materials")).to_have_attribute("href", "/materials")
         options = page.locator(_cell(page, WOOL, "porous", "low") + " option")
         assert options.evaluate_all("items => items.map(item => [item.textContent, item.value])") == [
             ["5", "0.05"], ["10", "0.1"], ["20", "0.2"]]
         for part, end, value in (("porous", "low", "0.05"), ("porous", "high", "0.2"), ("cavity", "low", "0"), ("cavity", "high", "25")):
             expect(page.locator(_cell(page, WOOL, part, end))).to_have_value(value)
+        row_options(page, THIN)
         page.locator(f"#zone-panel-range-toggle-{THIN}").click()
         expect(page.locator(f"#zone-panel-range-{THIN}-porous")).to_be_visible()
         expect(page.locator(f"#zone-panel-range-{THIN}-cavity")).to_have_count(0)
@@ -122,19 +128,22 @@ def test_one_zone_panel_offers_cells_only_under_ticked_tunable_materials(tmp_pat
         _click_zone(page, "yL/z3")
         expect(page.locator("#zone-panel-range-note")).to_contain_text("只改這一區，不改材料頁")
         for choice in (WOOL, THIN, "glass_wool_96k"):
+            row_options(page, choice)
             page.locator(f"#zone-panel-range-toggle-{choice}").click()
+        row_options(page, "glass_wool_96k")
         page.locator("#zone-panel-remove-glass_wool_96k").click()
         expect(page.locator("#zone-panel-range-glass_wool_96k")).to_have_count(0)
         assert page.locator("#zone-panel .zv-mrange").evaluate_all("rows => rows.map(row => row.dataset.choice)") == [WOOL, THIN]
-        page.locator("#zone-panel-add").click()
+        page.locator("#zone-panel-picker-search").focus()
         page.locator("#zone-panel-pick-glass_wool_96k").click()
         expect(page.locator("#zone-panel-range-toggle-glass_wool_96k")).to_have_attribute("aria-expanded", "false")
+        row_options(page, "glass_wool_96k")
         page.locator("#zone-panel-range-toggle-glass_wool_96k").click()
         expect(page.locator("#zone-panel-range-glass_wool_96k")).to_be_visible()
         page.locator(_cell(page, WOOL, "porous", "high")).select_option("0.1")
         page.locator(_cell(page, WOOL, "cavity", "high")).fill("15")
         rows = cast(list[dict[str, object]], page.locator("#zone-panel").evaluate(_TEXT_STYLES))
-        assert rows and all(cast(float, row["size"]) >= 13 and cast(float, row["contrast"]) >= 4.5 for row in rows), rows
+        assert rows and not [row for row in rows if cast(float, row["size"]) < 13 or cast(float, row["contrast"]) < 4.5], [row for row in rows if cast(float, row["size"]) < 13 or cast(float, row["contrast"]) < 4.5]
         page.locator("#zone-panel").scroll_into_view_if_needed()
         _shot(page, "1-one-zone-panel")
         assert watched.page_errors == [] and watched.console_errors == []
@@ -169,17 +178,19 @@ def test_zones_with_different_ranges_show_empty_cells_and_keep_their_own_unless_
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
+        row_options(page, WOOL)
         page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         for part in ("porous", "cavity"):
             expect(page.locator(f"#zone-panel-range-{WOOL}-{part}-mixed")).to_have_text("各區不同；不動它，各區照目前的")
             for end in ("low", "high"):
                 expect(page.locator(_cell(page, WOOL, part, end))).to_have_value("")
         # 選著區時右欄的清單卡收起來：清單一樣、範圍不同的兩張也寫出各自的範圍，不是只差區名。
-        expect(page.locator(".zv-list[data-zones='yL/z1'] .zv-ranges")).to_have_text("這一區自己的範圍：48K 玻璃棉（棉 5～10 cm、空腔 0～15 cm）")
-        expect(page.locator(".zv-list[data-zones='yL/z2'] .zv-ranges")).to_have_text("這一區自己的範圍：48K 玻璃棉（棉 5～20 cm、空腔 0～10 cm）")
-        expect(page.locator(".zv-list[data-zones*='yL/z3'] .zv-ranges")).to_have_count(0)
+        expect(page.locator(".zv-search-group[data-zones='yL/z1'] [data-ranged]")).to_have_text("這一區自己的範圍：棉 5～10 cm、空腔 0～15 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
+        expect(page.locator(".zv-search-group[data-zones='yL/z2'] [data-ranged]")).to_have_text("這一區自己的範圍：棉 5～20 cm、空腔 0～10 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
+        expect(page.locator(".zv-search-group[data-zones*='yL/z3'] [data-ranged]")).to_have_count(0)
         _shot(page, "2-zones-differ")
         page.locator("#zone-panel-depth").fill("28")
         _apply(page)
@@ -256,23 +267,25 @@ def test_list_cards_split_by_range_and_read_out_the_range_each_group_uses(tmp_pa
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
+        open_groups(page)
         _settled(page)  # 限制檢查回來會重畫整頁：先等它畫好再讀、再捲（雲端慢機器上撞過「元素已不在頁面上」）
-        cards = page.locator("#zone-page .zv-list").evaluate_all("cards => cards.map(card => [card.id, card.dataset.zones.split(' ').sort()])")
-        assert cards == [["zone-list", ["yL/auto1", "yL/auto2", "yL/z3"]], ["zone-list-2", ["yL/z1", "yL/z2"]]], cards
-        expect(page.locator(f"#zone-list-choices > [data-choice={WOOL}] .zv-range")).to_have_text(
+        cards = page.locator("#zone-page .zv-search-group").evaluate_all("cards => cards.map(card => [card.id, card.dataset.zones.split(' ').sort()])")
+        assert cards == [["zone-group", ["yL/auto1", "yL/auto2", "yL/z3"]], ["zone-group-2", ["yL/z1", "yL/z2"]]], cards
+        expect(page.locator(f"#zone-group-choices > [data-choice={WOOL}] .zv-range")).to_have_text(
             "可調：厚 5～20 cm、空腔 0～25 cm，加起來最深 30 cm")
-        ranged = page.locator(f"#zone-list-2-choices > [data-choice={WOOL}] .zv-range")
+        ranged = page.locator(f"#zone-group-2-choices > [data-choice={WOOL}] .zv-range")
         expect(ranged).to_have_text("這幾區自己的範圍：棉 5～10 cm、空腔 0～15 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
         expect(ranged).to_have_attribute("data-ranged", "true")
-        expect(page.locator(f"#zone-list-2-choices > [data-choice={THIN}] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
+        expect(page.locator(f"#zone-group-2-choices > [data-choice={THIN}] .zv-range")).to_have_text("可調：厚 5～20 cm、空腔：沒有（直接貼牆）")
         groups = page.locator("#zone-special .zv-group").evaluate_all("groups => groups.map(group => group.dataset.zones.split(' ').sort())")
         assert ["yL/auto1", "yL/auto2", "yL/z1", "yL/z2", "yL/z3"] in groups, groups
-        page.locator("#zone-list-2").scroll_into_view_if_needed()
+        page.locator("#zone-group-2").scroll_into_view_if_needed()
         _shot(page, "4-cards-read-ranges")
-        page.locator("#zone-list-2-select").click()
-        expect(page.locator("#zone-list-2-ranges")).to_have_text(
-            "這幾區自己的範圍：48K 玻璃棉（棉 5～10 cm、空腔 0～15 cm）")
-        expect(page.locator("#zone-list-2")).to_contain_text("1 筆範圍改窄了")
+        page.locator("#zone-group-2-select").click()
+        expect(page.locator("#zone-group-2 [data-ranged]")).to_have_text(
+            "這幾區自己的範圍：棉 5～10 cm、空腔 0～15 cm（材料頁是棉 5～20 cm、空腔 0～25 cm）")
+        expect(page.locator("#zone-group-2")).to_contain_text("1 筆範圍改窄了")
+        row_options(page, WOOL)
         page.locator(f"#zone-panel-remove-{WOOL}").click()
         _apply(page)
         expect(page.locator("#zone-page .zv-range[data-ranged]")).to_have_count(0)
@@ -302,7 +315,7 @@ def test_the_stage_three_preview_shows_the_range_the_zone_uses(tmp_path: Path, b
     一種一行「48K 玻璃棉…：棉 5～10 cm、空腔 0～15 cm」「24K 玻璃棉…：棉 10～20 cm」（不調空腔的不寫空腔）；
     沒寫範圍的區沒有這一行（截一張：第三階段預覽）。"""
     _prepare(tmp_path, _design())
-    with _serve(tmp_path) as base, _open(browser, base) as watched:
+    with serve_gradient(tmp_path, FakeLauncher()) as base, _open(browser, base) as watched:
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z3")
@@ -383,13 +396,18 @@ def test_control_without_touching_ranges_the_saved_design_is_byte_for_byte_part_
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
         page.locator("#zone-panel-mode-search").check()
+        row_options(page, THIN)
         page.locator(f"#zone-panel-remove-{THIN}").click()
         page.locator("#zone-panel-depth").fill("25")
         _apply(page)
         _click_zone(page, "x0/whole_wall")
         page.locator("#zone-panel-mode-search").check()
         _apply(page)
-        page.locator("#zone-list-select").click()
+        open_groups(page)
+        page.locator("#zone-group").get_by_role("button", name="選這幾區").click()
+        assert set((page.locator("#zone-panel").get_attribute("data-zones") or "").split()) == {
+            "yL/z3", "yL/auto1", "yL/auto2", "x0/whole_wall"}
+        row_options(page, "glass_wool_96k")
         page.locator("#zone-panel-remove-glass_wool_96k").click()
         _apply(page)
         _close_and_save(page)
@@ -460,6 +478,7 @@ def test_the_apply_check_needs_a_checked_answer_with_no_design_red_and_ignores_r
         _open_overview(page)
         before = page.evaluate("() => JSON.stringify(zoneDesign)")
         _click_zone(page, "yL/z1")
+        row_options(page, WOOL)
         page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         page.locator(high).fill("15")
         _fake_limits(page, {"status": "room", "message": "考卷編的：房間尺寸讀不出來", "zones": {}, "walls": {}, "caps": {},
@@ -495,6 +514,7 @@ def test_cells_that_are_negative_or_not_numbers_are_refused_on_the_spot(tmp_path
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z3")
+        row_options(page, WOOL)
         page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         page.locator(low).fill("-5")
         expect(page.locator("#zone-panel-problem")).to_have_text("48K 玻璃棉的空腔要填 0 以上的數字（公分）")
@@ -502,6 +522,7 @@ def test_cells_that_are_negative_or_not_numbers_are_refused_on_the_spot(tmp_path
         page.locator("#zone-panel-cancel").click()
         _click_zone(page, "yL/z1")
         _click_zone(page, "yL/z2")
+        row_options(page, WOOL)
         page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         expect(page.locator(low)).to_have_value("")
         page.locator(low).focus()
@@ -523,6 +544,7 @@ def test_a_late_limits_answer_redraws_the_page_but_keeps_the_cursor_in_the_range
         page = watched.page
         _open_overview(page)
         _click_zone(page, "yL/z1")
+        row_options(page, WOOL)
         page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         page.locator(high).fill("1")
         page.locator(high).evaluate("cell => { cell.dataset.old = 'yes'; }")
@@ -550,11 +572,12 @@ def test_when_ranges_split_the_rule_group_no_card_claims_the_zones_that_follow_t
         with _serve(folder) as base, _open(browser, base) as watched:
             page = watched.page
             _open_overview(page)
-            who = page.locator("#zone-page .zv-list .zv-who").all_inner_texts()
+            open_groups(page)
+            who = page.locator("#zone-page .zv-search-group .zv-who").all_inner_texts()
             assert any("沒另外指定的牆區" in line for line in who) is claimed, who
             if not claimed:
                 expect(page.locator("#zone-page .zv-range[data-ranged]")).to_have_count(1)
-                assert sum(line.startswith("這一張管 6 區：右牆整面") for line in who) == 1, who
+                assert sum(line.startswith("這組有 6 區：右牆整面") for line in who) == 1, who
             assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -595,8 +618,8 @@ def _late_verdict_redraws(page: Page, box: str, enter: Callable[[], None]) -> No
 
 def _tab_into(page: Page, box: str) -> None:
     """Tab 進那一格（瀏覽器把整格反白）：先把焦點放到它前面一個停得住的東西，再按 Tab。"""
-    page.locator(box).evaluate("""node => { const stops = [...document.querySelectorAll('#zone-panel input, #zone-panel select, #zone-panel button')]
-        .filter(stop => !stop.disabled && stop.offsetParent !== null); stops[stops.indexOf(node) - 1].focus(); }""")
+    page.locator(box).focus()
+    page.keyboard.press("Shift+Tab")
     page.keyboard.press("Tab")
     expect(page.locator(box)).to_be_focused()
 
@@ -634,6 +657,7 @@ def test_a_verdict_landing_after_entering_a_cavity_box_never_glues_the_typed_num
         _open_overview(page)
         _settled(page)
         _click_zone(page, "yL/z2")
+        row_options(page, WOOL)
         page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         expect(page.locator(box)).to_have_value("25")
         _late_verdict_redraws(page, box, lambda: _tab_into(page, box))
@@ -652,6 +676,7 @@ def test_a_verdict_landing_mid_typing_keeps_the_half_typed_number_and_the_next_k
         _open_overview(page)
         _settled(page)
         _click_zone(page, "yL/z2")
+        row_options(page, WOOL)
         page.locator(f"#zone-panel-range-toggle-{WOOL}").click()
         for box, first, second, whole in (("#zone-panel-depth", "2", "0", "20"), (cavity, "1", "5", "15")):
             def half(box: str = box, first: str = first) -> None:

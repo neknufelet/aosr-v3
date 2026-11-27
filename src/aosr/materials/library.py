@@ -30,9 +30,12 @@ from typing import Annotated, Final, Literal, Self, TypeAlias, overload
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr, field_validator, model_validator
 
+from aosr.config.catalog_surfaces import CatalogSurface, CatalogTable, load_catalog_surfaces
 from aosr.config.construction_presets import ConstructionPreset, load_construction_presets
 from aosr.config.material_gradient import NONE_TARGET, FamilySettings, MaterialGradientSettings, load_material_gradient_settings
 from aosr.config.paths import config_path
+from aosr.config.product_air import product_air_environment
+from aosr.materials.catalog_absorption import MAX_RANDOM_INCIDENCE_ABSORPTION, CatalogAbsorption, impedance_on_axis
 from aosr.materials.construction_models import (
     AirLayer,
     Assembly,
@@ -456,8 +459,58 @@ def _family_entry(family: FamilySettings, presets: dict[str, ConstructionPreset]
         max_total_depth_m=family.max_total_depth_m, preset_members=family.presets, template_preset=family.template_preset)
 
 
+def _catalog_axis(table: CatalogTable) -> tuple[float, ...]:
+    """阻抗表取點：以參考頻率對齊、每八度固定點數，含最低與最高頻之間的每一點。"""
+    low = math.ceil(table.points_per_octave * math.log2(table.lowest_hz / table.reference_hz))
+    high = math.floor(table.points_per_octave * math.log2(table.highest_hz / table.reference_hz))
+    return tuple(table.reference_hz * 2.0 ** (step / table.points_per_octave) for step in range(low, high + 1))
+
+
+def _catalog_entry(surface: CatalogSurface, axis: tuple[float, ...], rho_c: float) -> FixedEntry:
+    """文獻頻帶吸音率換成沒有虛部的阻抗表（決策紙 catalog-absorption-random-incidence-paris-inversion）。
+
+    表的點夠密、涵蓋整條產品軸，表內對數內插跟逐點反推只差內插誤差；表外（用不到）當硬面：
+    底構造是 1 mm 空氣層加剛背，低頻阻抗遠大於 ρc。
+    """
+    # 超過 Paris 頂點的手冊值會被夾掉、不再是那一格；硬面不該走到這裡，寧可整筆拒收也不默默換掉。
+    # 直接看手冊值本身：帶心不一定落在取點上，只看取到的點會漏。
+    if any(alpha > MAX_RANDOM_INCIDENCE_ABSORPTION for alpha in surface.absorption):
+        raise ValueError(f"catalog surface {surface.id!r} has absorption above the Paris peak; it would be clamped")
+    # 頻帶外是平的（延伸），只留最外那一點；頻帶內照常密取（內建頻帶都是標準八度帶，落在取點上）。
+    low, high = surface.band_center_hz[0], surface.band_center_hz[-1]
+    kept = (axis[0], *(f for f in axis if low <= f <= high), axis[-1])
+    converted = impedance_on_axis(CatalogAbsorption(surface.id, surface.band_center_hz, surface.absorption), kept, rho_c)
+    if any(converted.clamped):
+        # 保險：取點上的內插值也不准被夾。
+        raise ValueError(f"catalog surface {surface.id!r} has absorption above the Paris peak; it would be clamped")
+    # 存檔與材料頁清單要讀得動：頻率留到 0.001 Hz、阻抗留到 0.1 Pa·s/m，遠小於表內內插的差。
+    points = [{"frequency_hz": round(frequency, 3), "real_pa_s_m": round(value, 1)}
+              for frequency, value in zip(converted.frequencies_hz, converted.impedance_pa_s_per_m, strict=True)]
+    bands = "、".join(f"{band:g} Hz {alpha:g}" for band, alpha in zip(surface.band_center_hz, surface.absorption, strict=True))
+    conditions = (f"手冊無規入射頻帶吸音率（{bands}），以 Paris 公式反推的實數阻抗；不是阻抗管量測，沒有虛部。"
+                  f"{low:g} Hz 以下、{high:g} Hz 以上平延伸最近一帶的值（估計，不是量的）；"
+                  f"頻帶之間在表點上反推、表點之間阻抗內插，跟逐點反推最多差約 2%。表外當硬面。出處：{surface.source}")
+    return FixedEntry.model_validate({
+        "kind": "fixed", "id": surface.id, "label": surface.label, "provenance": "literature",
+        "source": surface.source, "links": surface.links, "notes": surface.notes,
+        "material": {"kind": "measured_impedance", "points": points, "source_and_conditions": conditions,
+                     "base_assembly": {"kind": "assembly", "backing": "rigid",
+                                       "layers": [{"kind": "air", "thickness_m": _CATALOG_BASE_AIR_M}]}}})
+
+
+_CATALOG_BASE_AIR_M: Final = 0.001
+
+
+def catalog_entries() -> tuple[FixedEntry, ...]:
+    """文獻硬面（門、窗、木地板、石膏板、磚、混凝土），每筆一張阻抗表；ρc 用產品標準空氣。"""
+    table, surfaces = load_catalog_surfaces(config_path("catalog_surfaces.toml"))
+    air, _ = product_air_environment()
+    axis = _catalog_axis(table)
+    return tuple(_catalog_entry(surface, axis, air.rho_c) for surface in surfaces)
+
+
 def builtin_entries() -> tuple[LibraryEntry, ...]:
-    """內建材料：構造預設每筆一個固定材料、第三階段梯度設定的每個家族一個可最佳化材料；唯讀起點。"""
+    """內建材料：構造預設每筆一個固定材料、文獻硬面每筆一個固定材料、第三階段梯度設定的每個家族一個可最佳化材料；唯讀起點。"""
     presets = load_construction_presets(config_path("construction_presets.toml"))
     settings: MaterialGradientSettings = load_material_gradient_settings(config_path("material_gradient.toml"))
     fixed: list[LibraryEntry] = [
@@ -466,7 +519,7 @@ def builtin_entries() -> tuple[LibraryEntry, ...]:
                                    "material": preset.material})
         for preset in presets]
     table = {preset.id: preset for preset in presets}
-    return (*fixed, *(_family_entry(family, table) for family in settings.family))
+    return (*fixed, *catalog_entries(), *(_family_entry(family, table) for family in settings.family))
 
 
 def family_settings(entry: OptimizableEntry) -> FamilySettings:
@@ -491,6 +544,17 @@ def template_assembly(entry: OptimizableEntry) -> Assembly:
 def initial_assembly(entry: TunableLayersEntry) -> Assembly:
     """可調多層構造初值排出來的剛背多層構造（位置規則由多層構造自己核）。"""
     return Assembly(layers=entry.layers, backing="rigid")
+
+
+def preview_material(entry: LibraryEntry) -> StandaloneSurface:
+    """拿一筆材料去算時用的牆面材料：可最佳化與可調多層取初值排法，背後要原牆的構造當剛背。"""
+    if isinstance(entry, TunableLayersEntry):
+        return initial_assembly(entry)
+    if isinstance(entry, OptimizableEntry):
+        return template_assembly(entry)
+    if isinstance(entry, ConstructionEntry):
+        return entry.preview_assembly()
+    return entry.surface_material()
 
 
 def load_user_library(path: Path) -> tuple[LibraryEntry, ...]:

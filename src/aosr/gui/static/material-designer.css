@@ -61,3 +61,27 @@ input[type=radio],input[type=checkbox]{accent-color:#15617b}
 .back-options label{padding:.35rem .55rem}.back-options small{margin:.15rem 0}
 #figure .cutaway{height:13rem}.save-bar{justify-content:flex-start}.tune{font-size:.72rem}.params{grid-template-columns:minmax(0,1fr)}}
 .performance th{white-space:nowrap;width:1%}
+#zone-depth:empty,.embedded-zones header nav,.embedded-zones .citation,.embedded-zones #copy-designer,
+.embedded-zones h2 small,.embedded-zones .back-options label:not(.unavailable) small,.embedded-zones #figure-key+.hint{display:none}
+.embedded-zones main{margin:0;padding:0;max-width:none}
+.embedded-zones header,.embedded-zones section{border:0;box-shadow:none;margin:0;padding:8px 12px}
+.embedded-zones #name{width:100%}
+.embedded-zones #workspace{height:calc(100dvh - 66px);overflow:auto}
+.embedded-zones .halves{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0}
+.embedded-zones .halves>section{min-width:0}
+.embedded-zones .add{display:flex;flex-direction:column}
+.embedded-zones .performance{grid-template-columns:1fr}
+.embedded-zones .save-bar{position:sticky;bottom:0;background:#fff;border-top:1px solid #d5e0e4;justify-content:flex-start}
+.embedded-zones:has(#workspace:not([hidden])) main{height:100dvh;display:flex;flex-direction:column}
+.embedded-zones #workspace:not([hidden]){flex:1;min-height:0}
+@media(max-width:520px){.embedded-zones .halves{grid-template-columns:1fr}}
+.embedded-zones .halves>section:first-child{display:flex;flex-direction:column}
+.embedded-zones .add{order:-1;border:0;margin:0;padding:0}
+.embedded-zones .add>strong,.embedded-zones .add>small{display:none}
+.embedded-zones #figure,.embedded-zones #figure .cutaway{min-height:0;height:10rem}
+.embedded-zones #curve-state:empty{display:none}
+.embedded-zones #figure-key{display:none}
+.embedded-zones .performance h3{margin:.2rem 0}
+.embedded-zones #zone-depth{margin:.3rem 0}
+
+.backs label.unavailable{color:#62686b;background:#f2f3f3}
