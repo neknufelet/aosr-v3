@@ -534,6 +534,9 @@ def test_result_line_follows_a_running_then_finished_calculation(tmp_path: Path,
         expect(page.locator("#room-result-title")).to_have_text("算好的結果", timeout=20_000)
         expect(page.locator("#room-result-link")).to_be_visible()
         expect(page.locator("#room-result-text")).not_to_contain_text("修改前的設定算的")
+        # 等頁底「算好了 ▸ 看結果」掛上才改：結果那一行讀的是輪詢的狀態，先寫「算好的結果」；頁底那一顆要等重讀結果清單回來才掛
+        # （app.js 的 poll）。這中間改了格子，那一筆就算成「開算後改過」、不掛連結，頁底那一句也不會亮（11-27 雲端紅過一次）。
+        expect(page.locator("#result-link")).to_be_visible()
         # 算完再改一格：頁底那句「設定已修改，這份結果是修改前算的」亮起來，結果那一行也註明（同一份狀態）。
         page.locator("#room-Lz").fill("3.3")
         expect(page.locator("#result-stale")).to_be_visible()

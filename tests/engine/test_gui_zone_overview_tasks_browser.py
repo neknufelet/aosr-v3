@@ -21,7 +21,7 @@ from pydantic import TypeAdapter
 from aosr.materials.library import LibraryEntry, dump_user_library
 from tests.engine._zone_material_steps import open_groups
 from tests.engine._zone_material_steps import pick_fixed_row, row_options
-from tests.engine._input_page_steps import open_scheme
+from tests.engine._input_page_steps import open_scheme, open_zone_page
 from tests.engine._construction_cases import construction
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
@@ -83,8 +83,7 @@ def _prepare(tmp_path: Path, design: dict[str, object] | None = None) -> None:
 
 def _open_overview(page: Page) -> None:
     _open_scheme(page, SAMPLE)
-    page.locator("#zone-page-open").click()
-    expect(page.locator("#zone-map")).to_be_visible()
+    open_zone_page(page)
 
 
 def _click_zone(page: Page, zone: str) -> None:
