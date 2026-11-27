@@ -228,6 +228,14 @@ def test_the_sample_room_opens_as_saved_with_a_rule_its_exceptions_and_nothing_w
     assert (tmp_path / "schemes" / f"{SAMPLE}.json").read_bytes() == scheme_bytes
 
 
+def _check_group_candidate_explanation(page: Page) -> None:
+    page.locator("#zone-group").get_by_role("button", name="選這幾區").click()
+    page.locator("#zone-panel-candidate-info > summary").click()
+    explanation = page.locator("#zone-panel-search-from")
+    expect(explanation).to_be_visible()
+    expect(explanation).to_have_text("程式從下面勾的 4 種裡選，每一區各自最佳化。")
+
+
 def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chose_differently(tmp_path: Path, browser: Browser) -> None:
     _write(tmp_path, ZONE_NAMING_SCHEME)
     write_zone_naming_library(tmp_path)
@@ -257,6 +265,8 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
         expect(page.locator("#zone-page .zv-search-group")).to_have_count(2)
         expect(page.locator("#zone-result-search")).to_have_attribute("data-count", "15")
         expect(page.locator("#zone-group")).to_have_attribute("data-count", "14")
+        expect(page.locator("#zone-result-search")).to_contain_text("由程式最佳化 15 區")
+        expect(page.locator("#zone-group-who")).to_be_visible()
         expect(page.locator("#zone-group-who")).to_have_text("這組有 14 區：沒另外指定的牆區、天花 1 主位上面那塊")
         assert page.locator("#zone-group-choices > [data-choice]").evaluate_all("rows => rows.map(row => row.dataset.choice)") == WOOLS
         expect(page.locator("#zone-group-choices > [data-choice]").last).to_have_text("也可以不貼（保留原樣）")
@@ -280,5 +290,6 @@ def test_a_design_with_a_search_rule_shows_the_list_card_and_the_zones_that_chos
         expect(page.locator("#zone-result-still")).to_contain_text("天花 4 區、地板、門 1 扇、窗 1 扇")
         expect(page.locator("#zone-page-search")).to_be_enabled()
         page.screenshot(path=str(tmp_path / "overview-search-rule.png"))
+        _check_group_candidate_explanation(page)
         assert watched.page_errors == [] and watched.console_errors == []
     assert design_file.read_bytes() == design_bytes

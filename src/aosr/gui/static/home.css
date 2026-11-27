@@ -203,6 +203,7 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
 .elevation-marker{pointer-events:none}
 .elevation-marker.speaker rect{fill:#872c22}
 .elevation-marker.seat circle{fill:#1d7a3a}
+#elevation-selected input[aria-invalid="true"]{border:2px solid #ad3025}
 #elevation-selected{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 
 

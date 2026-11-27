@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, expect
+from playwright.sync_api import Browser, Locator, Page, expect
 
 from tests.engine._zone_material_steps import open_groups
 from tests.engine._zone_material_steps import pick_fixed_row, row_options
@@ -43,8 +43,8 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
             e.backing !== 'zone_wall' && !e.placement.surfaces.includes('yL')).length""")
         expect(page.locator(".zv-picker-foot")).to_contain_text(f"只能貼在別面的 {elsewhere} 筆不列")
         search.fill("玻璃")
-        for group in ("optimizable", "fixed"):
-            options = page.locator(f"#zone-panel .zv-material[data-entry-kind={group}]:visible")
+        for group in ("參數構造", "成品"):
+            options = page.get_by_role("group", name=group, exact=True).get_by_role("checkbox")
             assert options.count() > 0
             for option in options.all():
                 expect(option.locator("mark").first).to_have_text("玻璃")
@@ -61,6 +61,15 @@ def test_picker_lists_only_selected_candidates_and_filters_both_groups(tmp_path:
         assert watched.page_errors == []
 
 
+def _visible_candidate_texts(page: Page, rows: Locator) -> list[str]:
+    # 每次都展開同一批候選列的選項，讀取畫面實際顯示的範圍、區號與動作。
+    page.locator("#zone-panel h2").hover()
+    for menu in rows.locator(".zv-row-options").all():
+        if menu.get_attribute("open") is None:
+            menu.locator("summary").press("Enter")
+    return rows.all_inner_texts()
+
+
 def test_only_and_undo_restore_each_zones_draft_and_ranges(tmp_path: Path, browser: Browser) -> None:
     _boss_room(tmp_path)
     design = tmp_path / "designs" / f"{SAMPLE}.json"
@@ -75,24 +84,24 @@ def test_only_and_undo_restore_each_zones_draft_and_ranges(tmp_path: Path, brows
         high = page.locator("#zone-panel-range-glass_wool_48k-porous-high")
         high.select_option("0.1")
         rows = page.locator("#zone-panel-list > [data-choice]")
-        before = rows.all_text_contents()
+        before = _visible_candidate_texts(page, rows)
         row_options(page, "glass_wool_24k")
         page.locator("#zone-panel-only-glass_wool_24k").click()
         notice = page.locator("#zone-panel-notice")
         for words in ("③", "④", "⑤", "48K 玻璃棉（2 區有）", "96K 玻璃棉（1 區有）", "「也可以不貼」沒動"):
             expect(notice).to_contain_text(words)
-        first_step = rows.all_text_contents()
+        first_step = _visible_candidate_texts(page, rows)
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         row_options(page, "none")
         page.locator("#zone-panel-remove-none").click()
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "none")
         assert design.read_bytes() == original
         page.locator("#zone-panel-undo").click()
-        assert rows.all_text_contents() == first_step
+        assert _visible_candidate_texts(page, rows) == first_step
         expect(page.locator("#zone-panel-none-row")).to_have_attribute("data-state", "all")
         expect(notice).to_contain_text("已只留")
         page.locator("#zone-panel-undo").click()
-        assert rows.all_text_contents() == before
+        assert _visible_candidate_texts(page, rows) == before
         expect(high).to_have_value("0.1")
         expect(notice).to_have_count(0)
         assert design.read_bytes() == original
@@ -864,3 +873,23 @@ def test_clicking_a_visible_map_zone_keeps_the_scroll_position(tmp_path: Path, b
         _click_zone(page, "yL/z3")
         expect(page.locator("#zone-panel")).to_have_attribute("data-zones", "yL/z3")
         assert pane.evaluate("node => node.scrollTop") == before
+
+
+def test_enter_on_a_partly_listed_covered_product_preserves_its_zones(tmp_path: Path, browser: Browser) -> None:
+    product = "glass_wool_48k_50mm"
+    allowed = {"z1": [WOOLS[0], product, "none"], "z2": [WOOLS[0], "none"]}
+    zones: dict[str, object] = {key: {"mode": "search", "allowed": choices} for key, choices in allowed.items()}
+    _prepare(tmp_path, _design({"yL": zones}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        for key in zones:
+            _click_zone(page, "yL/" + key)
+        row = page.locator(f"#zone-panel-pick-{product}")
+        expect(row).to_have_attribute("aria-checked", "mixed")
+        search = page.get_by_role("searchbox", name="找材料")
+        search.fill(row.locator("strong").inner_text())
+        search.press("Enter")
+        expect(row).to_have_attribute("aria-checked", "mixed")
+        _apply(page)
+        assert page.evaluate(_ALLOWED) == {"yL/" + key: choices for key, choices in allowed.items()}

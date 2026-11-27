@@ -243,9 +243,8 @@ def _back_door_scheme() -> dict[str, object]:
 
 
 def test_face_titles_make_room_for_their_buttons(tmp_path: Path, browser: Browser) -> None:
-    """牆名那一行的「面向它站…」放得下就照寫，放不下改短句，再放不下就不寫；量的是畫出來的字與鈕，不是估的。
-    三間房各看一次，哪一組鈕都不壓到圖上的字：假房間（前後牆五公尺多：四面都換短句）、窄房間（前後牆三公尺多：
-    前後牆不寫、側牆寫得下整句）、後牆靠右有門的假房間（地板小圖下緣外的「門」字不被「切區 ▸」蓋住）。"""
+    """一般與窄房間的四面牆都省去方向旁白，地板與天花保留方向。三間房的切區鈕都避開圖上的字，
+    包括後牆靠右的門在地板小圖下緣標出的「門」。"""
     _prepare(tmp_path)
     narrow = _narrow_scheme()
     narrow["scheme_id"] = "zone-narrow-sample"

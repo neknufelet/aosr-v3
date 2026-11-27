@@ -314,8 +314,12 @@ def test_a_scheme_swapped_in_by_the_page_itself_before_the_jump_is_not_what_the_
         _wait_routes(page, results, 1)
         assert page.evaluate("[document.getElementById('zone-page').inert, inputBusy]") == [True, True]
         assert sent == []
-        assert page.evaluate("name => openScheme(name, true)", OTHER)
-        page.wait_for_function("name => scheme.scheme_id === name", arg=OTHER)
+        with page.expect_response("**/api/zone-material/batch") as batch:
+            page.locator("#zone-panel-apply").evaluate("node => node.click()")
+        assert batch.value.ok and len(sent) == 1
+        page.wait_for_function("!inputBusy")
+        scripted_open_scheme(page, OTHER)
+        page.wait_for_function("name => scheme.scheme_id === name && !inputBusy", arg=OTHER)
         results[0].continue_()
         expect(page.locator("#zone-page-note")).to_have_text(f"存檔途中換了方案：「{SAMPLE}」照樣存好，這次不跳搜尋頁")
         page.wait_for_load_state("networkidle")
@@ -368,3 +372,25 @@ def test_combined_search_holds_selection_until_check_finishes(tmp_path: Path, br
         page.wait_for_url(f"**/gradient?scheme={SAMPLE}")
         assert len(saved) == 2 and watched.page_errors == []
     assert json.loads((tmp_path / "designs" / f"{SAMPLE}.json").read_text())["zones"] == {"yL": {"z1": SEARCH}}
+
+
+def test_combined_batch_reply_cannot_write_into_replacement_scheme(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    _write(tmp_path, ZONE_NAMING_SCHEME | {"scheme_id": OTHER})
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_overview(page)
+        _settled(page)
+        _click_zone(page, "yL/z1")
+        page.locator("#zone-panel-mode-search").check()
+        batch = _hold(page, "**/api/zone-material/batch")
+        page.get_by_role("button", name="套用並拿去搜尋").click()
+        _wait_held(page, batch, 1)
+        assert page.evaluate("name => openScheme(name, true)", OTHER)
+        state = "() => [scheme.scene.surface_zones_by_wall, zoneDesign.zones]"
+        before = page.evaluate(state)
+        batch.release()
+        page.wait_for_function("!document.body.inert")
+        assert page.evaluate(state) == before
+        assert page.evaluate("scheme.scheme_id") == OTHER and page.url == base + "/"
+        assert not (tmp_path / "designs" / f"{OTHER}.json").exists()

@@ -593,11 +593,11 @@ function snapshot() {
     ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
 }
 
-function hasUnsavedLayers() { return Boolean(draft?.layers.length && !readOnly && snapshot() !== savedSnapshot); }
+function hasUnsavedDraft() { return Boolean(draft && !readOnly && snapshot() !== savedSnapshot); }
 function designerSaving() { return byId("workspace").inert; }
 
 window.addEventListener("beforeunload", event => {
-  if (draft && !readOnly && snapshot() !== savedSnapshot) {
+  if (hasUnsavedDraft()) {
     event.preventDefault();
     event.returnValue = true;
   }

@@ -10,6 +10,7 @@ from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_ide
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_cut_link_browser import _cut_front_inside_auto2, _said
 from tests.engine.test_gui_zone_elevation_browser import _cut_by, _drag, _ready_pixel
+from aosr.gui.zone_edit import CutBox
 from tests.engine.test_gui_zone_mirror_draw_browser import END, FIRST, H, SECOND, START, W, _drawn, _matches_mirror, _room
 from tests.engine.test_gui_zone_overview_tasks_browser import _SELECTED, _click_zone, _open_overview, _prepare, _settled
 
@@ -243,3 +244,75 @@ def test_mirror_drag_shows_one_preview_sentence_in_overview(tmp_path: Path, brow
             expect(page.get_by_text(words, exact=True).locator("visible=true")).to_have_count(2)
 
         _drag(page, W, H, START, END, during=input_preview)
+
+
+@pytest.mark.parametrize(("field", "value", "overview"), [
+    ("left", "-", True), ("bottom", "", True), ("left", "", False), ("bottom", "-", False)])
+def test_invalid_offset_is_marked_without_sending_a_cut(tmp_path: Path, browser: Browser, field: str, value: str, overview: bool) -> None:
+    raised = CutBox(id="z1", u_m=(0.5, 1.5), v_m=(0.5, 1.5))
+    with _room(tmp_path, browser, (raised,)) as page:
+        if overview:
+            page.locator("#zone-page-open").click()
+            _enter(page)
+        page.mouse.click(*_ready_pixel(page, W, H)((0.9, 0.9)))
+        original = _drawn(page)
+        sent = []
+        page.on("request", lambda r: sent.append(r.url) if r.url.endswith("/api/zone-cut") else None)
+        box = page.locator("#elevation-" + field)
+        box.fill("")
+        if value:
+            box.press(value)
+        if overview:
+            page.get_by_role("button", name="切好了").click()
+        else:
+            box.press("Tab")
+        expect(box).to_have_attribute("aria-invalid", "true")
+        expect(box).to_be_visible()
+        if overview:
+            page.get_by_role("button", name="切好了").click()
+            expect(page.locator("#zone-map")).to_be_hidden()
+        assert sent == [] and _drawn(page) == original
+
+
+@pytest.mark.parametrize("gesture", ["mouse", "Escape", "one_wall"])
+def test_held_finish_keeps_cut_warning_until_a_fresh_press(tmp_path: Path, browser: Browser, gesture: str) -> None:
+    with _room(tmp_path, browser) as page:
+        wall = "x0" if gesture == "one_wall" else "yL"
+        page.locator("#zone-page-open").click()
+        page.locator("#zone-cut-" + wall).click()
+        done = page.get_by_role("button", name="切好了")
+        held: list[Route] = []
+        page.route("**/api/zone-cut", lambda r: held.append(r))
+        pixel = _ready_pixel(page, 5.5 if wall == "x0" else W, H)
+        page.mouse.move(*pixel(START))
+        page.mouse.down()
+        page.mouse.move(*pixel(END), steps=6)
+        with page.expect_request("**/api/zone-cut"):
+            page.mouse.up()
+        if gesture == "one_wall":
+            done.click()
+            with page.expect_response("**/api/zone-cut") as cut:
+                held[0].continue_()
+            reason = cut.value.json()["reason"]
+            assert "左右牆不跟著畫：對稱軸離左牆 2.45 公尺，房間正中是 2.60 公尺" in reason
+        else:
+            reason = "沒有切：自編越界"
+            if gesture == "mouse":
+                done.hover()
+                page.mouse.down()
+            else:
+                page.keyboard.down("Escape")
+            held[0].fulfill(status=422, json={"error": "自編越界"})
+        _settled(page)
+        if gesture == "mouse":
+            page.mouse.up()
+        elif gesture == "Escape":
+            page.keyboard.down("Escape")
+            page.keyboard.up("Escape")
+        expect(page.locator("#elevation-note")).to_contain_text("不在房間正中" if gesture == "one_wall" else "自編越界")
+        expect(page.locator("#elevation-banner")).to_be_visible()
+        expect(page.locator("#elevation-banner")).to_have_text(reason)
+        if gesture == "one_wall":
+            assert _drawn(page, "x0") and not _drawn(page, "xL")
+        done.click()
+        expect(page.locator("#zone-map")).to_be_visible()

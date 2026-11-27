@@ -217,16 +217,16 @@ async function cutWall(wall, boxes, done, change, repairing = false, cut = null)
   const unlock = window.lockZoneCut();
   const applied = applyCut(wall, boxes, done, mirror, repairing);
   if (mirror && !pendingMirror) pendingMirror = applied;
-  let changed;
+  let outcome;
   try {
-    changed = await applied;
-    if (changed) cut?.();
+    outcome = await applied;
+    if (outcome) cut?.();
   } finally {
     if (pendingMirror === applied) pendingMirror = null;
-    unlock(changed);
+    unlock(outcome === "ok");
   }
-  if (changed) await refreshPlan();
-  return Boolean(changed);  // 清掉這一面的切法要知道真的切了沒（沒切就不給復原）
+  if (outcome) await refreshPlan();
+  return Boolean(outcome);  // 清掉這一面的切法要知道真的切了沒（沒切就不給復原）
 }
 
 function cutZoneLabel(surface, wall) {
@@ -323,7 +323,7 @@ async function applyCut(wall, boxes, done, mirror, repairing) {
   markStale();
   action(updateMultiples);
   action(updateInputPreview);
-  return true;
+  return mirrorWarning?.summary ? "notice" : kind;
 }
 function pointerMetres(svg, event, geometry) {
   const point = svg.createSVGPoint();
@@ -652,11 +652,13 @@ function resizeHandle(svg, wall, box, g) {
   svg.append(handle);
 }
 // 選取的框用畫面方向的四個數字改：只改動到的那一格，另外三格沿用原值（顯示只到公釐，不拿顯示的數字回填）。
-function editSelected(wall, view, width, height, field, value) {
+function editSelected(wall, view, width, height, field, input) {
+  const value = input.valueAsNumber;
   const others = drawnBoxes(wall).filter(box => box.id !== elevationSelected);
   const current = drawnBoxes(wall).find(box => box.id === elevationSelected);
   if (!current) return;
   if (!Number.isFinite(value) || value < 0 || (["width", "height"].includes(field) && value <= 0)) {
+    input.setAttribute("aria-invalid", "true");
     note("請填 0 以上的數字（公尺）；寬與高要大於 0", "notice"); return;
   }
   let [a0, a1, b0, b1] = screenBox(view, width, height, current);
@@ -718,7 +720,8 @@ function selectedEditor(wall, view, width, height) {
     const wrap = document.createElement("label"); wrap.textContent = label;
     const input = document.createElement("input"); input.type = "number"; input.step = "0.01"; input.id = `elevation-${field}`;
     input.defaultValue = metres(value);  // 畫出來的值：跟它不同才算正在打字（限制判決先不重畫，#1111）
-    input.addEventListener("change", () => editSelected(wall, view, width, height, field, Number(input.value)));
+    input.addEventListener("input", () => input.removeAttribute("aria-invalid"));
+    input.addEventListener("change", () => editSelected(wall, view, width, height, field, input));
     wrap.append(input); fields.append(wrap);
   }
   const remove = document.createElement("button"); remove.id = "elevation-delete"; remove.textContent = "刪掉這個框";

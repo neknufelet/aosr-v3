@@ -403,8 +403,10 @@ def test_control_without_touching_ranges_the_saved_design_is_byte_for_byte_part_
         _click_zone(page, "x0/whole_wall")
         page.locator("#zone-panel-mode-search").check()
         _apply(page)
-        for zone in ("yL/z3", "yL/auto1", "yL/auto2", "x0/whole_wall"):
-            _click_zone(page, zone)
+        open_groups(page)
+        page.locator("#zone-group").get_by_role("button", name="選這幾區").click()
+        assert set((page.locator("#zone-panel").get_attribute("data-zones") or "").split()) == {
+            "yL/z3", "yL/auto1", "yL/auto2", "x0/whole_wall"}
         row_options(page, "glass_wool_96k")
         page.locator("#zone-panel-remove-glass_wool_96k").click()
         _apply(page)

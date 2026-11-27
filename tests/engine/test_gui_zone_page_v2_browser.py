@@ -206,7 +206,27 @@ def test_segment_shows_only_its_label_and_remains_keyboard_operable(tmp_path: Pa
         radio.focus()
         expect(radio).to_be_focused()
         radio.press("ArrowRight")
-        expect(page.locator("#zone-panel-mode-fixed")).to_be_checked()
+        fixed = page.locator("#zone-panel-mode-fixed")
+        expect(fixed).to_be_checked()
+        expect(fixed).to_be_focused()
+        page.keyboard.press("ArrowRight")
+        expect(page.locator("#zone-panel-mode-search")).to_be_focused()
+        page.keyboard.press("ArrowLeft")
+        expect(fixed).to_be_focused()
+
+
+def test_fixed_material_arrows_select_and_wrap(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_zone(page)
+        page.locator("#zone-panel-mode-fixed").check()
+        rows = page.get_by_role("radiogroup", name="指定貼哪一種").get_by_role("radio")
+        rows.first.focus()
+        for key, index in (("ArrowDown", 1), ("ArrowLeft", 0), ("ArrowUp", -1), ("ArrowRight", 0)):
+            page.keyboard.press(key)
+            expect(rows.nth(index)).to_be_focused()
+            expect(rows.nth(index)).to_be_checked()
 
 
 def test_fixed_form_uses_short_label_and_depth_placeholder(tmp_path: Path, browser: Browser) -> None:
@@ -287,3 +307,88 @@ def test_saved_material_recovers_after_library_failure(tmp_path: Path, browser: 
         row = page.locator("#zone-panel .zv-material").filter(has_text="自編補讀構造")
         expect(row).to_have_attribute("aria-checked", "true")
         assert len(reads) == failures + 1
+
+
+@pytest.mark.parametrize("mode", ["fixed", "search"])
+def test_drawer_reread_preserves_the_later_pick(tmp_path: Path, browser: Browser, mode: str) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_zone(page)
+        page.locator(f"#zone-panel-mode-{mode}").check()
+        page.locator("#zone-panel-build").click()
+        frame = page.frame_locator("#zone-builder iframe")
+        frame.locator("#name").fill("自編延遲回覆板")
+        frame.locator('#palette [data-kind="porous"]').click()
+        page.route("**/api/materials", lambda r: r.fulfill(status=503, json={"error": "考卷暫停讀取"})
+                   if r.request.frame == page.main_frame else r.continue_())
+        frame.locator("#save").click()
+        expect(page.locator("#zone-builder [role=status]")).to_contain_text("已存入材料庫")
+        page.unroute("**/api/materials")
+        held: list[Route] = []
+        page.route("**/api/materials", lambda r: held.append(r))
+        with page.expect_request("**/api/materials"):
+            page.locator("#zone-builder-close").click()
+        prefix = "material" if mode == "fixed" else "pick"
+        chosen = page.locator(f"#zone-panel-{prefix}-{PRODUCT}")
+        chosen.click()
+        with page.expect_response("**/api/materials"):
+            held[0].continue_()
+        new_row = page.get_by_role("radio" if mode == "fixed" else "checkbox", name="自編延遲回覆板")
+        expect(new_row).to_have_attribute("aria-checked", "false")
+        expect(chosen).to_have_attribute("aria-checked", "true")
+
+
+def test_drawer_rebuilds_default_candidates_after_initial_library_failure(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path, _design({"yL": {"z1": {"mode": "search"}}}))
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.route("**/api/materials", lambda r: r.fulfill(status=503, json={"error": "考卷初讀失敗"}))
+        _open_zone(page)
+        expect(page.locator("#zone-panel-search-from")).to_contain_text("材料庫沒讀全")
+        page.unroute("**/api/materials")
+        page.locator("#zone-panel-build").click()
+        frame = page.frame_locator("#zone-builder iframe")
+        frame.locator("#name").fill("自編初讀恢復棉")
+        frame.locator('#palette [data-kind="porous"]').click()
+        frame.locator("#save").click()
+        expect(page.locator("#zone-builder")).to_have_count(0)
+        expect(page.get_by_role("checkbox", name="自編初讀恢復棉", exact=False)).to_be_checked()
+        for choice in WOOLS:
+            expect(page.locator(f"#zone-panel-pick-{choice}")).to_be_checked()
+
+
+@pytest.mark.parametrize("field", ["name", "backing"])
+def test_escape_preserves_drawer_edits_before_first_layer(tmp_path: Path, browser: Browser, field: str) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_zone(page)
+        page.locator("#zone-panel-mode-fixed").check()
+        page.locator("#zone-panel-build").click()
+        frame = page.frame_locator("#zone-builder iframe")
+        if field == "name":
+            frame.locator("#name").fill("自編未加層")
+        else:
+            frame.locator('[name="backing"][value="rigid"]').check()
+        frame.locator("#name").press("Escape")
+        expect(page.locator("#zone-builder-resume")).to_be_visible()
+        page.locator("#zone-builder-resume").click()
+        if field == "name":
+            expect(frame.locator("#name")).to_have_value("自編未加層")
+        else:
+            expect(frame.locator('[name="backing"][value="rigid"]')).to_be_checked()
+
+
+def test_composing_escape_in_drawer_leaves_the_editor_open(tmp_path: Path, browser: Browser) -> None:
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_zone(page)
+        page.locator("#zone-panel-mode-fixed").check()
+        page.locator("#zone-panel-build").click()
+        name = page.frame_locator("#zone-builder iframe").locator("#name")
+        name.fill("組字中")
+        name.dispatch_event("keydown", {"key": "Escape", "isComposing": True})
+        expect(name).to_be_visible()
+        expect(page.locator("#zone-builder-resume")).to_be_hidden()

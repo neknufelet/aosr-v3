@@ -500,7 +500,18 @@ function startingDraft() {
   if (mode === "unknown") return null;
   return {...untouched(), mode, materialId: mode === "fixed" && sameMethod ? libraryLabel(items[0].zone.material, items[0].wall, items[0].key)?.id ?? "" : ""};
 }
+let draftRevision = 0;
+let libraryRead = 0;
+function markDraftEdited() {
+  draftRevision++;
+  if (draft.libraryRetry) {
+    delete draft.libraryRetry;
+    $("zone-library-retry")?.parentElement.remove();
+  }
+  draftTouched = true;
+}
 function select(ids, partners = []) {
+  draftRevision++;
   followed = partners;
   selected = ids; draftTouched = false; ruleDraft = false;
   openDetails.delete("zone-panel-zones"); openDetails.delete("zone-panel-ref-why");
@@ -529,6 +540,7 @@ async function pick(next, toggled = null) {
   const followers = toggled ? followed.filter(id => next.includes(id)).concat(added) : added;
   if (next.length === selected.length && next.every(id => selected.includes(id)) && sameList(followed, followers)) return;
   if (draftTouched && next.length) {
+    draftRevision++;
     selected = next; followed = followers;
     const message = "換了選區，剛才清單上還沒套用的改動放掉了；要的話再做一次，會套到全部選中的區";
     const discarded = draft.notice === message || Object.keys(draft.ticks).length || Object.keys(draft.ranges).length;
@@ -573,9 +585,14 @@ function cutFace(wall) {
   const panel = $("elevation-panel"), home = document.createComment("立面圖原位");
   const toolbar = panel.querySelector(".walls-row");
   const title = el("strong", "zv-cut-title", `${wallNames[wall]}　切區`);
-  const done = button("zv-cut-done", "切好了", "zone-finish-cut", finishCut);
+  let pendingAtPress = null;
+  const done = button("zv-cut-done", "切好了", "zone-finish-cut", event => {
+    if (event.detail && pendingAtPress?.canFinish === false) return;
+    finishCut();
+  });
   // 等完整點擊才讓數字格失焦，避免滑鼠還沒放開，拒收的回覆就先到了。
   done.onmousedown = event => {
+    pendingAtPress = cutting.pending;
     if (document.activeElement?.matches("#elevation-selected input")) event.preventDefault();
   };
   cutGeneration++;
@@ -615,7 +632,8 @@ window.lockZoneCut = () => {
     page.inert = true;
     return () => { page.inert = false; };
   }
-  editor.pending = true;
+  const request = {};
+  editor.pending = request;
   const locked = [];
   for (let branch = editor.done; branch !== page; branch = branch.parentElement) {
     for (const sibling of branch.parentElement.children) {
@@ -624,11 +642,12 @@ window.lockZoneCut = () => {
       locked.push(sibling);
     }
   }
-  return changed => {
+  return canFinish => {
+    request.canFinish = canFinish;
     for (const element of locked) element.inert = false;
     editor.pending = false;
     if (cutting !== editor) return;
-    if (changed && editor.finishRequested) finishCut();
+    if (canFinish && editor.finishRequested) finishCut();
     else editor.done.focus({preventScroll: true});
     editor.finishRequested = false;
   };
@@ -641,6 +660,8 @@ function finishCut() {
     if (!cutting.pending) return;
   }
   if (cutting.pending) { cutting.finishRequested = true; return; }
+  const invalid = $("elevation-selected").querySelector('[aria-invalid="true"]');
+  if (invalid) { invalid.focus(); return; }
   if (inputBusy) return;
   const wall = cutting.wall;
   restoreElevation();
@@ -651,7 +672,7 @@ function finishCut() {
 document.addEventListener("keydown", event => {
   if (cutting && event.key === "Escape") {
     event.preventDefault();
-    finishCut();
+    if (!event.repeat) finishCut();
   }
 });
 // 牆名那一行讓出右邊那組鈕（#1262）：「面向它站…」壓到鈕就換短句，還壓到就不寫。量畫出來的字（字型各台不同，估的不準）。
@@ -688,6 +709,7 @@ function tickedList(item, ticks) {
 // 等伺服器回那一批的時候整頁鎖住（inert：點圖、按套用都沒作用），所以同時只會有一批在路上。
 // written：做法寫完之後、第一次重畫之前要同步做的事（這一頁自己的變數在這裡改；平面圖檢查回來之後不准再寫）。
 async function applyMethod(items, method, written = () => {}) {
+  const generation = zoneDesignGeneration;
   const drafted = items.find(item => measuredDrafts[item.wall]);
   if (drafted) { zoneNote(`${wallNames[drafted.wall]}有還沒套用的實測阻抗草稿：先套用或取消`, "notice"); return false; }
   const changes = items.filter(() => method.mode !== "fixed" || method.materialId).map(item => method.mode === "fixed"
@@ -701,6 +723,7 @@ async function applyMethod(items, method, written = () => {}) {
       const {response, data} = await reply(fetch("/api/zone-material/batch", {method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({scheme: document_, original_scheme_id: zoneDesign?.original_scheme_id ?? null,
           changes: changes.map(change => ({...change, picked_entry: zoneSetting(change.wall, change.zone).picked_entry ?? null}))})}));
+      if (generation !== zoneDesignGeneration) return false;
       if (!response.ok) {
         const where = data.wall && data.zone && view.byId.get(`${data.wall}/${data.zone}`);
         zoneNote(where && data.reason ? `沒有改：${zoneWhereText(where)}：${data.reason}；一區都沒改` : `沒有改：${data.error}`, "notice");
@@ -715,7 +738,7 @@ async function applyMethod(items, method, written = () => {}) {
         scheme.scene.surface_zones_by_wall[change.wall].find(zone => zoneKey(zone) === change.zone).material = results[index].material;
       });
     } catch (error) {
-      zoneNote(`沒有改：${errorText(error)}`, "notice");
+      if (generation === zoneDesignGeneration) zoneNote(`沒有改：${errorText(error)}`, "notice");
       return false;
     } finally {
       document.querySelector("main").inert = false; $("zone-page").inert = false;
@@ -905,6 +928,7 @@ function plannedRanges(items, lists, edits) {
 // （超出材料頁、收窄後放不下）就不套用，照伺服器的原句寫在小框、套用鈕停用（改了任何一格才再試）。判法只在伺服器一份。
 // 等回覆時整頁鎖住（同 applyMethod 換材料那一步）。回 true＝可以套用。
 async function rangesPass(items, method) {
+  const generation = zoneDesignGeneration;
   const design = structuredClone(designForEdit());
   for (const item of items) {
     design.zones[item.wall] ??= {};
@@ -917,12 +941,13 @@ async function rangesPass(items, method) {
     ({data} = await reply(fetch("/api/zone-limits", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({scheme: wallDocument(), design})})));
   } catch (error) {
-    zoneNote(`範圍沒檢查成，這次沒有套用：${errorText(error)}`, "notice");
+    if (generation === zoneDesignGeneration) zoneNote(`範圍沒檢查成，這次沒有套用：${errorText(error)}`, "notice");
     return false;
   } finally {
     document.querySelector("main").inert = false; $("zone-page").inert = false;
     inputBusy = false;
   }
+  if (generation !== zoneDesignGeneration) return false;
   if (data.status !== "checked") { zoneNote(`範圍沒檢查成，這次沒有套用：${data.message ?? data.error ?? "限制檢查失敗"}`, "notice"); return false; }
   const who = item => items.length > 1 ? `${zoneWhereText(item)}：` : "";
   const red = [...(data.design ?? []).filter(line => line.level === "red").map(line => line.text),
@@ -1078,7 +1103,7 @@ function rangeRow(entry, items, ticks, sync) {
   const row = el("div", "zv-mrange"); row.id = `zone-panel-range-${entry.id}`; row.dataset.choice = entry.id;
   const edit = (part, end, text) => {
     const next = structuredClone(rangeDraft(entry.id)); next[part][end] = text;
-    draft.ranges = {...draft.ranges, [entry.id]: next}; draft.rangeRefused = ""; draftTouched = true; sync();
+    draft.ranges = {...draft.ranges, [entry.id]: next}; draft.rangeRefused = ""; markDraftEdited(); sync();
   };
   const cell = (part, end) => {
     const id = `zone-panel-range-${entry.id}-${part}-${end ? "high" : "low"}`, value = typed[part][end] ?? shown[part]?.texts[end] ?? "";
@@ -1138,7 +1163,7 @@ function deepestRow(items, walls, sync) {
     : null;
   if (lost) { lost.id = "zone-panel-depth-lost"; input.setAttribute("aria-invalid", "true"); }
   const typed = () => {
-    draft.depthText = input.value; draft.depthBad = input.validity.badInput; draft.rangeRefused = ""; draftTouched = true;
+    draft.depthText = input.value; draft.depthBad = input.validity.badInput; draft.rangeRefused = ""; markDraftEdited();
     lost?.remove(); input.removeAttribute("aria-invalid");
     sync();
   };
@@ -1206,10 +1231,11 @@ function candidateAction(items, ticks, id, operation) {
   draft.order = [...before.order.filter(other => after.count(other)), ...after.ids.filter(other => !before.order.includes(other))];
   draft.notice = words.join("；");
   draft.rangeRefused = "";
-  draftTouched = true;
+  markDraftEdited();
   renderZoneOverview();
 }
 function undoCandidate() {
+  markDraftEdited();
   const {removedRanges, ...before} = draft.history.pop();
   for (const id of Object.keys(draft.ranges)) if (!before.order.includes(id)) delete draft.ranges[id];
   Object.assign(draft.ranges, removedRanges);
@@ -1367,6 +1393,11 @@ function materialFilter(container) {
         else label.textContent = name;
       }
     }
+    if (container.getAttribute("role") === "radiogroup") {
+      const visible = [...container.querySelectorAll('[role="radio"]:not([hidden])')];
+      const stop = visible.find(row => row.getAttribute("aria-checked") === "true") ?? visible[0];
+      for (const row of visible) row.tabIndex = row === stop ? 0 : -1;
+    }
     empty.hidden = !query || matches > 0;
     empty.textContent = empty.hidden ? "" : `沒有符合「${input.value.trim()}」的材料`;
     for (const group of container.querySelectorAll("[data-material-group]")) {
@@ -1380,7 +1411,7 @@ function materialFilter(container) {
     if (event.key === "Enter" && input.value.trim()) {
       event.preventDefault();
       const match = [...container.querySelectorAll(".zv-material:enabled:not([data-covered])")]
-        .find(row => row.getClientRects().length && row.getAttribute("aria-checked") !== "true");
+        .find(row => row.getClientRects().length && !row.hasAttribute("data-remove-only") && row.getAttribute("aria-checked") !== "true");
       if (match) {
         input.value = ""; update();
         match.click();
@@ -1402,9 +1433,10 @@ function candidateRow(id, items, ticks, covered, sync) {
     description: entry?.kind === "optimizable" ? rowThickness(entry, pageRange(entry)) :
       entry ? fixedDescription(entry) : none ? (count ? "" : "沒有。") + "程式算出來不貼比較好的區，就不貼，保留原樣" : "材料庫找不到，照原樣留著，開跑時伺服器會點名"});
   if (state === "some") check.querySelector(".zv-material-text").append(el("span", "zv-owned", `${count} 區已有`));
+  const removeOnly = count && !none && candidateRestriction(entry, covered, true);
+  if (removeOnly) check.dataset.removeOnly = "";
   check.onclick = () => {
-    const take = state === "all" || (count && !none && candidateRestriction(entry, covered, true));
-    candidateAction(items, ticks, id, take ? "remove" : "add");
+    candidateAction(items, ticks, id, state === "all" || removeOnly ? "remove" : "add");
     $(check.id)?.focus({preventScroll: true});
   };
   row.append(check);
@@ -1524,6 +1556,7 @@ function searchForm(items, walls, sync) {
   }
   const others = el("div"); others.id = "zone-panel-picker";
   if (!ticks.count(ZONE_NONE)) others.append(candidateRow(ZONE_NONE, items, ticks, null, sync));
+  const groups = new Map();
   for (const entry of [...libraryEntries("optimizable"), ...assignableEntries().filter(fixedCandidate)]) {
     if (ticks.count(entry.id) || !pickerFits(entry, walls, ticks)) continue;
     const reason = candidateRestriction(entry, covered.get(entry.id), false);
@@ -1543,7 +1576,13 @@ function searchForm(items, walls, sync) {
       if (referenceOnly(entry.id)) row.dataset.reference = "off";
       row.append(el("small", "zv-covered-why", explanation));
     }
-    others.append(row);
+    const name = catalogKind(entry) === "fixed" ? "成品" : "參數構造";
+    if (!groups.has(name)) {
+      const group = el("div");
+      group.setAttribute("role", "group"); group.setAttribute("aria-label", name);
+      group.dataset.materialGroup = name; groups.set(name, group); others.append(group);
+    }
+    groups.get(name).append(row);
   }
   const pool = el("div");
   pool.append(el("p", "zv-list-hint", `已勾 ${ids.length} 種${ticks.count(ZONE_NONE) ? "＋也可以不貼" : ""}`), list,
@@ -1569,6 +1608,7 @@ function searchForm(items, walls, sync) {
 function openMaterialBuilder() {
   if ($("zone-builder")) return;
   const items = chosenItems(), mode = draft.mode, generation = zoneDesignGeneration;
+  const revision = draftRevision;
   const ids = selected.join(",");
   const label = [...new Set(items.map(item => item.wall))].map(wall => {
     const here = items.filter(item => item.wall === wall);
@@ -1581,27 +1621,30 @@ function openMaterialBuilder() {
   const status = el("span", null, label); status.setAttribute("role", "status");
   const frame = el("iframe"); frame.title = "材料設計器"; frame.src = "/materials/designer?" + query;
   let savedId = null, loading = false;
-  const stillHere = () => generation === zoneDesignGeneration && selected.join(",") === ids && draft?.mode === mode;
+  const stillHere = () => revision === draftRevision && generation === zoneDesignGeneration && selected.join(",") === ids && draft?.mode === mode;
   const refresh = async () => {
     if (loading || !stillHere()) return;
     loading = true;
+    const read = ++libraryRead;
     try {
       const state = await fetchZoneLibrary();
-      if (!stillHere()) { if (dialog.open) dialog.close(); return; }
+      if (generation !== zoneDesignGeneration || read !== libraryRead) { if (dialog.open) dialog.close(); return; }
       if (state.problem) throw new Error(state.problem);
       applyZoneLibrary(state);
+      renderZoneOverview();  // 材料庫補齊後，重新算目前各區的預設候選。
+      if (!stillHere()) { if (dialog.open) dialog.close(); return; }
+      const currentItems = chosenItems();
       const entry = libraryEntry(savedId);
       if (!entry) throw new Error("材料庫沒有這一筆");
       if (mode === "search") {
-        if (!items.every(item => fitsHere(savedId, item.wall)) || referenceOnly(savedId)) throw new Error("這筆材料不能加入所選區的候選");
+        if (!currentItems.every(item => fitsHere(savedId, item.wall)) || referenceOnly(savedId)) throw new Error("這筆材料不能加入所選區的候選");
         draft.query = "";
-        candidateAction(items, panelTicks(items), savedId, "add");
+        candidateAction(currentItems, panelTicks(currentItems), savedId, "add");
       } else {
         if (!assignableEntries().includes(entry)) throw new Error("這筆材料只能由程式最佳化");
-        draft.materialId = savedId; draft.query = ""; draftTouched = true;
+        draft.materialId = savedId; draft.query = ""; markDraftEdited();
+        renderZoneOverview();
       }
-      delete draft.libraryRetry;
-      renderZoneOverview();
       if (dialog.open) dialog.close();
     } catch (error) {
       const message = `已存入材料庫，尚未加入：${errorText(error)}`;
@@ -1612,12 +1655,12 @@ function openMaterialBuilder() {
   const closeDrawer = () => {
     if (loading || frame.contentWindow?.designerSaving?.()) return;
     if (savedId) { dialog.close(); void refresh(); return; }
-    if (!frame.contentWindow?.hasUnsavedLayers?.()) { dialog.close(); return; }
+    if (!frame.contentWindow?.hasUnsavedDraft?.()) { dialog.close(); return; }
     bar.hidden = true; confirm.hidden = false; frame.inert = true; resume.focus();
   };
   frame.addEventListener("load", () => {
     frame.contentDocument?.addEventListener("keydown", event => {
-      if (event.key === "Escape") { event.preventDefault(); closeDrawer(); }
+      if (event.key === "Escape") { event.preventDefault(); if (!event.isComposing) closeDrawer(); }
     });
   });
   const close = button("zv-btn", "關閉", "zone-builder-close", closeDrawer);
@@ -1703,7 +1746,7 @@ function panelCard() {
   const ruled = new Set(ruleZones(view.faces, view.roles).map(item => item.id));
   const sameAs = rule && items.every(item => ruled.has(item.id)) ? rule.mode : null;
   const allPasted = items.every(item => item.pasted);
-  const choose = (mode, materialId = "") => { draft = {...untouched(), ...draft, libraryRetry: draft?.mode === mode ? draft.libraryRetry : null, query: draft?.mode === mode ? draft.query : "", mode, materialId, rangeRefused: ""}; draftTouched = true; renderZoneOverview(); };
+  const choose = (mode, materialId = "") => { draft = {...untouched(), ...draft, query: draft?.mode === mode ? draft.query : "", mode, materialId, rangeRefused: ""}; markDraftEdited(); renderZoneOverview(); };
   // 套用鈕與它上面那一句「為什麼不能套用」：在小框裡打字（最深那一格）時就地更新這兩樣，不重畫整頁（重畫會換掉正在打的那一格）。
   const apply = button("zv-btn zv-main-btn", `套用到 ${items.length} 區`, "zone-panel-apply", () => action(applyDraft));
   const problem = el("p", "zv-problem zv-panel-problem"); problem.id = "zone-panel-problem"; problem.setAttribute("role", "alert");
@@ -1741,6 +1784,16 @@ function panelCard() {
     if (mode === "fixed") {
       const material = el("div"); material.id = "zone-panel-material"; material.setAttribute("role", "radiogroup");
       material.setAttribute("aria-label", "指定貼哪一種");
+      material.onkeydown = event => {
+        const step = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1}[event.key];
+        if (!step || event.isComposing) return;
+        const rows = [...material.querySelectorAll('[role="radio"]')].filter(row => row.getClientRects().length);
+        const index = rows.indexOf(event.target);
+        if (index < 0) return;
+        event.preventDefault();
+        const next = rows[(index + step + rows.length) % rows.length];
+        next.focus(); next.click();
+      };
       const option = entry => materialRow({entry, name: entry ? vprWords(entry.label) + (entry.id === ruleMaterial && !sameHere ? "（＝其他牆面）" : "") : "照現在貼的，不換",
         description: entry && fixedDescription(entry), role: "radio", state: String(draft.materialId === (entry?.id ?? "")),
         id: `zone-panel-material-${entry?.id ?? ""}`, activate: () => choose("fixed", entry?.id ?? "")});
@@ -2225,7 +2278,7 @@ function renderZoneOverview() {
   if (mapPane) mapPane.scrollTop = mapScroll;
   const scrollBody = page.querySelector(".zv-panel-body");
   if (scrollBody && scrollZone === selected.join(" ") && scrollMode === draft?.mode) scrollBody.scrollTop = panelScroll;
-  const again = typing || focused.startsWith("zone-cut-") ? $(focused) : null;
+  const again = typing || ["zone-cut-", "zone-panel-mode-", "zone-panel-material-"].some(prefix => focused.startsWith(prefix)) ? $(focused) : null;
   again?.focus({preventScroll: true});
   // 放回去的是新畫的一格，原本的反白帶不過來（數字格讀不到選取範圍）。那一格畫的是原值（草稿裡沒有它的字，沒有 typed 記號）
   // ＝使用者進了格子還沒打字：整格反白，跟 Tab 進去時一樣，接著打的字換掉舊值——不然黏在舊值後面，12.5 打 20 變成 12.520（#1231）。
