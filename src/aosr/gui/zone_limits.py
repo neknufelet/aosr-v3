@@ -50,7 +50,7 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import NONE_TARGET, SCHEME_MATERIAL, MaterialGradientSettings, centimeters, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, range_problem, ranged_misfits, target_fit
+from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, narrowed_family, range_problem, ranged_misfits, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
@@ -87,6 +87,40 @@ class DepthTargets:
 
     def label(self, identifier: str) -> str:
         return self.labels.get(identifier, identifier)
+
+
+class CandidateSelection(BaseModel):
+    """一區原來的勾選、草稿可調範圍、當下生效的總深上限。"""
+
+    allowed: tuple[str, ...]
+    ranges: dict[str, ZoneRange] | None = None
+    cap: float | None = None
+
+
+class EffectiveCandidates(BaseModel):
+    allowed: tuple[str, ...]
+    covered: dict[str, str]
+
+
+def effective_candidates(selection: CandidateSelection, targets: DepthTargets) -> EffectiveCandidates:
+    """畫面與開跑共用；設計檔保留原勾選，以便移除家族時回復固定款。"""
+    covered: dict[str, str] = {}
+    for family in targets.settings.family:
+        if family.id not in selection.allowed:
+            continue
+        given = (selection.ranges or {}).get(family.id)
+        bounds = narrowed_family(family, given) if given else family
+        cap = min(family.max_total_depth_m, selection.cap if selection.cap is not None else family.max_total_depth_m)
+        for member in family.presets:
+            material = targets.fixed.get(member)
+            if not isinstance(material, Assembly) or member == family.id:
+                continue
+            wool = sum(layer.thickness_m for layer in material.layers if layer.kind == "porous")
+            air = sum(layer.thickness_m for layer in material.layers if layer.kind == "air")
+            cavity = bounds.cavity_range_m if bounds.initial_cavity_m is not None else (0.0, 0.0)
+            if wool in bounds.thicknesses_m and cavity[0] <= air <= cavity[1] and wool + air <= cap + 1e-12:
+                covered[member] = family.id
+    return EffectiveCandidates(allowed=tuple(code for code in selection.allowed if code not in covered), covered=covered)
 
 
 @dataclass(frozen=True)
@@ -515,6 +549,7 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             construction = catalog.construction(room, wall, key, entry, current, setting, lines)
             lines.extend(_depth_problems(current, mode, cap, catalog.required, construction=construction))
             if mode == "search":
+                setting = catalog.search_setting(wall, key, setting, cap)
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
                 lines.extend(problems)
                 if lines_by_group:
@@ -529,7 +564,8 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
     refusals += [f"{names.get(wall, wall)}：{problem.text}" for wall, lines in walls.items() for problem in lines if problem.level == "red"]
     refusals += [f"{zone_words(wall, key, names)}：{problem.text}" for wall, items in zones.items() for key, lines in items.items()
                  for problem in lines if problem.level == "red"]
-    return {**({"picked_constructions": catalog.picked} if catalog.picked else {}), "status": "checked", "design": [problem.model_dump() for problem in top],
+    return {**({"candidates": catalog.candidates} if catalog.candidates else {}),
+            **({"picked_constructions": catalog.picked} if catalog.picked else {}), "status": "checked", "design": [problem.model_dump() for problem in top],
             "zones": {wall: {key: [problem.model_dump() for problem in lines] for key, lines in items.items()}
                       for wall, items in zones.items() if items},
             "walls": {wall: [problem.model_dump() for problem in lines] for wall, lines in walls.items() if lines},
@@ -544,7 +580,18 @@ class _ZoneCatalog:
     original_id: str | None
     problems: list[Problem]
     picked: dict[str, dict[str, dict[str, str]]] = field(default_factory=dict)
+    candidates: dict[str, dict[str, dict[str, object]]] = field(default_factory=dict)
     load_error: Problem | None = None
+
+    def search_setting(self, wall: str, key: str, setting: ZoneDesign | None, cap: DepthCap | None) -> ZoneDesign | None:
+        if setting is None or not setting.allowed or self.targets is None:
+            return setting
+        selection = CandidateSelection(allowed=setting.allowed, ranges=setting.ranges, cap=cap.value_m if cap else None)
+        effective = effective_candidates(selection, self.targets)
+        if effective.allowed != setting.allowed:
+            self.candidates.setdefault(wall, {})[key] = effective.model_dump()
+            return setting.model_copy(update={"allowed": effective.allowed})
+        return setting
 
     @cached_property
     def targets(self) -> DepthTargets | None:
@@ -659,6 +706,16 @@ def zone_limit_routes(range_check: RangeCheck | None,
             return JSONResponse({"error": "限制檢查的請求要有 scheme（整份方案）"}, status_code=400)
         return JSONResponse(await run_in_threadpool(judged, body["scheme"], body.get("design")))
 
-    return [Route("/api/zone-limits", limits, methods=["POST"])]
+    async def candidates(request: Request) -> Response:
+        if depth_targets is None:
+            return JSONResponse({"error": "還沒有材料庫，無法核對候選"}, status_code=400)
+        try:
+            selections = TypeAdapter(list[CandidateSelection]).validate_python(await request.json())
+            targets = await run_in_threadpool(depth_targets)
+            return JSONResponse([effective_candidates(selection, targets).model_dump() for selection in selections])
+        except (ValueError, OSError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    return [Route("/api/zone-limits", limits, methods=["POST"]), Route("/api/zone-candidates", candidates, methods=["POST"])]
 
 

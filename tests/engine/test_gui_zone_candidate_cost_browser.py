@@ -65,6 +65,11 @@ def _expect_candidate_cost(surface: Locator, present: bool) -> None:
     if not present:
         expect(note).to_have_count(0)
         return
+    expect(surface.get_by_text("這次搜尋需要重新訓練", exact=True)).to_be_visible()
+    details = surface.locator("#zone-panel-candidate-info")
+    if details.get_attribute("open") is None:
+        expect(note).to_be_hidden()
+        details.locator("summary").click()
     expect(note).to_be_visible()
     words = note.inner_text()
     for phrase in ("整塊貼上去的材料", "每筆都要放進訓練", "再多核對一次", "清單、深度上限、裝法或方案有改",

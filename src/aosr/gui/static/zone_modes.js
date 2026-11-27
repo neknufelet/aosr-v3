@@ -333,14 +333,17 @@ async function loadZoneLibrary() { applyZoneLibrary(await fetchZoneLibrary()); }
 function libraryEntries(kind) { return (zoneLibrary || []).filter(entry => entry.kind === kind); }
 function assignableEntries() { return (zoneLibrary || []).filter(entry => entry.kind === "fixed" || entry.kind === "construction"); }
 function fixedCandidate(entry) { return entry?.kind === "fixed" || (entry?.kind === "construction" && entry.backing !== "zone_wall"); }
-function appendFixedCandidateNote(container, allowed) {
+function appendFixedCandidateNote(container, details, allowed) {
   if (!allowed.some(id => fixedCandidate(libraryEntry(id)))) return;
   const note = document.createElement("p");
   note.className = "zone-candidate-cost";
   note.textContent = "清單裡有整塊貼上去的材料。建替身時，每筆都要放進訓練，再多核對一次。"
     + "之後只要清單、深度上限、裝法或方案有改，就要重建替身。"
     + "存檔後，開跑前到第三階段搜尋頁按「預覽轉好的參數」，就能看到是否需要重建及原因。";
-  container.append(note);
+  const summary = document.createElement("p");
+  summary.textContent = "這次搜尋需要重新訓練";
+  container.append(summary);
+  details.append(note);
 }
 function fixedSurface(entry) {
   if (entry.kind === "construction") {

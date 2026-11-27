@@ -62,7 +62,7 @@ from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_construction import OriginalReader
 from aosr.gui.zone_design import WHOLE_WALL_KEY, DesignSettings, ZoneMode, effective_modes, mismatches
 from aosr.gui.zone_limits import (
-    DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, no_group_words, reference_only_refusals, saved_refusals, target_fits,
+    CandidateSelection, DepthCap, DepthLevel, DepthTargets, RangeCheck, depth_cap, effective_candidates, no_group_words, reference_only_refusals, saved_refusals, target_fits,
     ranged_misfit_words, target_line, zone_limits, zone_words,
 )
 from aosr.gui.zone_symmetry import PAIR_WITHIN_M, Frame, SettingsCheck, Symmetry, Unchecked, drawn_frames, drawn_partners, pair_zones, symmetry_on
@@ -204,13 +204,13 @@ def _start_preset(wall: str, zone: str, targets: tuple[str, ...] | None, family:
                       "或一種可調材料（例如 48K 玻璃棉），或把做法改成「指定貼一種」")
 
 
-def _allowed(design: DesignSettings | None, settings: MaterialGradientSettings,
-             fixed_ids: frozenset[str]) -> dict[tuple[str, str], tuple[str, ...]]:
+def _allowed(design: DesignSettings | None, targets: DepthTargets, depths: Mapping[str, float]) -> dict[tuple[str, str], tuple[str, ...]]:
     found = {}
     for wall, zones in (design.zones if design is not None else {}).items():
         for zone, item in zones.items():
             if item.allowed is not None:
-                found[(wall, zone)] = _targets(wall, zone, item.allowed, settings, fixed_ids)
+                selection = CandidateSelection(allowed=item.allowed, ranges=item.ranges, cap=depths.get(surface_of(wall, zone)))
+                found[(wall, zone)] = effective_candidates(selection, targets).allowed
     return found
 
 
@@ -270,7 +270,7 @@ _LEVEL_WORDS = {"zone": "這一塊", "wall": "這面牆", "room": "房間預設"
 
 def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], per_surface: tuple[ZoneMode, ...],
                    depths: Mapping[str, float], sources: Mapping[str, str], targets: DepthTargets,
-                   names: Mapping[str, str]) -> dict[str, tuple[TargetLine, ...]]:
+                   names: Mapping[str, str], choices: Mapping[tuple[str, str], tuple[str, ...]]) -> dict[str, tuple[TargetLine, ...]]:
     """交給搜尋、有上限的每一區，准用的每一組在生效上限下的判決（開跑預覽那一格；准用清單照它拿掉放不下的組）。
 
     寫了可調範圍的組照收窄後的判（#1199，同分區頁 ``zone_limits._target_problems`` 與命令列 ``check_depth_targets``）：
@@ -284,7 +284,7 @@ def _depth_targets(design: DesignSettings | None, pairs: list[tuple[str, str]], 
             continue
         item = design.zones.get(wall, {}).get(zone) if design is not None else None
         given = None if item is None else item.ranges
-        fits = target_fits(None if item is None else item.allowed, depths[surface], targets, given)
+        fits = target_fits(choices.get((wall, zone)), depths[surface], targets, given)
         if not fits:
             continue
         source = sources.get(surface, "request")
@@ -447,10 +447,11 @@ def _plan_without_ties(scheme: Scheme, design: DesignSettings | None, request: G
         family = settings.family_by_id(request.family) if request.family is not None else settings.family[0]
     except ValueError as error:
         raise PlanRefused(f"{error}；可選：{'、'.join(item.id for item in settings.family)}") from error
-    allowed = _allowed(design, settings, fixed_ids)
     ranges = _ranges(design)
     depths, sources = _depths(request, modes, design)
-    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names)
+    choices = _allowed(design, targets_for_depth, depths)
+    allowed = {pair: _targets(*pair, ids, settings, fixed_ids) for pair, ids in choices.items()}
+    lines = _depth_targets(design, pairs, per_surface, depths, sources, targets_for_depth, names, choices)
     unusable = {surface: frozenset(line.target for line in found if not line.usable) for surface, found in lines.items()}
     for pair, chosen in list(allowed.items()):
         dropped = unusable.get(surface_of(*pair), frozenset())

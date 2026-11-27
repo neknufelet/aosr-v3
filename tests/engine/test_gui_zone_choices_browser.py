@@ -94,13 +94,20 @@ def test_menus_list_only_what_this_face_can_take(tmp_path: Path, browser: Browse
         assert watched.page_errors == [] and watched.console_errors == []
 
 
-def test_input_page_recognizes_the_assigned_door_and_existing_floor(tmp_path: Path, browser: Browser) -> None:
+@pytest.mark.parametrize("with_original", [False, True])
+def test_input_page_recognizes_the_assigned_door_and_existing_floor(tmp_path: Path, browser: Browser, with_original: bool) -> None:
     """門和木地板採各自的面，右欄能認出已指定的門和原方案內的木地板。"""
     document = room109_document()
     floor = next(entry["material"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == FLOOR_WOOD)
     cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]["floor"][0]["material"] = (
         cast(dict[str, object], floor))
     _write(tmp_path, document)
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    original = walls["x0"][0]["material"]
+    if with_original:
+        _write(tmp_path, document | {"scheme_id": "before"})
+        (tmp_path / "designs").mkdir()
+        (tmp_path / "designs" / "room109.json").write_text(json.dumps({"scheme_id": "room109", "original_scheme_id": "before"}))
     _sample_library(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -110,12 +117,17 @@ def test_input_page_recognizes_the_assigned_door_and_existing_floor(tmp_path: Pa
         choose_fixed(page, "x0", "whole_wall", DOOR)
         assert fixed_value(page, "x0", "whole_wall") == DOOR
 
-        choose_mode(page, "x0", "whole_wall", "keep_original")
-        # 舊表「不貼」那一格（#zone-keep-）→ 右欄那一區那一句的開頭（同一支 keepWords）。
-        door_name = next(entry["label"] for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)
-        expect(page.locator("#wall-zone-what-x0-whole_wall")).to_have_text(f"原牆「{door_name}」原樣，不貼東西。改這一區 ▸")
-        expect(page.locator("#zone-numbers-x0-whole_wall")).to_have_text("原牆：多層構造")
-        assert page.evaluate("scheme.scene.surface_zones_by_wall.x0[0].material.backing") == "air"
+        door = page.evaluate('zoneList("x0")[0].material')
+        choose_mode(page, "x0", "whole_wall", "keep_original",
+                    said_part="放回原牆" if with_original else "看不出原牆是什麼；照現在的材料不動")
+        current = page.locator("#wall-zone-what-x0-whole_wall")
+        if with_original:
+            expect(current).to_contain_text("原牆")
+            assert page.evaluate('zoneList("x0")[0].material') == original
+        else:
+            expect(current).not_to_contain_text("原牆「")
+            expect(current).to_contain_text("木門")
+            assert page.evaluate('zoneList("x0")[0].material') == door
 
         # 地板本身就是木地板那一筆（直接取代整面的固定阻抗，有的房間地板就是這樣）：選單照樣是它，但它就是地板本身，不標紅說不是地板用的。
         page.locator("#elevation-wall-floor").click()
@@ -596,3 +608,26 @@ def test_a_tunable_vpr_in_the_library_never_shows_on_the_zone_page(tmp_path: Pat
             assert VPR not in material_values(page, wall, "whole_wall")
         assert "鋼板 VPR（自編）" not in page.locator("body").inner_text()
         assert watched.page_errors == [] and watched.console_errors == []
+
+def test_old_mounted_door_changes_only_depth_after_save(tmp_path: Path, browser: Browser) -> None:
+    document = room109_document()
+    walls = cast(dict[str, dict[str, list[dict[str, object]]]], document["scene"])["surface_zones_by_wall"]
+    door = next(entry for entry in SAMPLE_USER_ENTRIES if entry["id"] == DOOR)
+    walls["x0"][0]["material"] = {"kind": "mounted_on_wall", "layers": cast(dict[str, object], door["material"])["layers"],
+                                 "wall": walls["x0"][0]["material"]}
+    _write(tmp_path, document)
+    _sample_library(tmp_path)
+    path = tmp_path / "schemes" / "room109.json"
+    before = json.loads(path.read_bytes())["scene"]["surface_zones_by_wall"]["x0"][0]["material"]
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, "room109")
+        page.locator("#elevation-wall-x0").click()
+        open_panel(page, "x0", "whole_wall")
+        expect(page.locator(f"#zone-panel-material-{DOOR}")).to_be_checked()
+        page.locator("#zone-panel-depth").fill("22")
+        apply_and_return(page)
+        _save(page, "room109")
+    assert json.loads(path.read_bytes())["scene"]["surface_zones_by_wall"]["x0"][0]["material"] == before
+    setting = json.loads((tmp_path / "designs" / "room109.json").read_bytes())["zones"]["x0"]["whole_wall"]
+    assert setting == {"mode": "fixed", "max_depth_m": 0.22}

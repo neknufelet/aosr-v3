@@ -20,7 +20,7 @@ from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _cut_by, _drag, _open_scheme, _write, _zones
-from tests.engine.test_gui_zone_modes_browser import PRESET, _first_cut, _modes, _save, _write_room109_design
+from tests.engine.test_gui_zone_modes_browser import PRESET, WALL_FIXED, _first_cut, _modes, _save, _write_room109_design
 
 LY, LZ = ROOM_109["Ly"], ROOM_109["Lz"]
 SAMPLE = "zone-naming-sample"
@@ -346,8 +346,10 @@ def test_the_list_puts_each_zone_in_its_group_with_words_from_the_data(tmp_path:
         setting = _modes(page, "x0")[key]
         if group == "search":
             allowed = cast(list[str], setting["allowed"])
-            names = cast(str, page.evaluate("allowed => allowed.map(choiceName).join('、')", allowed))
-            expect(what).to_contain_text(f"已交給程式挑：從 {len(allowed)} 種裡挑（{names}）")
+            effective = ["glass_wool_48k", "glass_wool_24k", "none"]
+            assert allowed == [*effective, WALL_FIXED]  # 存檔保留五公分棉加十公分空腔；搜尋由 48K 家族涵蓋。
+            names = cast(str, page.evaluate("ids => ids.map(choiceName).join('、')", effective))
+            expect(what).to_contain_text(f"已交給程式挑：從 {len(effective)} 種裡挑（{names}）")
             expect(what).to_contain_text("直接算就照它算")
         elif group == "fixed":
             assert setting["mode"] == "fixed"

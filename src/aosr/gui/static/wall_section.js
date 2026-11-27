@@ -94,7 +94,7 @@ function zoneSentence(wall, item, group, marks) {
   const paired = pairSentence(marks, item);
   if (group === "unknown") return `${uncertainWords(item.construction)}。${paired}`;
   if (group === "search") {
-    const allowed = item.allowed;
+    const allowed = item.effectiveAllowed;
     // 從幾種裡挑：跟那一頁小框同一支算（pickableChoices，程式不會挑的那一類不算進 N，另外點名；#1265 單元 3 審查設計洞 2）。
     const pickable = allowed && pickableChoices(allowed), aside = allowed ? allowed.filter(id => !pickable.includes(id)) : [];
     // 括號裡兩段（能挑的、程式不會挑的）有哪段寫哪段，中間才接「；」（全是程式不會挑的那一類時開頭不多一個「；」，第二趟追加）。

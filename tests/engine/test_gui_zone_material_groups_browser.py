@@ -482,15 +482,13 @@ def test_zone_map_uses_the_saved_original_to_identify_a_bare_copy(tmp_path: Path
             _click_zone(page, "yL/z3")
             page.locator("#zone-panel-mode-keep_original").check()
             _apply(page)
-            expect(zone).to_have_attribute("data-shown", "still")
-            assert page.evaluate("""() => {
-                const mat = zoneList("yL").find(z => z.id === "z3").material;
-                return [plainNow(mat, "yL", "z3"), originalWords(mat, "yL", "z3")];
-            }""") == ["不貼，保留原樣"] * 2
-            expect(zone.locator("title")).to_contain_text("不貼，保留原樣")
+            expect(page.locator("#zone-page-note")).to_contain_text("看不出原牆是什麼；照現在的材料不動")
+            expect(zone).to_have_attribute("data-shown", "fixed")
+            expect(zone.locator("title")).to_contain_text("布置用面板")
+            assert page.evaluate('zoneSetting("yL", "z3").picked_entry') == "ceiling_copy"
             _click_zone(page, "yL/z3")
-            expect(page.locator("#zone-panel-now-keep_original")).to_have_attribute("data-zones", "yL/z3")
-            expect(page.locator(".zv-chip[data-zone='yL/z3']")).not_to_contain_text("看不出")
+            expect(page.locator("#zone-panel-now-fixed")).to_have_attribute("data-zones", "yL/z3")
+            expect(page.locator("#zone-panel-material-ceiling_copy")).to_be_checked()
         assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -510,7 +508,9 @@ def test_table_pick_saves_the_entry_and_clears_it_on_replacement_or_mode_change(
         _save(page, design=True)
         assert json.loads(path.read_bytes())["zones"]["yL"]["z3"] == {"mode": "fixed"}
         choose_fixed(page, "yL", "z3", "table_sample")
-        choose_mode(page, "yL", "z3", "keep_original")
+        # 這一筆就是剛才木板背後的原牆，選回它時伺服器已認出兩者相同。
+        assert page.evaluate('zoneSetting("yL", "z3")') == {"mode": "keep_original"}
+        choose_mode(page, "yL", "z3", "keep_original", said_part="看不出原牆是什麼")
         _save(page, design=True)
         assert json.loads(path.read_bytes())["zones"]["yL"]["z3"] == {"mode": "keep_original"}
 
