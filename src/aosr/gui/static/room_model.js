@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const TICKS_HZ = [20, 30, 40, 50, 60, 80, 100, 150, 200, 300];
   const COLORS = ["#2a6fdb", "#e07b39", "#5fb36b", "#9b59b6"];
-  let model = null, timer = null, plot = null;
+  let model = null, timer = null, plot = null, activeRun = null;
 
   async function call(url, body) {
     const response = await fetch(url, body === undefined ? {} :
@@ -65,16 +65,22 @@
     $("facts").textContent = `網格 ${result.mesh.tetrahedra} 個四面體，空氣 ${result.mesh.volume_m3} m³，算了 ${result.seconds} 秒`;
   }
 
+  function stopPolling() {
+    clearInterval(timer); timer = null; activeRun = null;
+  }
+
   async function poll(runId) {
     try {
       const data = await call(`/api/room-model-jobs/${runId}`);
+      if (runId !== activeRun) return;  // 換了房或重按過：舊工作的回應不畫、不動計時器
       $("state").textContent = data.status === "done" ? "" : data.text + (data.error ? "\n" + data.error : "");
       if (data.status === "running") return;
-      clearInterval(timer); timer = null;
+      stopPolling();
       $("run").disabled = false;
       if (data.result) draw(data.result);
     } catch (error) {
-      clearInterval(timer); timer = null;
+      if (runId !== activeRun) return;
+      stopPolling();
       $("run").disabled = false;
       $("state").textContent = error.message;
     }
@@ -83,6 +89,8 @@
   $("file").addEventListener("change", async () => {
     const file = $("file").files[0];
     if (!file) return;
+    stopPolling();
+    $("result").hidden = true;
     $("state").textContent = "讀取中…";
     try {
       showModel(await call("/api/room-models", {file_name: file.name, data_base64: base64(await file.arrayBuffer())}));
@@ -97,8 +105,12 @@
     document.querySelectorAll("#layers select").forEach((select) => { absorption[select.dataset.layer] = select.value; });
     $("run").disabled = true;
     try {
-      const job = await call(`/api/room-models/${model.id}/runs`, {absorption});
+      const forModel = model.id;
+      const job = await call(`/api/room-models/${forModel}/runs`, {absorption});
+      if (!model || model.id !== forModel) return;  // 等回應時換了房
       $("state").textContent = job.display_text || "計算低頻中";
+      stopPolling();
+      activeRun = job.run_id;
       timer = setInterval(() => poll(job.run_id), 3000);
     } catch (error) {
       $("run").disabled = false;

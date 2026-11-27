@@ -12,11 +12,15 @@ import sys
 import time
 from pathlib import Path
 
+from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
 from aosr.config.frequency_axis import FEM_LANE_FREQUENCIES_HZ
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui.room_model import ABSORPTION_RATIOS
+from aosr.config.paths import config_path
+from aosr.config.room_shell_import import load_room_shell_import_settings
+from aosr.geometry.rhino_room import read_rhino_room
+from aosr.gui.room_model import ABSORPTION_RATIOS, RoomModels, room_model_routes
 from aosr.reporting.room_shell_run import run
 
 TEST_ROOM = Path(__file__).parent / "data" / "room_shell_test_room.3dm"
@@ -73,6 +77,22 @@ def test_upload_lists_checks_layers_and_a_picture(tmp_path: Path) -> None:
         assert _upload(client)["id"] == first["id"]
         bad = client.post("/api/room-models", json={"data_base64": "不是base64"})
         assert bad.status_code == 400
+        # 讀不了的檔回 400，而且不留在磁碟上
+        junk = client.post("/api/room-models", json={"data_base64": base64.b64encode(b"not a rhino file").decode()})
+        assert junk.status_code == 400
+        assert sorted(p.name for p in (tmp_path / "data" / "room-models").iterdir()) == [str(first["id"])]
+
+
+def test_an_upload_over_the_limit_is_refused_while_reading(tmp_path: Path) -> None:
+    models = RoomModels(tmp_path, (sys.executable, "-c", "pass"), "a" * 40, config_path("capabilities.toml"))
+    models.body_limit = 1000
+    app = Starlette(routes=room_model_routes(models, tmp_path))
+    with TestClient(app, base_url="http://localhost") as client:
+        big = client.post("/api/room-models", content=b'{"data_base64": "' + b"A" * 2000 + b'"}',
+                          headers={"Content-Type": "application/json"})
+        assert big.status_code == 400 and "太大" in big.json()["error"]
+        small = client.post("/api/room-models", content=b"[", headers={"Content-Type": "application/json"})
+        assert small.status_code == 400 and "JSON" in small.json()["error"]
 
 
 def test_run_sends_each_layer_its_impedance_ratio_and_returns_the_result(tmp_path: Path) -> None:
@@ -82,9 +102,11 @@ def test_run_sends_each_layer_its_impedance_ratio_and_returns_the_result(tmp_pat
         url = f"/api/room-models/{model['id']}/runs"
         assert client.post(url, json={"absorption": {names[0]: "hard"}}).status_code == 400
         assert client.post(url, json={"absorption": {name: "loud" for name in names}}).status_code == 400
+        assert client.post(url, json={"absorption": {name: ["hard"] for name in names}}).status_code == 400
         assert client.post("/api/room-models/" + "0" * 64 + "/runs", json={"absorption": {}}).status_code == 404
         choice = {name: ("strong" if name.startswith("Panel") else "hard") for name in names}
         job = client.post(url, json={"absorption": choice}).json()
+        assert client.post(url, json={"absorption": choice}).json()["run_id"] == job["run_id"]  # 重按不重算
         for _ in range(100):
             state = client.get(f"/api/room-model-jobs/{job['run_id']}").json()
             if state["status"] != "running":
@@ -103,7 +125,9 @@ def test_background_run_gives_one_curve_per_speaker_on_the_official_axis(tmp_pat
     axis = [round(f, 3) for f in FEM_LANE_FREQUENCIES_HZ if f <= 60.0]
     assert result["frequencies_hz"] == axis
     curves = result["curves"]
-    assert isinstance(curves, list) and len(curves) >= 1
+    speakers = read_rhino_room(TEST_ROOM, load_room_shell_import_settings(
+        config_path("room_shell_import.toml")).max_file_bytes).speakers
+    assert isinstance(curves, list) and len(speakers) >= 1 and len(curves) == len(speakers)
     assert all(len(curve["spl_db"]) == len(axis) for curve in curves)
     modes = result["modes_hz"]
     assert isinstance(modes, list) and modes[0] > 20.0

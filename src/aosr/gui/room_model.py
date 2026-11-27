@@ -35,6 +35,7 @@ REFERENCE_SECONDS = 420
 REFERENCE_LABEL = "測試房 70 m³ 在 florian-coder 上"
 _MODEL_ID = re.compile(r"[0-9a-f]{64}")
 _RUN_ID = re.compile(r"[0-9a-f]{32}")
+_BODY_ALLOWANCE = 64 * 1024
 
 
 def _choice_label(ratio: float | None) -> str:
@@ -46,6 +47,15 @@ def _choice_label(ratio: float | None) -> str:
 
 def absorption_choices() -> list[dict[str, str]]:
     return [{"key": key, "label": _choice_label(ratio)} for key, ratio in ABSORPTION_RATIOS]
+
+
+def _layer_areas(room: RoomShell) -> dict[str, float]:
+    """每個圖層的面積，直接從三角形算：檢查沒過（例如座位朝向不對）時也有，畫面才看得到圖。"""
+    areas: dict[str, float] = {}
+    for t in (*room.shell, *(t for solid in room.solids for t in solid.triangles)):
+        cross = np.cross(np.subtract(t.b, t.a), np.subtract(t.c, t.a))
+        areas[t.layer] = areas.get(t.layer, 0.0) + float(np.linalg.norm(cross)) / 2.0
+    return areas
 
 
 def _preview(room: RoomShell, names: list[str]) -> str:
@@ -63,6 +73,10 @@ class RoomModels:
         self.models = data_dir / "room-models"
         self.models.mkdir(parents=True, exist_ok=True)
         self.settings: RoomShellImportSettings = load_room_shell_import_settings(config_path("room_shell_import.toml"))
+        # 上傳那包 JSON 的上限：檔案上限換成 base64 的長度，再留一點給檔名與括號。超過就不往下讀。
+        self.body_limit = (self.settings.max_file_bytes + 2) // 3 * 4 + _BODY_ALLOWANCE
+        # 同一份模型、同一組吸音只算一次：還在算或算好了就回同一個工作，重按不重算。
+        self.started: dict[str, dict[str, object]] = {}
         self.manager = JobManager(data_dir / "room-model-jobs", runner, engine_commit, capabilities,
                                   reference_seconds=REFERENCE_SECONDS, reference_label=REFERENCE_LABEL,
                                   result_url_template="/api/room-model-jobs/{run_id}")
@@ -80,12 +94,19 @@ class RoomModels:
         folder = self.models / model_id
         folder.mkdir(exist_ok=True)
         path = folder / "model.3dm"
-        if not path.exists():
+        fresh = not path.exists()
+        if fresh:
             path.write_bytes(content)
-        room = read_rhino_room(path, self.settings.max_file_bytes)
+        try:
+            room = read_rhino_room(path, self.settings.max_file_bytes)
+        except ValueError:
+            if fresh:  # 讀不了的檔不留在磁碟上
+                path.unlink()
+                folder.rmdir()
+            raise
         report = check_room_shell(room, self.settings)
-        names = sorted(name for name, _ in report.area_by_layer)
-        area = dict(report.area_by_layer)
+        area = _layer_areas(room)
+        names = sorted(area)
         summary = {"id": model_id, "ok": report.ok, "layers": names}
         (folder / "summary.json").write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
         return {**summary,
@@ -109,12 +130,21 @@ class RoomModels:
         if not isinstance(chosen, dict) or not isinstance(layers, list) or set(chosen) != set(layers):
             raise ValueError("每個圖層都要選一種吸音")
         ratios = dict(ABSORPTION_RATIOS)
-        if any(value not in ratios for value in chosen.values()):
-            raise ValueError("吸音選項無效")
+        if any(not isinstance(value, str) or value not in ratios for value in chosen.values()):
+            raise ValueError("吸音選項無效：每個圖層給一個選項代號（字串）")
         snapshot = {"model_path": str(self.models / model_id / "model.3dm"),
                     "impedance_ratio_by_layer": {name: ratios[chosen[name]] for name in layers}}
-        return self.manager.start_snapshot(json.dumps(snapshot, ensure_ascii=False), model_id[:12],
-                                           job_fields={"running_label": "計算低頻中"})
+        text = json.dumps(snapshot, ensure_ascii=False, sort_keys=True)
+        earlier = self.started.get(text)
+        if earlier is not None:
+            try:
+                if self.manager.get(str(earlier["run_id"]))["status"] in ("running", "done"):
+                    return earlier
+            except (ValueError, FileNotFoundError, KeyError):
+                pass
+        job = self.manager.start_snapshot(text, model_id[:12], job_fields={"running_label": "計算低頻中"})
+        self.started[text] = job
+        return job
 
     def job(self, run_id: str) -> dict[str, object]:
         if _RUN_ID.fullmatch(run_id) is None:
@@ -134,9 +164,27 @@ def room_model_routes(models: RoomModels, static: Path) -> list[Route]:
     async def page(request: Request) -> Response:
         return FileResponse(static / "room_model.html", media_type="text/html")
 
+    async def bounded_json(request: Request) -> object:
+        """邊讀邊數：宣告的或實際讀到的超過上限就停，不把一整包讀進記憶體再判。"""
+        declared = request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > models.body_limit:
+            raise ValueError(f"上傳太大，檔案上限 {models.settings.max_file_bytes / 1e6:.0f} MB")
+        chunks: list[bytes] = []
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > models.body_limit:
+                raise ValueError(f"上傳太大，檔案上限 {models.settings.max_file_bytes / 1e6:.0f} MB")
+            chunks.append(chunk)
+        try:
+            document: object = json.loads(b"".join(chunks))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError("上傳內容不是 JSON") from exc
+        return document
+
     async def upload(request: Request) -> Response:
         try:
-            return JSONResponse(models.upload(await request.json()))
+            return JSONResponse(models.upload(await bounded_json(request)))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
