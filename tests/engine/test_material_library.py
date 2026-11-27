@@ -17,10 +17,13 @@ from typing import cast
 import pytest
 from pydantic import TypeAdapter
 
+from aosr.config.catalog_surfaces import load_catalog_surfaces
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
+from aosr.config.physics_constants import load_physics_constants
 from aosr.materials import library
+from aosr.materials.catalog_absorption import random_incidence_absorption
 from aosr.materials.construction_models import Assembly, MeasuredImpedance, MeasuredImpedancePoint, SurfaceMaterial
 from aosr.runtime import child_process_env, configure_jax
 from tests.engine._cpu_pins import forward_cpu_pins
@@ -58,11 +61,12 @@ _ENTRY: TypeAdapter[library.LibraryEntry] = TypeAdapter(library.LibraryEntry)
 
 
 def test_builtins_are_every_preset_as_fixed_and_every_family_as_optimizable() -> None:
-    """內建材料：構造預設每筆一個固定材料、梯度設定每個家族一個可最佳化材料，代號一一對上。"""
+    """內建材料：構造預設每筆一個固定材料、文獻硬面每筆一個固定材料、梯度設定每個家族一個可最佳化材料，代號一一對上。"""
     entries = library.builtin_entries()
     presets = load_construction_presets(config_path("construction_presets.toml"))
     families = load_material_gradient_settings(config_path("material_gradient.toml")).family
-    assert [e.id for e in entries if e.kind == "fixed"] == [p.id for p in presets]
+    catalog = load_catalog_surfaces(config_path("catalog_surfaces.toml"))[1]
+    assert [e.id for e in entries if e.kind == "fixed"] == [p.id for p in presets] + [c.id for c in catalog]
     assert [e.id for e in entries if e.kind == "optimizable"] == [f.id for f in families]
     assert all(e.provenance == "literature" for e in entries)
     assert len({e.id for e in entries}) == len({e.label for e in entries}) == len(entries)
@@ -84,7 +88,8 @@ def test_builtin_families_rebuild_todays_gradient_settings() -> None:
 def test_builtin_fixed_entries_carry_the_preset_material_unchanged() -> None:
     """內建固定材料的物理材料＝構造預設那份材料原樣驗證出來的。"""
     presets = {p.id: p for p in load_construction_presets(config_path("construction_presets.toml"))}
-    fixed = [e for e in library.builtin_entries() if isinstance(e, library.FixedEntry)]
+    fixed = [e for e in library.builtin_entries() if isinstance(e, library.FixedEntry) and e.id in presets]
+    assert len(fixed) == len(presets)
     for entry in fixed:
         assert entry.surface_material() == TypeAdapter(SurfaceMaterial).validate_python(presets[entry.id].material)
         assert (entry.label, entry.source, entry.links, entry.notes) == (
@@ -300,3 +305,66 @@ def test_fixed_surface_distinguishes_standalone_material_from_a_family() -> None
     entry = library.FixedEntry.model_validate(_fixed())
     assert library.fixed_surface(entry) == entry.surface_material()
     assert library.fixed_surface(_ENTRY.validate_python(_optimizable())) is None
+
+
+# 手冊原表（pyroomacoustics 材料資料庫，與 PTB 同源），125 Hz 起逐八度；另抄一份釘在這裡，設定檔抄錯一格就紅。
+HANDBOOK_ALPHA = {
+    "door_wood_solid": (0.14, 0.10, 0.06, 0.08, 0.10, 0.10, 0.10),
+    "glass_single_3mm": (0.08, 0.04, 0.03, 0.03, 0.02, 0.02, 0.02),
+    "glass_double_gap30": (0.15, 0.05, 0.03, 0.03, 0.02, 0.02, 0.02),
+    "wood_floor_on_joists": (0.18, 0.12, 0.10, 0.09, 0.08, 0.07, 0.07),
+    "wood_floor_on_sleepers": (0.09, 0.06, 0.05, 0.05, 0.05, 0.04),
+    "gypsum_double_13mm_stud": (0.15, 0.10, 0.06, 0.04, 0.04, 0.05, 0.05),
+    "plasterboard_ceiling": (0.20, 0.15, 0.10, 0.08, 0.04, 0.02),
+    "brick_rendered": (0.01, 0.02, 0.02, 0.03, 0.03, 0.04, 0.04),
+    "brick_painted": (0.01, 0.01, 0.02, 0.02, 0.02, 0.02, 0.02),
+    "concrete_smooth": (0.01, 0.01, 0.02, 0.02, 0.02, 0.05, 0.05),
+    "concrete_floor": (0.01, 0.03, 0.05, 0.02, 0.02, 0.02, 0.02),
+    "hard_surface_average": (0.02, 0.02, 0.03, 0.03, 0.04, 0.05, 0.05),
+}
+
+
+def test_catalog_surfaces_reproduce_their_handbook_absorption_at_each_band() -> None:
+    """文獻硬面（門、窗、木地板、石膏板、磚、混凝土）：換成阻抗表後，在每個頻帶中心用 Paris 公式正算回去，
+    等於手冊那一格；頻帶外平坦延伸，最低頻帶以下各點都等於最低頻帶那一格。"""
+    table, surfaces = load_catalog_surfaces(config_path("catalog_surfaces.toml"))
+    entries = {e.id: e for e in library.catalog_entries()}
+    rho_c = load_physics_constants(config_path("physics_constants.toml")).rho_c
+    assert list(entries) == [s.id for s in surfaces] == list(HANDBOOK_ALPHA)
+    for surface in surfaces:
+        entry = entries[surface.id]
+        assert (entry.label, entry.provenance, entry.source) == (surface.label, "literature", surface.source)
+        assert entry.imaginary_missing and library.basis_label(entry) == library.BASIS_LABELS["approximate"]
+        material = entry.surface_material()
+        assert isinstance(material, MeasuredImpedance)
+        rows = {round(point.frequency_hz, 3): point.real_pa_s_m for point in material.points}
+        assert material.points[0].frequency_hz <= table.lowest_hz * 2 ** (1 / table.points_per_octave)
+        assert material.points[-1].frequency_hz >= table.highest_hz / 2 ** (1 / table.points_per_octave)
+        alphas = HANDBOOK_ALPHA[surface.id]
+        assert surface.absorption == alphas, surface.id
+        assert surface.band_center_hz == tuple(125.0 * 2.0**k for k in range(len(alphas))), surface.id
+        assert "Hz 以下" in material.source_and_conditions and "平延伸" in material.source_and_conditions
+        for band, alpha in zip(surface.band_center_hz, alphas, strict=True):
+            back = random_incidence_absorption(rows[band] / rho_c)
+            assert back == pytest.approx(alpha, abs=1e-4), (surface.id, band)
+        assert material.points[0].real_pa_s_m == rows[surface.band_center_hz[0]]
+
+
+def test_catalog_surface_above_the_paris_peak_is_refused_not_clamped() -> None:
+    """手冊值超過 Paris 頂點會被夾掉、不再是那一格；整筆拒收，不默默換值。"""
+    table, surfaces = load_catalog_surfaces(config_path("catalog_surfaces.toml"))
+    loud = surfaces[0].model_copy(update={"absorption": (0.99, *surfaces[0].absorption[1:])})
+    with pytest.raises(ValueError, match="clamped"):
+        library._catalog_entry(loud, library._catalog_axis(table), load_physics_constants(config_path("physics_constants.toml")).rho_c)
+
+
+def test_catalog_surface_above_the_paris_peak_off_the_sampling_points_is_refused() -> None:
+    """帶心不在阻抗表取點上（235 Hz）也要拒收：檢查看手冊值本身，不看取到了哪些點。"""
+    table, surfaces = load_catalog_surfaces(config_path("catalog_surfaces.toml"))
+    axis = library._catalog_axis(table)
+    centres = (surfaces[0].band_center_hz[0], 235.0, *surfaces[0].band_center_hz[2:])
+    assert all(abs(f - 235.0) > 1.0 for f in axis)
+    loud = surfaces[0].model_copy(update={"band_center_hz": centres,
+                                          "absorption": (surfaces[0].absorption[0], 0.99, *surfaces[0].absorption[2:])})
+    with pytest.raises(ValueError, match="clamped"):
+        library._catalog_entry(loud, axis, load_physics_constants(config_path("physics_constants.toml")).rho_c)
