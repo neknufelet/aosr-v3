@@ -133,8 +133,8 @@ def test_two_size_edits_whose_resizes_finish_out_of_order_never_leave_the_top_ba
         _seen(page, plans, "後改那一次的平面圖檢查")
         sent_before = len(plans)
         resizes[0].continue_()
-        page.unroute("**/api/zone-resize")
         _release(resizes[2:])
+        page.unroute("**/api/zone-resize")
         page.wait_for_timeout(400)
         assert len(plans) == sent_before, "先改的那一次醒來時已經過時，還是送了平面圖檢查"
         _let_go(page, "**/api/plan", plans)

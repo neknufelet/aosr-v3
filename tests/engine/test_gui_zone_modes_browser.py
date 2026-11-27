@@ -565,9 +565,9 @@ def test_a_footer_reply_written_after_the_save_survives_the_verdict_that_save_as
         note = page.locator("#zone-to-search-note")
         expect(note).to_have_text("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次")
         assert held, "存檔時問的那一次限制判決應該還在路上"
-        page.unroute("**/api/zone-limits")
         for route in held:
             route.continue_()
+        page.unroute("**/api/zone-limits")
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
         expect(note).to_have_text("每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次")
         assert watched.page_errors == []

@@ -92,8 +92,8 @@ def test_an_edit_made_while_the_plan_check_is_on_its_way_takes_the_undo_away(tmp
         assert held, "圖面檢查應該還在路上"
         page.locator("#depth-room").fill("20")
         page.locator("#depth-room").blur()
-        page.unroute("**/api/plan")
         _release(held)
+        page.unroute("**/api/plan")
         _settled(page)
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
         expect(page.locator("#elevation-undo-clear")).to_have_count(0)
@@ -117,8 +117,8 @@ def test_switching_walls_while_the_plan_check_is_on_its_way_keeps_the_slot_of_th
         assert held, "圖面檢查應該還在路上"
         page.locator("#elevation-wall-xL").click()
         expect(page.locator("#elevation-wall-xL")).to_have_attribute("aria-pressed", "true")
-        page.unroute("**/api/plan")
         _release(held)
+        page.unroute("**/api/plan")
         _settled(page)
         expect(page.locator("#elevation-undo-clear")).to_have_count(0)
         expect(page.locator("#elevation-clear")).to_have_count(1)

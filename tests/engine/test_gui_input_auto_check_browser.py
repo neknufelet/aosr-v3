@@ -78,8 +78,8 @@ def _seen(page: Page, held: list[Route], what: str) -> None:
 
 
 def _let_go(page: Page, pattern: str, held: list[Route]) -> None:
-    page.unroute(pattern)
     _release(held)
+    page.unroute(pattern)
 
 
 def _commit(page: Page, selector: str, value: str) -> None:
