@@ -8,6 +8,9 @@ from playwright.sync_api import Locator, Page, expect
 
 
 def scheme_open_button(page: Page, name: str) -> Locator:
+    # 先等方案清單讀到這一份：存檔、另存之後清單是解鎖後才重讀的，選單若在清單回來前就打開，
+    # 已經展開的選單不會補畫新的那一列（#1265 單元 5b 第二趟審查 6A，整套 -n 8 時逾時；11-27 雲端另存後馬上重開也逾時）。
+    page.wait_for_function("name => schemeNames.includes(name)", arg=name)
     close_results(page)
     if page.locator("#scheme-menu").is_hidden():
         page.locator("#scheme-menu-button").click()
@@ -18,12 +21,31 @@ def scheme_open_button(page: Page, name: str) -> Locator:
 
 
 def open_scheme(page: Page, name: str) -> None:
-    # 先等方案清單讀到這一份：存檔、另存之後清單是解鎖後才重讀的，選單若在清單回來前就打開，
-    # 已經展開的選單不會補畫新的那一列（#1265 單元 5b 第二趟審查 6A，整套 -n 8 時逾時）。
-    page.wait_for_function("name => schemeNames.includes(name)", arg=name)
     scheme_open_button(page, name).click()
     if page.locator("#leave-edits").is_visible():
         page.get_by_role("button", name="不存走", exact=True).click()
+
+
+# 頁面靜下來了：整頁沒鎖、忙碌旗落下、分區頁沒有一批改動在路上，而且最新那一次平面圖檢查與限制檢查都回來、畫上去了
+# （頂條那一句不是「檢查中…」）。打開方案時忙碌旗落下那一刻，兩個檢查才剛送出去（app.js 的 openScheme 解鎖後才 refreshPlan）；
+# 限制檢查晚一點回來會把立面圖與分區頁整頁重畫（zone_limits.js 的 showZoneLimits → renderElevation → renderZoneOverview），
+# 在那之前量的元素會被換掉：量位置回 None、點到被換掉的鈕逾時（11-27 雲端底列、立面圖兩支）。
+# 只在沒有攔著 /api/plan 或 /api/zone-limits 的時候用：攔著時檢查回不來，會一直等。
+SETTLED = """() => { const zone = document.getElementById('zone-page');
+    return !document.querySelector('main').inert && !zone.inert && !inputBusy && !(Number(zone.dataset.changing) > 0)
+        && zoneLimitsFresh() && zoneLimitsShown === zoneLimitsGeneration
+        && document.getElementById('check-state').dataset.kind !== 'pending'; }"""
+
+
+def wait_settled(page: Page) -> None:
+    page.wait_for_function(SETTLED)
+
+
+def open_zone_page(page: Page) -> None:
+    """第 2 段右欄那一顆打開「這間房貼什麼」，等到平面圖看得到、頁面靜下來（見 SETTLED）才回來。"""
+    page.locator("#zone-page-open").click()
+    expect(page.locator("#zone-map")).to_be_visible()
+    wait_settled(page)
 
 
 # 開頁先開的那一份存好的範例預設叫這個名字（open_example_scheme）。
