@@ -1,4 +1,5 @@
 """元件目錄的每一格都能回到樣板、設定或層的欄位約束。"""
+from typing import cast
 from pathlib import Path
 
 from httpx import Response
@@ -10,9 +11,11 @@ from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.material_names import family_display_name
-from aosr.gui.problem_text import kind_word, rounded_number
-from aosr.materials.construction_models import Assembly, MicroPerforatedLayer, PerforatedLayer, PorousLayer
+from aosr.gui.material_elements import Fields, _word
+from aosr.gui.problem_text import kind_word, material_form_spec, rounded_number
+from aosr.materials.construction_models import Assembly, BoardLayer, MicroPerforatedLayer, PerforatedLayer, PorousLayer
 from aosr.materials.library import FixedEntry, builtin_entries
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 
 
 def _catalog(folder: Path) -> Response:
@@ -62,8 +65,18 @@ def test_plate_bounds_and_absent_board(tmp_path: Path) -> None:
     plate, = [r for r in rows if r["kind"] == layer.kind and sample.label in r["templates"]]
     assert any(f"開孔率 {rounded_number(layer.open_area * 100)}%" in size for size in plate["templates"][sample.label])
     board, = [r for r in rows if r["kind"] == "board"]
-    assert board["template_note"] == "內建樣板沒有這一種"
-    assert board["parameters"] == ["面密度", "面阻力"]
+    # #1330 擬合 VPR 的鋼板是內建裡第一個「板」：板這一種從此有內建樣板，列得出它的名字。
+    vpr, = [e for e in builtin_entries() if e.id in FITTED_VPR_IDS]
+    assert board["template_note"] == "用這組物性的內建樣板："
+    assert vpr.label in board["templates"]
+    # 有樣板以後參數那一格寫這筆板層的值（從寫入端取：內建那筆的板層）。
+    assert isinstance(vpr, FixedEntry) and isinstance(vpr.material, Assembly)
+    plate_layer, = [layer for layer in vpr.material.layers if layer.kind == "board"]
+    assert isinstance(plate_layer, BoardLayer)
+    fields = cast(Fields, material_form_spec()["board"]["fields"])
+    assert board["parameters"] == [_word(fields, "surface_mass_kg_m2", plate_layer.surface_mass_kg_m2),
+                                   _word(fields, "resistance_pa_s_m", plate_layer.resistance_pa_s_m)]
+    assert board["parameters"][0].startswith("面密度 ") and board["parameters"][1].startswith("面阻力 ")
 
 
 def _sample(key: str, provenance: str, layers: list[dict[str, object]], label: str | None = None) -> FixedEntry:

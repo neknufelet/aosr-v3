@@ -34,7 +34,8 @@ STEPS = "demo_wool_steps"
 MAIN = {"plan": "5ad63e325f1be6ebe6e2667ff0aae32fcdd0f5e566363606787b82d79a6490aa",
         "designs": "5e1e59739d1601558b2d67efc73e45180e1ec00039deb2fb1c6b453261a4d3c2",
         "ledger": "baaf346edde5911d0b575359266304d780aed23729712464d7f60b8e4c6df079",
-        "preview": "727dec6ca0f6b3cefc20c60e4b7d612972721a81109f351b17bcbe874e581edb",  # #1323：labels 多了 12 筆文獻硬面的名字
+        # #1323：labels 多了 12 筆文獻硬面的名字；#1330：再多擬合 VPR 一筆名字（拿掉它重算等於 727dec6c…，其餘逐位元組不變）
+        "preview": "caee5adb61bfcc0be76d229a3e86a2314f09a69827169d4cb74a1102fcb2b2c5",
         "limits": "634c0333b9cdda95b933e4c21ffc2ecbd07e6f047b8265a2f5fa48ee0d008aa8"}
 
 
