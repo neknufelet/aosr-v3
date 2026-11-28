@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
 from playwright.sync_api import Browser, Locator, Page, expect
 
@@ -26,6 +26,16 @@ from tests.engine.test_gui_zone_overview_tasks_browser import (
 )
 
 VPR, = FITTED_VPR_IDS
+
+
+class Box(TypedDict):
+    """圖上一個部位的框（getBBox 換成左上右下）與它的 class。"""
+    name: str
+    x: float
+    y: float
+    r: float
+    b: float
+
 ZONE = ("yL", "z1")  # 自編房間裡貼在原牆上的一區：換回原牆要拆得回它記的原牆
 SHOTS = Path(os.environ.get("AOSR_BACKING_SHOTS", "")) if os.environ.get("AOSR_BACKING_SHOTS") else None
 
@@ -247,7 +257,7 @@ def test_map_names_the_backing_until_switched_back(tmp_path: Path, browser: Brow
 
 def _laid_apart(zone: Locator) -> None:
     """那一區上的號碼圈、做法字、背後那一行、配對記號互不重疊，而且都在那一區裡面（#1338 審查：只核字會漏掉壓字與越界）。"""
-    boxes = cast(list[dict[str, float]], zone.evaluate("""group => {
+    boxes = cast(list[Box], zone.evaluate("""group => {
         const box = node => { const b = node.getBBox(); return {name: node.getAttribute('class') || node.tagName, x: b.x, y: b.y, r: b.x + b.width, b: b.y + b.height}; };
         const parts = [...group.querySelectorAll('.zv-badge, .zv-search-label, .zv-backing-label, .zv-pair-mark, .zv-missed-bg, .zv-pair-words:not(.zv-hide)')];
         return [box(group.querySelector('.zv-fill')), ...parts.map(box)]; }"""))
@@ -305,7 +315,7 @@ DRAW = """([wall, key, width, height, mark]) => {
     return found; }"""
 
 
-def _apart(boxes: list[dict[str, float]], behind: bool = True) -> None:
+def _apart(boxes: list[Box], behind: bool = True) -> None:
     """第一個是那一區的底，其餘部位都要在底裡面、而且兩兩不疊（「沒配成一對」黑條本來就墊在那一句底下，不互比）。"""
     fill, parts = boxes[0], boxes[1:]
     assert any(part["name"] == "zv-backing-label" for part in parts) is behind, parts
@@ -327,5 +337,5 @@ def test_backing_line_never_sits_on_the_badge_or_pair_marks(tmp_path: Path, brow
         cases = [(80, 100, None, True), (80, 140, "pair", True), (190, 140, "pair", True), (190, 140, "missed", True), (120, 140, None, True),
                  (80, 100, "pair", False), (80, 100, "missed", False)]  # 最後兩種放不下背後那一行：不寫，也不壓字
         for width, height, mark, behind in cases:
-            _apart(cast(list[dict[str, float]], page.evaluate(DRAW, [ZONE[0], ZONE[1], width, height, mark])), behind)
+            _apart(cast(list[Box], page.evaluate(DRAW, [ZONE[0], ZONE[1], width, height, mark])), behind)
         assert base
