@@ -1,6 +1,14 @@
 /* 方案輸入頁自己的樣式；共用的在 app.css（#1360 換新外框：深底色票，同一個意思同一個色家族）。 */
 /* 外框：body 是 app.css 的格子（頂列／功能列＋內容）；主頁與分區頁輪流佔內容那一格。
    兩段各自是一組 .app-cols：左欄是設定（第 1 段「這間房現在」、第 2 段這一面的區清單），中間是圖。 */
+/* 這一頁（含分區頁）自己的色票：三種做法的淡底／選中的濃底、警示淡底、遮罩與陰影，全都從 app.css 的色票調出來，
+   立面圖、分區頁的圖、兩邊的圖例同一個值（app.css 沒有半透明的這幾格；要全站共用時搬過去）。 */
+body.app{--search-fill:rgba(239,138,46,.34);--search-strong:rgba(239,138,46,.55);   /* --acc */
+  --fixed-soft:rgba(111,179,170,.16);--fixed-fill:rgba(111,179,170,.34);--fixed-strong:rgba(111,179,170,.55);   /* --fix */
+  --still:#3d4349;--still-mark:#8a9298;--still-fill:rgba(160,167,173,.18);--still-strong:rgba(160,167,173,.36);   /* 灰：保留原樣 */
+  --bad-t:rgba(226,119,106,.14);   /* --bad */
+  --ref-band:rgba(60,120,210,.16);   /* 參考範圍：跟材料曲線（material-ui.js）同一個藍 */
+  --shade:rgba(0,0,0,.4);--mask:rgba(0,0,0,.6)}
 body.app>main,body.app>#zone-page{grid-column:2;grid-row:2;min-width:0}
 @media (max-width:900px){body.app>main,body.app>#zone-page{grid-column:1}}  /* 窄畫面外框收掉功能列、只剩一欄 */
 .input-main{--left:400px}
@@ -27,13 +35,13 @@ body.app>main,body.app>#zone-page{grid-column:2;grid-row:2;min-width:0}
 /* 立面圖的字：比外框的 .app svg text 具體，下面各條（區名、自動補的區、鏡子、提示）的顏色才算數。 */
 .input-main #elevation .zone text,.input-main #elevation .elevation-marker text,.input-main #elevation .elevation-edge{fill:var(--ink)}
 .input-main #elevation .zone-auto text{fill:var(--soft)}
+.input-main #elevation .zone .zone-number text{fill:var(--sunk)}  /* 區號：亮圈深字，不吃上面那一條 */
 .input-main #elevation .zone-preview-hint{fill:var(--ink)}
 @media (max-width:900px){.roomrow.app-cols,.cutrow.app-cols{grid-template-columns:minmax(0,1fr)}.room-step .app-cols>.app-left,.room-step .app-cols>.app-center{grid-column:1;grid-row:auto;border-right:0}}
 /* 從 style.css 搬來、這一頁還在用的幾條（style.css 不再載入）。 */
 .input-main input[type=number]{width:6.5rem}
 .row strong{display:inline-block;min-width:6rem}
 .input-main svg{width:100%;height:auto}
-.input-main button:disabled{opacity:.5;cursor:default}
 .furniture-fields{border-top:1px solid var(--line);padding:.8rem 0}
 .furniture-fields .fields label,#cabinet-fields label{flex-direction:column;align-items:flex-start}
 .height-problem{display:block;white-space:pre-line;font-weight:400;margin:.3rem 0 .7rem}
@@ -122,8 +130,8 @@ body.app>main,body.app>#zone-page{grid-column:2;grid-row:2;min-width:0}
 .facts details.fold summary::marker{color:var(--soft)}
 .facts details.fold[open]{padding-bottom:.4rem}
 /* 座標數字在右卡裡比以前窄：名字欄與數字格收窄，一個點的 x、y、z 排得進同一行（不收的話 z 掉到下一行，打開後高一倍）。 */
-#coordinates-fold .row strong{min-width:9rem}
-#coordinates-fold input[type=number]{width:5rem}
+#coordinates-fold .row strong{display:block;min-width:0}  /* #1360 左欄 400 寬：名字自己一行，x、y、z 三格排在下一行 */
+#coordinates-fold input[type=number]{width:4.5rem}
 .facts h3{font-size:1rem;margin:.75rem 0 .4rem}
 .facts h4{font-size:.9375rem;margin:.75rem 0 .3rem}
 #placement-warnings:not([hidden]){margin:.5rem 0;padding-left:1.2rem;font-size:.8125rem}
@@ -143,7 +151,7 @@ table:has(#archived-list) th,#archived-list td:not(:nth-child(2)):not(:nth-child
 .finished-date,.finished-time{display:inline-block;white-space:nowrap}
 #archived summary{cursor:pointer;color:var(--acc)}
 /* 非正常完成的產物整列染色，查看與比較仍可用於診斷；代號底下那一行狀態加粗，只在標點後折。 */
-#results-list tr.not-finished,#archived-list tr.not-finished{background:rgba(226,119,106,.12);color:var(--bad)}
+#results-list tr.not-finished,#archived-list tr.not-finished{background:var(--bad-t);color:var(--bad)}
 #results-list .run-status,#archived-list .run-status{display:block;white-space:normal;word-break:keep-all;font-weight:600}
 /* 結果抽屜每一列的兩個動作（看、封存）、勾好兩筆後的「比較」、算完後的「查看結果頁」長一樣：
    連結外觀做成跟按鈕一樣（訊息叫人「按」它，它就要長得像能按的）。
@@ -171,7 +179,7 @@ input[readonly]{background:var(--sunk);border-color:var(--line-strong);color:var
 /* 主欄寬照結果清單還在頁面中間時的寬（#1265 單元 4 搬進抽屜，頁面寬不跟著變）。 */
 #archived-packages-list td{white-space:nowrap}
 #archived-packages-list button{padding:.4rem .8rem;line-height:1.3}
-#archived-packages-list tr.not-finished{background:rgba(226,119,106,.12);color:var(--bad)}
+#archived-packages-list tr.not-finished{background:var(--bad-t);color:var(--bad)}
 #archived-packages-list .run-status{display:block;white-space:normal;word-break:keep-all;font-weight:600}
 /* 構造每層獨立一列；長預設名字與出處在窄畫面完整換行。 */
 .wall-editor{padding:.8rem 0}
@@ -193,7 +201,7 @@ input[readonly]{background:var(--sunk);border-color:var(--line-strong);color:var
 
 /* 永久刪除以紅框紅字區別搬回；內距與同列按鈕一致。窄畫面各表格自己左右捲動。 */
 button.archive-danger{background:var(--panel);color:var(--bad);border:1px solid var(--bad);padding:.4rem .8rem;line-height:1.3}
-button.archive-danger:hover{background:rgba(226,119,106,.12)}
+button.archive-danger:hover{background:var(--bad-t)}
 #archived-packages{width:100%}
 .archive-scroll-note{display:none}
 #archived-packages-list td:nth-child(2){white-space:normal}
@@ -214,9 +222,9 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
    卡片比圖窄時才縮。 */
 #elevation svg{width:auto;max-width:100%;margin-top:2.75rem;touch-action:none;user-select:none;cursor:crosshair}
 #elevation-frame{fill:var(--sunk);stroke:var(--soft);stroke-width:2}
-.zone rect{fill:rgba(111,179,170,.24);stroke:var(--fix);stroke-width:2}
+.zone rect{fill:var(--fixed-fill);stroke:var(--fix);stroke-width:2}
 .zone-auto rect{fill:var(--panel);stroke:var(--faint);stroke-dasharray:6 4}
-.zone.selected rect{fill:rgba(111,179,170,.45);stroke-width:4}
+.zone.selected rect{fill:var(--fixed-strong);stroke-width:4}
 .zone text,.elevation-edge,.elevation-marker text{font-size:14px;fill:var(--ink);pointer-events:none}
 .zone-auto text{fill:var(--soft)}
 /* 區號碼（#1176）：深色圓白字，跟下面表的「區」那一欄同一個號碼；超過限制的區圓變紅。不接滑鼠（按下去照樣是畫框或搬框）。 */
@@ -227,21 +235,21 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
 .zone-drawn{cursor:move}
 .zone.moving rect{fill-opacity:.7;stroke-dasharray:6 3}
 /* 每一區的做法（#1105）：指定貼一種＝青綠（--fix）、保留原牆＝灰、由程式最佳化＝橘（--acc，#1360 起）；立面圖、圖例、第 2 段右欄清單同一套。 */
-.zone.zone-mode-keep_original rect,#elevation-frame.zone-mode-keep_original{fill:rgba(160,167,173,.14);stroke:var(--soft)}
-.zone.zone-mode-search rect,#elevation-frame.zone-mode-search{fill:rgba(239,138,46,.26);stroke:var(--acc)}
-.zone.zone-mode-search.selected rect{fill:rgba(239,138,46,.5)}
-.zone.zone-mode-keep_original.selected rect{fill:rgba(160,167,173,.32)}
+.zone.zone-mode-keep_original rect,#elevation-frame.zone-mode-keep_original{fill:var(--still-fill);stroke:var(--soft)}
+.zone.zone-mode-search rect,#elevation-frame.zone-mode-search{fill:var(--search-fill);stroke:var(--acc)}
+.zone.zone-mode-search.selected rect{fill:var(--search-strong)}
+.zone.zone-mode-keep_original.selected rect{fill:var(--still-strong)}
 /* 停用的「拿去搜尋」照樣看得清楚（審查 11-15：白字淺底、整顆半透明太淡）：深字淺灰底、不透明；跟旁邊那一句留間隔。 */
 #zone-to-search:disabled{opacity:1;background:var(--line);color:var(--soft);border-color:var(--line)}
 #input-footer #zone-to-search-note{margin:.5rem 0 0}
 /* 超過限制（#1111）：紅框紅底；每一條原因照輕重上色（紅＝擋、橘＝警告、灰＝說明）。 */
-.zone.zone-red rect,#elevation-frame.zone-red,#elevation-frame.wall-red{fill:rgba(226,119,106,.16);stroke:var(--bad);stroke-width:3}
+.zone.zone-red rect,#elevation-frame.zone-red,#elevation-frame.wall-red{fill:var(--bad-t);stroke:var(--bad);stroke-width:3}
 .limit-lines p{margin:.15rem 0}
 .limit-red{color:var(--bad);font-weight:600}
 .limit-warn{color:var(--warn)}
 .limit-note{color:var(--soft)}
 .zone-thin{fill:none;stroke:var(--bad);stroke-width:3;stroke-dasharray:5 3}
-.zone-preview{fill:rgba(111,179,170,.16);stroke:var(--fix);stroke-dasharray:3 3}
+.zone-preview{fill:var(--fixed-soft);stroke:var(--fix);stroke-dasharray:3 3}
 .elevation-marker{pointer-events:none}
 .elevation-marker.speaker rect{fill:var(--c1)}
 .elevation-marker.seat circle{fill:var(--good)}
@@ -254,9 +262,9 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
 /* 鏡子線（對稱軸）用點劃線，跟補滿格子的灰虛線分得開（#1265 單元 3：只換線型，位置與算法照舊）。 */
 .mirror-axis line{stroke-dasharray:10 4 2 4}
 .mirror-axis text,.mirror-link text,.mirror-preview text{font-size:13px;fill:var(--ink);paint-order:stroke;stroke:var(--sunk);stroke-width:3px;stroke-linejoin:round}
-.mirror-preview rect{fill:rgba(111,179,170,.16);stroke:var(--fix);stroke-width:2;stroke-dasharray:6 4}
+.mirror-preview rect{fill:var(--fixed-soft);stroke:var(--fix);stroke-width:2;stroke-dasharray:6 4}
 .mirror-preview.pending rect{fill:none;stroke:var(--soft)}
-.mirror-preview.refused rect{fill:rgba(226,119,106,.16);stroke:var(--bad)}
+.mirror-preview.refused rect{fill:var(--bad-t);stroke:var(--bad)}
 .mirror-preview.refused text{fill:var(--bad);font-weight:700}
 .mirror-resize{cursor:nesw-resize;fill:var(--sunk);stroke:var(--ink);stroke-width:2}
 .mirror-blocked{pointer-events:none;fill:none;stroke:var(--bad);stroke-width:2;stroke-dasharray:6 4}
@@ -265,8 +273,8 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
 
 /* 兩條共用容器隨主表單鎖住；選單與另存框可以伸出頂條。 */
 #input-bars,#input-footer{position:sticky;background:var(--panel);border:1px solid var(--line-strong);overflow:visible;padding:0 1rem}
-#input-bars{top:var(--top);z-index:8;border-radius:0 0 .65rem .65rem;box-shadow:0 3px 12px #0006}
-#input-footer{bottom:0;z-index:6;border-radius:.65rem .65rem 0 0;box-shadow:0 -3px 12px #0006}
+#input-bars{top:var(--top);z-index:8;border-radius:0 0 .65rem .65rem;box-shadow:0 3px 12px var(--shade)}
+#input-footer{bottom:0;z-index:6;border-radius:.65rem .65rem 0 0;box-shadow:0 -3px 12px var(--shade)}
 .input-nav{display:flex;gap:1.1rem;align-items:center;font-size:.85rem;padding:.35rem 0;border-bottom:1px solid var(--line-strong)}
 .input-nav a{color:var(--soft);text-decoration:none}.input-nav a:hover{text-decoration:underline}.input-nav [aria-current]{color:var(--ink);font-weight:700}
 .bar-row,.bar-actions{display:flex;align-items:center;gap:.65rem}
@@ -283,7 +291,7 @@ section:has(> #elevation-panel){overflow-x:clip;overflow-y:visible}
 #input-bars button,#show-results{background:var(--panel);border:1px solid var(--line-strong);color:var(--ink);padding:.45rem .75rem;border-radius:6px;font:inherit;text-decoration:none}
 #input-bars button.primary{background:var(--acc);color:var(--sunk);border-color:var(--acc);font-weight:700}
 #input-bars #save-as,#calculate{background:var(--ink);color:var(--sunk);border-color:var(--ink)}
-#scheme-menu,.bar-popup{position:absolute;z-index:2;top:calc(100% + .4rem);min-width:18rem;max-width:min(34rem,90vw);background:var(--panel);border:1px solid var(--line-strong);border-radius:.5rem;box-shadow:0 .4rem 1.4rem #0006;padding:.75rem}
+#scheme-menu,.bar-popup{position:absolute;z-index:2;top:calc(100% + .4rem);min-width:18rem;max-width:min(34rem,90vw);background:var(--panel);border:1px solid var(--line-strong);border-radius:.5rem;box-shadow:0 .4rem 1.4rem var(--shade);padding:.75rem}
 #scheme-menu{width:min(26rem,84vw);max-height:60vh;overflow-y:auto}
 #scheme-menu strong{font-size:.85rem;color:var(--soft)}
 #scheme-menu [data-scheme]:not([hidden]){display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line-strong)}
@@ -336,7 +344,7 @@ html:has(#input-bars){scroll-padding-bottom:7rem}
 #input-footer[data-state=failed] #next-title{color:var(--bad)}
 #input-footer #run-state:not(:empty){color:var(--soft)}
 #leave-edits{background:var(--panel);max-width:27rem;border:1px solid var(--line-strong);border-radius:.65rem;color:var(--ink)}
-#leave-edits::backdrop{background:#0009}
+#leave-edits::backdrop{background:var(--mask)}
 #input-bars :focus-visible,#input-footer :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
 
 #current-stop:has([hidden]),#current-stop:empty,.followed-run:has(#run-state:empty),.followed-run:has(#run-state[hidden]){display:none}
@@ -379,9 +387,9 @@ button.lnk{color:var(--ink);margin-left:.4rem}
 .legend{display:flex;flex-wrap:wrap;gap:.35rem 1.125rem;font-size:.8125rem;color:var(--soft);margin:.5rem .125rem 0}
 .legend[hidden]{display:none}
 .legend .sw{display:inline-block;width:.75rem;height:.75rem;border-radius:2px;margin-right:.35rem;vertical-align:-1px;border:1px solid var(--line-strong)}
-.legend .sw.zone-mode-search{background:rgba(239,138,46,.5);border-color:var(--acc)}
-.legend .sw.zone-mode-fixed{background:rgba(111,179,170,.45);border-color:var(--fix)}
-.legend .sw.zone-mode-keep_original{background:rgba(160,167,173,.32);border-color:var(--soft)}
+.legend .sw.zone-mode-search{background:var(--search-fill);border-color:var(--acc)}
+.legend .sw.zone-mode-fixed{background:var(--fixed-fill);border-color:var(--fix)}
+.legend .sw.zone-mode-keep_original{background:var(--still-fill);border-color:var(--soft)}
 .legend .sw-mirror{display:inline-block;width:1.5rem;height:2px;margin-right:.35rem;vertical-align:4px;
   background:repeating-linear-gradient(90deg,var(--soft) 0 10px,transparent 10px 14px,var(--soft) 14px 16px,transparent 16px 20px)}
 #elevation-note:empty{display:none}
@@ -402,7 +410,7 @@ button.lnk{color:var(--ink);margin-left:.4rem}
 #elevation-list-notes .notice{margin:.25rem 0 .5rem;font-size:.8125rem;line-height:1.45}
 .tag{display:inline-block;font-size:.8125rem;padding:0 .45rem;border-radius:4px;margin-left:.4rem}
 .tag-search{background:var(--acc-t);color:var(--acc);border:1px solid var(--acc)}
-.tag-fixed{background:rgba(111,179,170,.16);color:var(--fix);border:1px solid var(--fix)}
+.tag-fixed{background:var(--fixed-soft);color:var(--fix);border:1px solid var(--fix)}
 .tag-still,.tag-unknown{background:var(--sunk);color:var(--soft);border:1px solid var(--line-strong)}
 #zone-methods-row{margin:.75rem 0 0}
 #zone-methods-row button.go{display:block;width:100%;padding:.65rem .875rem;border-radius:8px;border:0;background:var(--ink);color:var(--sunk);font-weight:600;font-size:.9375rem;text-align:left}
@@ -417,9 +425,9 @@ button.lnk{color:var(--ink);margin-left:.4rem}
 /* 結果抽屜（#1265 單元 4，示意圖第三版「算過的結果」）：右側整高一條，底下半透明遮罩，點遮罩關。
    一列＝一筆結果：勾選格（勾了標 A／B）、名字與一行小字、看與封存；評分設定不同的兩筆勾在一起時兩列標紅。 */
 #results-drawer[hidden]{display:none}
-#results-mask{position:fixed;inset:0;background:#0009;z-index:20}
+#results-mask{position:fixed;inset:0;background:var(--mask);z-index:20}
 #results-panel{position:fixed;top:0;right:0;bottom:0;box-sizing:border-box;width:min(680px,100vw);margin:0;border:0;border-radius:0;
-  z-index:21;background:var(--panel);box-shadow:-10px 0 30px #0006;padding:1.25rem 1.5rem;overflow:auto}
+  z-index:21;background:var(--panel);box-shadow:-10px 0 30px var(--shade);padding:1.25rem 1.5rem;overflow:auto}
 html.drawer-open{overflow:hidden}
 #results-panel .drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
 #results-panel h2{font-size:1.25rem;margin:0 0 .25rem}
@@ -438,7 +446,7 @@ html.drawer-open{overflow:hidden}
 #results-list .res-acts{white-space:nowrap;text-align:right}
 #results-list .res-acts>*{margin-left:.4rem}
 #results-list tr.not-finished .res-line{color:var(--bad)}
-#results-list tr.registry-differs{background:rgba(226,119,106,.12);box-shadow:inset 3px 0 0 var(--bad)}
+#results-list tr.registry-differs{background:var(--bad-t);box-shadow:inset 3px 0 0 var(--bad)}
 #results-list tr.registry-differs .res-registry{color:var(--bad);font-weight:600}
 #compare-row:not([hidden]){display:flex;align-items:center;gap:.75rem;margin-top:.5rem;padding-top:.75rem;border-top:1px solid var(--line-strong);color:var(--soft)}
 #compare-hint{flex:1;font-size:.8125rem}

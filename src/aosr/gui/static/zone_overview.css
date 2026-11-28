@@ -4,9 +4,7 @@
 /* #1360 換深底：三種做法照外框色票——由程式最佳化＝橘（--acc）、指定貼一種＝青綠（--fix）、保留原樣＝灰；
    圖上的區用淡底＋同色框、字用 --ink，標記與圖例用實色。--ink、--soft、--line 直接用 app.css 的。 */
 #zone-page{--paper:var(--bg);--card:var(--panel);
-  --search:var(--acc);--search-soft:rgba(239,138,46,.2);--search-fill:rgba(239,138,46,.34);
-  --fixed:var(--fix);--fixed-soft:rgba(111,179,170,.18);--fixed-fill:rgba(111,179,170,.34);
-  --still:#3d4349;--still-mark:#8a9298;
+  --search:var(--acc);--search-soft:var(--acc-t);--fixed:var(--fix);   /* 淡底、灰、遮罩在 home.css 的 body.app 那一格 */
   width:clamp(1280px,100%,1440px);min-height:100vh;margin:0 auto;background:var(--paper);color:var(--ink);font-size:15px;line-height:1.55;
   font-family:var(--sans)}
 #zone-page *{box-sizing:border-box}
@@ -60,12 +58,16 @@ body.zone-page-open{background:var(--sunk)}
 #zone-page .zv-sw.search{background:var(--search)}
 #zone-page .zv-sw.fixed{background:var(--fixed)}
 #zone-page .zv-sw.still{background:var(--still)}
+/* 圖例跟圖上畫的同一個樣子：淡底＋同色框（結果列、規則條那幾個小方塊照舊用實色當記號）。 */
+#zone-page .zv-legend .zv-sw.search{background:var(--search-fill);border-color:var(--search)}
+#zone-page .zv-legend .zv-sw.fixed{background:var(--fixed-fill);border-color:var(--fixed)}
+#zone-page .zv-legend .zv-sw.still{border-color:var(--still-mark)}
 #zone-page .zv-sw.hatch{background:repeating-linear-gradient(45deg,var(--still-mark) 0 1.6px,var(--still) 1.6px 5px)}
 
 /* 點圖選區：每一區都點得到（蓋在上面的記號與字不擋）；選到的加一圈白框 */
 #zone-page .zv-zone{cursor:pointer}
 #zone-page .zv-face > :not(.zv-zone),#zone-page .zv-zone > :not(.zv-fill){pointer-events:none}
-#zone-page .zv-ring{fill:none;stroke:var(--ink);stroke-width:6;filter:drop-shadow(0 0 4px rgba(0,0,0,.85))}
+#zone-page .zv-ring{fill:none;stroke:var(--ink);stroke-width:6;filter:drop-shadow(0 0 4px var(--mask))}
 
 /* 右欄：提示、規則、清單卡 */
 #zone-page .zv-side{display:flex;flex-direction:column;gap:12px;padding-bottom:14px;min-width:0}
@@ -303,9 +305,9 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-foot .zv-area{font-size:12.5px}
 
 /* 「鋼板直接貼在棉上」的構造（#1208）：面板曲線界線以下的淡藍底、圖例那一行與「為什麼」（樣式同材料頁那一份）。 */
-#zone-page .zv-ref-band{fill:rgba(60,120,210,.16)}  /* 參考範圍：跟材料曲線（material-ui.js）同一個藍色淡底，深底上照用 */
+#zone-page .zv-ref-band{fill:var(--ref-band)}  /* 參考範圍：跟材料曲線（material-ui.js）同一個藍色淡底，深底上照用 */
 #zone-page .ref-note{margin:.4rem 0 .1rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid var(--line-strong);color:var(--ink);font-size:13px;text-align:left}
-#zone-page .ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(60,120,210,.16);border:1px solid var(--c1)}
+#zone-page .ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:var(--ref-band);border:1px solid var(--c1)}
 #zone-page .ref-note details{display:inline}
 #zone-page .ref-note summary{display:inline;cursor:pointer;font-weight:400;font-size:inherit;color:var(--acc);text-decoration:underline;text-underline-offset:3px;margin-left:.5em;white-space:nowrap}
 #zone-page .ref-note summary::after{content:" ▸"}
@@ -412,9 +414,9 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-form .zv-row-options summary{font-size:13px;font-weight:400}
 #zone-page .zv-build{width:100%;margin:10px 0;padding:9px 12px;border:1px dashed var(--line-strong);border-radius:8px;color:var(--ink);background:var(--sunk);text-align:left;font:inherit}
 #zone-builder{position:fixed;inset:56px 0 0 auto;margin:0;width:min(700px,100vw);height:calc(100dvh - 56px);
-  max-width:100%;max-height:none;box-sizing:border-box;padding:0;border:0;border-left:1px solid var(--soft);background:var(--panel);box-shadow:-12px 0 30px #0006}
+  max-width:100%;max-height:none;box-sizing:border-box;padding:0;border:0;border-left:1px solid var(--soft);background:var(--panel);box-shadow:-12px 0 30px var(--shade)}
 #zone-builder[open]{display:flex;flex-direction:column}
-#zone-builder::backdrop{background:#0009}
+#zone-builder::backdrop{background:var(--mask)}
 #zone-builder .zv-drawer-head{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid var(--line-strong)}
 #zone-builder .zv-drawer-head[hidden]{display:none}
 #zone-builder iframe{width:100%;flex:1;min-height:0;border:0}
@@ -425,7 +427,9 @@ body.app.zone-page-open{grid-template-columns:minmax(0,1fr);background:var(--bg)
 body.app.zone-page-open>.app-rail{display:none}
 body.app.zone-page-open>#zone-page{grid-column:1}
 body.app #zone-page:not([hidden]){height:calc(100dvh - var(--top))}
-body.app #zone-page #elevation svg{max-height:calc(65dvh - var(--top) - 24px)}
+body.app #zone-page #elevation svg{max-height:calc(65dvh - var(--top))}
+/* 借來的立面圖卡在輸入頁是外框的中間欄（.app-center）；搬進這一頁時不要那一欄的留白與底色，照原本貼齊。 */
+#zone-page #elevation-panel .app-center{padding:0;background:none}
 #zone-page .zv-mapwrap{max-width:100%}
 /* 明細滑入就展開，開關要一直留在原來的點擊位置。 */
 #zone-page .zv-row-options > summary{position:absolute;right:3px;top:8px;width:fit-content}

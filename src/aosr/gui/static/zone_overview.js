@@ -2474,7 +2474,7 @@ function symmetryBox() {
   box.append(head, body);
   return box;
 }
-// 配對細節的小圖：那一面牆、第二區現在的框（黃）、第一區對過來的框（斜線），對稱軸在這一面上就畫出來。
+// 配對細節的小圖：那一面牆、第二區現在的框（橘）、第一區對過來的框（斜線），對稱軸在這一面上就畫出來。
 function missFigure(entry) {
   const {views, wallSize, screenBox, flip} = window.elevationGeometry;
   const {wall} = entry.figure, [width, height] = wallSize(wall);
