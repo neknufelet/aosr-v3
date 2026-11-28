@@ -6,7 +6,7 @@
 /* 剖面花紋的示意色（material-cutaway.js 的 pattern 讀這幾格）：深底上壓暗、不搶畫面。 */
 body{--mat-wool:#8a7a45;--mat-wool-line:#c9ad5a;--mat-foam:#5d6a70;--mat-foam-dot:#9fb0b7;--mat-board:#7d6b52;
   --mat-steel:#6c777d;--mat-fabric:#5b6b61;--mat-fabric-line:#93a79a;--mat-hole:#2a241b;--mat-wall:#555c61;--mat-wall-line:#8b959b;
-  --mat-air:var(--sunk);--mat-edge:var(--soft)}
+  --mat-air:var(--sunk);--mat-edge:var(--soft);--mat-adjustable:var(--acc)}
 
 .app button.quiet{color:var(--soft)}
 .app button.danger{color:var(--bad);border-color:var(--bad)}

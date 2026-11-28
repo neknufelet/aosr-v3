@@ -67,12 +67,13 @@
 .app .back-options label{padding:.35rem .55rem}.back-options small{margin:.15rem 0}
 .app #figure svg.cutaway{height:13rem}.tune{font-size:11px}.params{grid-template-columns:minmax(0,1fr)}}
 .performance th{white-space:nowrap;width:1%}
-.app .backs label.unavailable{color:var(--faint);background:var(--panel)}
+.app .backs label.unavailable{color:var(--soft);background:var(--panel)}
 
 /* 嵌進分區頁（?embed=zones）：分區頁還是舊的淺色頁，抽屜照舊淺色；不要外框的頂列與功能列。 */
 body.app.embedded-zones{display:block;background:var(--bg);color-scheme:light;
   --bg:#ffffff;--panel:#f7fafb;--sunk:#edf4f6;--line:#d5e0e4;--line-strong:#97aeb8;--ink:#17212a;--soft:#4a5a62;--faint:#82969d;
-  --acc:#b4530f;--acc-t:rgba(192,90,17,.12);--fix:#15617b;--good:#1f6136;--warn:#7a4a0c;--bad:#9b2c22;
+  --acc:#15617b;--acc-t:rgba(21,97,123,.12);--mat-adjustable:#c05a11;  /* 分區頁的按鈕與勾選是藍綠色；橘色只留給剖面上可調的層 */
+  --fix:#15617b;--good:#1f6136;--warn:#7a4a0c;--bad:#9b2c22;
   --c1:#1d4f7a;--c2:#b4530f;--c3:#1f6136;--c4:#5b4a8a;
   --mat-wool:#f4e7b4;--mat-wool-line:#a8862a;--mat-foam:#e6ecef;--mat-foam-dot:#748a93;--mat-board:#cdbb9c;--mat-steel:#87949b;
   --mat-fabric:#dfe7e1;--mat-fabric-line:#8fa397;--mat-hole:#3a2f20;--mat-wall:#c9cfd3;--mat-wall-line:#6f7c83;--mat-air:#ffffff;--mat-edge:#52646d}

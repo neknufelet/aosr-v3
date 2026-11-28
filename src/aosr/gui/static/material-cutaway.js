@@ -45,7 +45,7 @@ function materialCutaway(layers, backing, description, selection = null) {
     const {x, width, texture, adjustable} = slabs[i];
     const top = bottom - 34 - i * 6;
     // 邊線與空氣層的顏色走色票（#1351）：可調的層橘框＝程式會調，其他層細灰邊。
-    const group = materialSvg("g", {style: `stroke:var(${adjustable ? "--acc" : "--mat-edge"})` +
+    const group = materialSvg("g", {style: `stroke:var(${adjustable ? "--mat-adjustable" : "--mat-edge"})` +
       (texture === "air" ? ";fill:var(--mat-air)" : ""),
       "stroke-width": adjustable ? 1.8 : .9, "stroke-linejoin": "round",
       fill: texture === "air" ? "none" : `url(#mat-${texture})`});
