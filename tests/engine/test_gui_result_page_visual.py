@@ -192,7 +192,8 @@ def test_categories_hide_technical_details_and_show_short_commit(tmp_path: Path,
         data = page.request.get(f"{base}/api/results/{RUN_ID}").json()
         # 頁首主畫面講白話（計算版本跟現在的程式相同），提交碼與計算指紋收在「技術細節」，一開始收著。
         assert page.locator("#fingerprint-status").inner_text() == "物理與評分設定都跟現在相同"
-        header = page.locator("#page-head").inner_text()
+        # 舊頁首含兩則提醒；#1350 提醒搬到中間最上面，範圍照舊連提醒一起看。
+        header = "\n".join(page.locator("#page-head, #server-notice, #run-notice").all_inner_texts())
         assert "e53bfae" not in header and data["fingerprint_text"] not in header and "指紋" not in header
         assert page.locator("#header-details").is_visible() and _open_flags(page.locator("#header-details")) == [False]
         page.locator("#header-details summary").click()

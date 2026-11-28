@@ -768,7 +768,8 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
             assert status.inner_text() == (
                 "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較")
             assert "notice" in (status.get_attribute("class") or "")
-            assert "1" * 12 not in page.locator("#page-head").inner_text()
+            # 舊頁首含兩則提醒；#1350 提醒搬到中間最上面，範圍照舊連提醒一起看。
+            assert "1" * 12 not in "\n".join(page.locator("#page-head, #server-notice, #run-notice").all_inner_texts())
             requested = _check_rerun_starts_once(page, "#fingerprint-rerun", "#fingerprint-rerun-state")
             assert requested == [f"{base}/api/results/{RUN_ID}/rerun"]
             _assert_quiet(watched)

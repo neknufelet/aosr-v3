@@ -256,7 +256,9 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             assert page.locator("#version-text").inner_text() == data.version_text == "兩份相同"
             technical = page.locator("#identity-technical")
             assert technical.evaluate("el => el.open") is False
-            assert not re.search(r"[0-9a-f]{7,}", page.locator("#page-head").inner_text())
+            # 舊頁首含兩則提醒；#1350 提醒搬到中間最上面，範圍照舊連提醒一起看。
+            assert not re.search(r"[0-9a-f]{7,}", "\n".join(
+                page.locator("#page-head, #server-notice, #run-notices").all_inner_texts()))
             codes = technical.text_content() or ""
             assert all(code in codes for code in (data.a.fingerprint_text, data.b.fingerprint_text,
                                                   data.a.engine_text, data.b.engine_text))
