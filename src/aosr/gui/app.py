@@ -50,6 +50,7 @@ from aosr.gui.room_model_high import RoomModelHigh, room_model_high_routes
 from aosr.gui.labels import label_tables
 from aosr.gui.material_curves import material_curve_routes, range_check
 from aosr.gui.material_editor import material_routes
+from aosr.gui.params_view import params_routes
 from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
 from aosr.gui.construction_input import web_scheme_problems
 from aosr.gui.result_list import ResultList, ResultSummary
@@ -94,7 +95,7 @@ STATIC_NAMES = {"material-tuning.js", "app.js", "home.js", "room_facts.js", "wal
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
                 "material-ui.js", "material-designer.js", "material-designer.css", "material-cutaway.js", "material-kind.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css",
                 "room_model.js", "room_model.css", "room_model_high.js", "room_model_high.css", "app.css", "app_shell.js",
-                "report_frame.css"}
+                "report_frame.css", "params.js", "params.css"}
 
 
 def repo_root() -> Path:
@@ -951,7 +952,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/modal-jobs/{run_id}", handlers.modal_job),
         Route("/api/modal-jobs/{run_id}/stop", handlers.modal_job, methods=["POST"]),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
-        *material_routes(handlers.data_dir, handlers.gradient.search_settings), *material_curve_routes(),
+        *material_routes(handlers.data_dir, handlers.gradient.search_settings), *material_curve_routes(), *params_routes(),
         *room_model_routes(handlers.room_models, STATIC), *room_model_high_routes(handlers.room_model_high),
         *zone_result_routes(ZoneResultDeps(handlers.data_dir, handlers.jobs, handlers.capabilities, handlers.directivity,
             handlers.startup_physics_identity, handlers._server_stale, handlers._updated_response, handlers._load_result)),

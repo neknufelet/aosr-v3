@@ -232,6 +232,13 @@ function loadPlan() {
   return readPlan();
 }
 
+// 哪一個選項是預設由伺服器給（進階參數清單，#1343），選項字不另寫一份「（預設）」。
+function markDefault(id, value) {
+  for (const option of byId(id).options) {
+    option.textContent = option.textContent.replace(/（預設）$/, "") + (option.value === value ? "（預設）" : "");
+  }
+}
+
 // 回傳這一次有沒有落地（讀到、而且等的時候沒有再換一份）；重建替身那一條路照它決定要不要往下走。
 async function readPlan() {
   if (!schemeId) return false;
@@ -256,6 +263,8 @@ async function readPlan() {
   byId("family").value = defaults.family;
   byId("mount").value = defaults.mount;
   byId("device").value = defaults.device;
+  markDefault("mount", defaults.mount);
+  markDefault("device", defaults.device);
   byId("frequency-batch").value = "";
   mountWarning();
   drawDepthTable(reply.body.plan);

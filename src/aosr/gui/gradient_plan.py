@@ -52,12 +52,13 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import (
-    MOUNT_ON_WALL, NONE_TARGET, SCHEME_MATERIAL, FamilySettings, MaterialGradientSettings, Mount, fixed_target,
+    NONE_TARGET, SCHEME_MATERIAL, FamilySettings, MaterialGradientSettings, Mount, fixed_target,
 )
 from aosr.config.paths import config_path
 from aosr.gradient.boundary import scheme_patch_keys, surface_ids
 from aosr.gradient.depth_fit import ZoneRange, narrowed_family, ranged_misfits
 from aosr.gui.material_surfaces import legacy_replacement
+from aosr.gui.params_view import advanced_text
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme
 from aosr.gui.wall_words import wall_words
 from aosr.gui.zone_construction import OriginalReader
@@ -77,6 +78,9 @@ if TYPE_CHECKING:
     from aosr.gradient.material_gradient import SurfaceDesign
 
 Device = Literal["cpu", "gpu"]
+# 網頁開跑的裝法與裝置預設住進階參數清單（#1343）；清單寫了這裡不認得的值，開機就炸。
+DEFAULT_MOUNT: Mount = TypeAdapter(Mount).validate_python(advanced_text("gradient.mount"))
+DEFAULT_DEVICE: Device = TypeAdapter(Device).validate_python(advanced_text("gradient.device"))
 _LOG = logging.getLogger(__name__)
 _MATERIAL: TypeAdapter[SurfaceMaterial] = TypeAdapter(SurfaceMaterial)
 
@@ -94,8 +98,8 @@ class GradientRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
     family: str | None = Field(default=None, min_length=1)
-    mount: Mount = MOUNT_ON_WALL
-    device: Device = "gpu"
+    mount: Mount = DEFAULT_MOUNT
+    device: Device = DEFAULT_DEVICE
     max_steps: int | None = Field(default=None, ge=1, strict=True)
     frequency_batch: int | None = Field(default=None, ge=1, strict=True)
     max_depths: dict[str, dict[str, float]] = Field(default_factory=dict)

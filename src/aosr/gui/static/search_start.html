@@ -116,7 +116,8 @@
         <label>同時算幾個（工作行程數）<input id="workers" type="number" min="1" step="1"></label>
         <label>亂數種子<input id="seed" type="number" step="1"></label>
       </div>
-      <p><label><input id="liar" type="checkbox" checked> 同一批互相避開（constant liar：還沒算完的先當成算過了）</label></p>
+      <p><label><input id="liar" type="checkbox"> 同一批互相避開（constant liar：還沒算完的先當成算過了）</label></p>
+      <p id="advanced-message" aria-live="polite"></p>
     </details>
     <p><button id="preview" type="button">預覽轉好的設定</button></p>
     <p id="form-message" aria-live="polite"></p>

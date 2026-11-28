@@ -1,0 +1,276 @@
+# 吸音模型目錄（#1343 追加）：aosr 實際在用的每一個吸音模型，給唯讀「所有參數」頁看。
+# 住 gui 底下、不放 aosr/config/data：只有網頁在讀，放進 config 會動到計算指紋（calc-v1）。
+#
+# 一個模型一節 [[model]]：
+# - code：程式裡的類別或函式（repo 根起算的「檔案::名字」）；variant：同一類別裡的模型選項（多孔層的 model 欄）。
+# - params：用到的參數，寫成「類別.欄位」（類別在 aosr.materials.construction_models）；
+#   中文名、單位、可填範圍一律由那個欄位的定義現讀，這裡不抄。
+# - range：有效範圍。registry 指範圍登記簿 porous_model_ranges.toml 的哪一節（讀的時候現抓，這裡不寫數字）；
+#   沒有出處的一律 note = "未列有效範圍"，不自己編。
+# - citation：文獻引用。repo 裡沒寫的欄位（題名、期刊、DOI、年份）就不寫，頁面顯示「repo 未列」；
+#   registry 指範圍登記簿那一節的 provenance，書目與 DOI 從那裡讀。
+# - origin：程式從哪裡改寫來的（跟文獻引用分開）。
+# - 核過的外部書目住檔尾 [[reference]]（verified 寫誰、哪天核的）。書目核過≠aosr 照它實作，所以掛法分三種：
+#   citation.reference（引用，必附 note 講實作對應核了沒）、related（相關文獻：外部對照報告用它比對，aosr 實作是否照它未核對）、
+#   background（背景文獻：aosr 沒實作那個模型）；aosr 沒實作的模型另列 [[unimplemented]]，不掛在任何現有模型下。
+# - 每一個範圍、引用、來源都附 at = "檔案:行"（repo 根起算）與 mark（那一行一定含的字；引用的 mark 就是第一作者姓）。
+#   考卷逐筆核：檔在、行在、那一行含 mark。
+
+# ---- 多孔層（四種模型，構造裡 model 欄選；預設 komatsu）----
+
+[[model]]
+id = "porous_komatsu"
+name = "多孔層：Komatsu 纖維經驗式（預設）"
+code = "src/aosr/materials/construction_models.py::PorousLayer"
+variant = "komatsu"
+compute = ["src/aosr/materials/transfer_matrix.py::equivalent_fluid_model", "src/aosr/materials/transfer_matrix.py::porous_layer"]
+params = ["PorousLayer.thickness_m", "PorousLayer.flow_resistivity_pa_s_m2", "PorousLayer.material_class"]
+blurb = "棉類吸音材只靠流阻與厚度算出等效流體；流阻在手動試算範圍外拒收，低於樣品下限、頻率外推、泡棉照算但標註。"
+range = { registry = "komatsu", at = "src/aosr/config/data/porous_model_ranges.toml:1", mark = "Komatsu" }
+citation = { authors = ["Komatsu"], year = 2008, registry = "komatsu", at = "src/aosr/config/data/porous_model_ranges.toml:14" }
+background = ["delany_bazley_1970", "allard_champoux_1992"]
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "porous_miki"
+name = "多孔層：Miki 纖維經驗式"
+code = "src/aosr/materials/construction_models.py::PorousLayer"
+variant = "miki"
+compute = ["src/aosr/materials/transfer_matrix.py::equivalent_fluid_model", "src/aosr/materials/transfer_matrix.py::porous_layer"]
+params = ["PorousLayer.thickness_m", "PorousLayer.flow_resistivity_pa_s_m2", "PorousLayer.material_class"]
+blurb = "棉類經驗式，只靠流阻與厚度；可選、不當預設。"
+range = { note = "未列有效範圍", at = "src/aosr/materials/construction.py:6", mark = "Miki" }
+citation = { authors = ["Miki"], reference = "miki_1990", note = "書目已核；aosr 係數與原文對應未核對", at = "src/aosr/materials/construction.py:6" }
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "porous_wilson_2015"
+name = "多孔層：Wilson 鬆弛模型"
+code = "src/aosr/materials/construction_models.py::PorousLayer"
+variant = "wilson_2015"
+compute = ["src/aosr/materials/transfer_matrix.py::equivalent_fluid_model", "src/aosr/materials/transfer_matrix.py::porous_layer"]
+params = ["PorousLayer.thickness_m", "PorousLayer.flow_resistivity_pa_s_m2", "PorousLayer.porosity", "PorousLayer.tortuosity", "PorousLayer.material_class"]
+blurb = "除了流阻還要孔隙率與曲折度的鬆弛式；可選、不當預設。"
+range = { note = "未列有效範圍", at = "src/aosr/materials/construction.py:6", mark = "Wilson 2015" }
+citation = { authors = ["Wilson"], year = 2015, at = "src/aosr/materials/construction.py:6" }
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "porous_mechel_1976"
+name = "多孔層：Mechel 低頻延伸式"
+code = "src/aosr/materials/construction_models.py::PorousLayer"
+variant = "mechel_1976"
+compute = ["src/aosr/materials/transfer_matrix.py::equivalent_fluid_model", "src/aosr/materials/transfer_matrix.py::porous_layer"]
+params = ["PorousLayer.thickness_m", "PorousLayer.flow_resistivity_pa_s_m2", "PorousLayer.porosity", "PorousLayer.material_class"]
+blurb = "經驗式加低頻延伸，要孔隙率，而且孔隙率不大於一（這條不在欄位定義裡，見 construction_models.py 第 5 行）；在分界處會跳一階，梯度不可靠，可選、不當預設。"
+range = { note = "未列有效範圍", at = "src/aosr/materials/construction.py:6", mark = "Mechel 1976" }
+citation = { authors = ["Mechel"], year = 1976, at = "src/aosr/materials/construction.py:6" }
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+# ---- 其他層 ----
+
+[[model]]
+id = "air"
+name = "空氣層"
+code = "src/aosr/materials/construction_models.py::AirLayer"
+compute = ["src/aosr/materials/transfer_matrix.py::air_layer"]
+params = ["AirLayer.thickness_m"]
+blurb = "構造裡的空腔，當無耗空氣算。"
+range = { note = "未列有效範圍" }
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "board"
+name = "薄板層"
+code = "src/aosr/materials/construction_models.py::BoardLayer"
+compute = ["src/aosr/materials/construction.py::_layer_matrix"]
+params = ["BoardLayer.surface_mass_kg_m2", "BoardLayer.resistance_pa_s_m"]
+blurb = "不透氣的薄板當一張壓力跳躍：面阻力加板的質量，不算彎曲剛度。"
+range = { note = "未列有效範圍" }
+origin = { text = "aosr 自己的式子：壓力跳躍阻抗 r+jωm", at = "src/aosr/materials/construction_models.py:107", mark = "r+jωm" }
+
+[[model]]
+id = "fabric"
+name = "布層"
+code = "src/aosr/materials/construction_models.py::FabricLayer"
+compute = ["src/aosr/materials/transfer_matrix.py::porous_facing_layer"]
+params = ["FabricLayer.surface_mass_kg_m2", "FabricLayer.flow_resistance_pa_s_m"]
+blurb = "布的質量與面流阻並聯（算法 pieren_free），只收兩格。"
+range = { note = "未列有效範圍" }
+citation = { authors = ["Pieren"], at = "src/aosr/materials/transfer_matrix.py:430" }
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "micro_perforated"
+name = "微孔板"
+code = "src/aosr/materials/construction_models.py::MicroPerforatedLayer"
+compute = ["src/aosr/materials/transfer_matrix.py::perforated_panel_layer"]
+params = ["MicroPerforatedLayer.thickness_m", "MicroPerforatedLayer.hole_diameter_m", "MicroPerforatedLayer.open_area",
+          "MicroPerforatedLayer.hole_spacing_m", "MicroPerforatedLayer.hole_pattern", "MicroPerforatedLayer.hole_spacing_2_m",
+          "MicroPerforatedLayer.surface_mass_kg_m2"]
+blurb = "微穿孔薄片（算法 barrier_mpp，自帶修正），板質量並聯；不收背面貼布。跟一般圓孔板照孔徑分界、由人選，界線見孔徑欄。"
+range = { note = "未列有效範圍" }
+related = ["maa_1998"]
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "perforated"
+name = "一般圓孔板"
+code = "src/aosr/materials/construction_models.py::PerforatedLayer"
+compute = ["src/aosr/materials/transfer_matrix.py::perforated_panel_layer"]
+params = ["PerforatedLayer.thickness_m", "PerforatedLayer.hole_diameter_m", "PerforatedLayer.open_area",
+          "PerforatedLayer.hole_spacing_m", "PerforatedLayer.hole_pattern", "PerforatedLayer.hole_spacing_2_m",
+          "PerforatedLayer.surface_mass_kg_m2"]
+blurb = "集中孔道薄片（算法 barrier）加末端修正 jb，板質量並聯；可選背面貼布。跟微孔板照孔徑分界、由人選，界線見孔徑欄。"
+range = { note = "未列有效範圍" }
+related = ["ingard_1953"]
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "slotted"
+name = "長縫板"
+code = "src/aosr/materials/construction_models.py::SlottedLayer"
+compute = ["src/aosr/materials/transfer_matrix.py::slotted_panel_layer"]
+params = ["SlottedLayer.thickness_m", "SlottedLayer.slot_width_m", "SlottedLayer.open_area", "SlottedLayer.slot_spacing_m",
+          "SlottedLayer.surface_mass_kg_m2"]
+blurb = "假設縫無限長、週期排列（算法 barrier）；有限長木條沒驗過。可選背面貼布。"
+range = { note = "未列有效範圍" }
+related = ["kristiansen_vigran_1994"]
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "backing_fabric"
+name = "背面貼布（圓孔板、長縫板選填）"
+code = "src/aosr/materials/construction_models.py::_BackingFabric"
+compute = ["src/aosr/materials/construction.py::_backed_sheet"]
+params = ["PerforatedLayer.backing_fabric_surface_mass_kg_m2", "PerforatedLayer.backing_fabric_flow_resistance_pa_s_m"]
+blurb = "工程近似：板阻抗加布面流阻除板開孔率，布當不會動，面密度只記錄；沒有一手出處。"
+range = { note = "未列有效範圍" }
+origin = { text = "aosr 自己的工程近似，沒有一手出處", at = "src/aosr/materials/construction_models.py:232", mark = "沒有一手出處" }
+
+[[model]]
+id = "vpr"
+name = "VPR：薄板＋骨架彈簧"
+code = "src/aosr/materials/construction.py::_frame_spring"
+compute = ["src/aosr/materials/construction.py::_frame_spring"]
+params = ["BoardLayer.surface_mass_kg_m2", "BoardLayer.resistance_pa_s_m", "PorousLayer.frame_compression_modulus_pa",
+          "PorousLayer.frame_loss_factor", "PorousLayer.thickness_m"]
+blurb = "多孔層整面黏在薄板後、背後是牆：骨架當彈簧串在板後；板當活塞，不算板彎曲與邊緣進聲。"
+range = { note = "未列有效範圍" }
+origin = { text = "aosr 自己的式子（#1171）", at = "src/aosr/materials/construction.py:154", mark = "VPR" }
+
+# ---- 整面寫法 ----
+
+[[model]]
+id = "constant_impedance"
+name = "定值阻抗"
+code = "src/aosr/materials/construction_models.py::ConstantImpedance"
+compute = ["src/aosr/materials/transfer_matrix.py::constant_z"]
+params = ["ConstantImpedance.impedance_pa_s_m"]
+blurb = "整面一個正實數阻抗，不分頻率。"
+range = { note = "未列有效範圍" }
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "measured_impedance"
+name = "實測阻抗表"
+code = "src/aosr/materials/construction_models.py::MeasuredImpedance"
+compute = ["src/aosr/materials/construction.py::_table_impedance"]
+params = ["MeasuredImpedancePoint.frequency_hz", "MeasuredImpedancePoint.real_pa_s_m", "MeasuredImpedancePoint.imag_pa_s_m",
+          "MeasuredImpedance.source_and_conditions"]
+blurb = "表內照對數頻率內插，表外由同一面牆的底構造補值並標註。"
+range = { note = "未列有效範圍" }
+origin = { text = "aosr 自己的內插與補值規則", at = "src/aosr/materials/construction_models.py:3", mark = "實測阻抗表" }
+
+# ---- 角度 ----
+
+[[model]]
+id = "oblique_tmm"
+name = "斜入射傳遞矩陣"
+code = "src/aosr/materials/transfer_matrix.py::compute"
+compute = ["src/aosr/materials/transfer_matrix.py::compute"]
+params = []
+blurb = "給角度時多孔層與空氣層照角度換波數，空腔隨角度變；鏡像法逐路徑取這個角度的阻抗。"
+range = { note = "未列有效範圍" }
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+[[model]]
+id = "paris_random_incidence"
+name = "無規入射吸音（Paris 角度平均）"
+code = "src/aosr/materials/transfer_matrix.py::diffuse_absorption_coefficient"
+compute = ["src/aosr/materials/transfer_matrix.py::diffuse_absorption_coefficient"]
+params = []
+blurb = "斜入射吸音率照 Paris 式對角度平均，給晚期混響用。"
+range = { note = "未列有效範圍" }
+citation = { authors = ["Paris"], at = "src/aosr/materials/transfer_matrix.py:753" }
+origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
+
+# ---- 構造裡的外殼，不是吸音模型 ----
+
+[[not_model]]
+code = "src/aosr/materials/construction_models.py::Assembly"
+why = "多層構造：把上面的層從房間側排到牆體側、接背後負載，本身沒有模型"
+
+[[not_model]]
+code = "src/aosr/materials/construction_models.py::MountedOnWall"
+why = "貼在原牆上的構造：新增層背後接原牆阻抗當負載，本身沒有模型"
+
+# ---- 沒有實作的模型：aosr 目前不用，列出來只為了跟外部對照時知道出處 ----
+
+[[unimplemented]]
+id = "jca"
+name = "JCA（Johnson–Champoux–Allard 五參數多孔模型）"
+why = "aosr 目前不用，列出來只為了跟外部對照時知道出處；要兩個特徵長度，型錄不給，決策紙定不列。"
+references = ["johnson_koplik_dashen_1987", "champoux_allard_1991"]
+at = "docs/decisions/wall-constructions-three-lanes-komatsu-measured-table.md:27"
+mark = "JCA"
+
+# ---- 核過的外部書目（主對話 2026-11-28 用 Crossref 逐筆核：作者、年、題名、期刊、卷期、頁、DOI）----
+
+[[reference]]
+id = "miki_1990"
+text = "Miki, Y. (1990). Acoustical properties of porous materials. Modifications of Delany-Bazley models. Journal of the Acoustical Society of Japan (E), 11(1), 19–24."
+doi = "https://doi.org/10.1250/ast.11.19"
+verified = "Crossref 2026-11-28"
+
+[[reference]]
+id = "maa_1998"
+text = "Maa, D.-Y. (1998). Potential of microperforated panel absorber. The Journal of the Acoustical Society of America, 104(5), 2861–2866."
+doi = "https://doi.org/10.1121/1.423870"
+verified = "Crossref 2026-11-28"
+
+[[reference]]
+id = "ingard_1953"
+text = "Ingard, U. (1953). On the theory and design of acoustic resonators. The Journal of the Acoustical Society of America, 25(6), 1037–1061."
+doi = "https://doi.org/10.1121/1.1907235"
+verified = "Crossref 2026-11-28"
+
+[[reference]]
+id = "kristiansen_vigran_1994"
+text = "Kristiansen, U. R., & Vigran, T. E. (1994). On the design of resonant absorbers using a slotted plate. Applied Acoustics, 43(1), 39–48."
+doi = "https://doi.org/10.1016/0003-682X(94)90039-6"
+verified = "Crossref 2026-11-28"
+
+[[reference]]
+id = "delany_bazley_1970"
+text = "Delany, M. E., & Bazley, E. N. (1970). Acoustical properties of fibrous absorbent materials. Applied Acoustics, 3(2), 105–116."
+doi = "https://doi.org/10.1016/0003-682X(70)90031-9"
+verified = "Crossref 2026-11-28"
+
+[[reference]]
+id = "allard_champoux_1992"
+text = "Allard, J. F., & Champoux, Y. (1992). New empirical equations for sound propagation in rigid frame fibrous materials. The Journal of the Acoustical Society of America, 91(6), 3346–3353."
+doi = "https://doi.org/10.1121/1.402824"
+verified = "Crossref 2026-11-28"
+
+[[reference]]
+id = "johnson_koplik_dashen_1987"
+text = "Johnson, D. L., Koplik, J., & Dashen, R. (1987). Theory of dynamic permeability and tortuosity in fluid-saturated porous media. Journal of Fluid Mechanics, 176, 379–402."
+doi = "https://doi.org/10.1017/S0022112087000727"
+verified = "Crossref 2026-11-28"
+
+[[reference]]
+id = "champoux_allard_1991"
+text = "Champoux, Y., & Allard, J.-F. (1991). Dynamic tortuosity and bulk modulus in air-saturated porous media. Journal of Applied Physics, 70(4), 1975–1979."
+doi = "https://doi.org/10.1063/1.349482"
+verified = "Crossref 2026-11-28"

@@ -1,0 +1,194 @@
+# 網頁上「進階」類參數的一份清單（#1343，老闆 11-28「進階數據要有一份清單，順便兼設定檔」）。
+# 住 gui 底下、不放 aosr/config/data：清單只有網頁在讀，放進 config 會改計算指紋（calc-v1），讓所有舊結果被標成要重算。
+#
+# 一條參數一節 [[param]]：key（代號）、name（中文名）、unit（單位，空字串＝沒有單位）、kind（數字型別或選項）、
+# 範圍（min／max，min_open／max_open 為 true 表示不含那一端；或 choices 可選值；或 range_note 一句話）、
+# blurb（一句白話說明）、page（屬於哪一頁，見 [[page]]）、field（那一頁上那一格的 HTML id）。
+#
+# 預設值只住一個地方，三種寫法擇一：
+# - default：這份清單就是它的家，程式從這裡讀（數字原本只寫在程式或網頁腳本裡的那幾條）。
+# - source：數字的家在引擎設定檔（搜尋命令列也讀那一份），這裡只寫「哪一檔、哪一格」、讀的時候現抓，不抄數字。
+# - 兩者都沒有：沒有固定值（例如空白＝一次全部、種子取今天日期），default_note 寫白話。
+# 精度契約、物理常數、評分門檻各有登記簿，不搬進來；這裡只列網頁上使用者看得到的進階設定。
+# 數字都是工程暫定，調整走 PR。
+
+[[page]]
+id = "input"
+name = "方案輸入頁（牆上切區）"
+path = "/"
+
+[[page]]
+id = "search_start"
+name = "開始擺位搜尋（第一、二階段）"
+path = "/search-start"
+
+[[page]]
+id = "gradient"
+name = "第三階段搜尋（牆面材料）"
+path = "/gradient"
+
+# ---- 方案輸入頁：牆上切區 ----
+
+[[param]]
+key = "zone_cut.snap_m"
+page = "input"
+field = "elevation"
+name = "框邊吸附格距"
+unit = "公尺"
+kind = "number"
+default = 0.05
+min = 0
+min_open = true
+blurb = "在牆上拖框時，框邊對齊到這個間距的格線。"
+
+[[param]]
+key = "zone_cut.min_side_m"
+page = "input"
+field = "elevation"
+name = "分區最小邊"
+unit = "公尺"
+kind = "number"
+default = 0.20
+min = 0
+min_open = true
+blurb = "每一區的寬與高都要至少這麼長；太碎的話網格與替身會爆。"
+
+# ---- 開始擺位搜尋：進階（取樣與工作行程） ----
+
+[[param]]
+key = "search.n_startup_trials"
+page = "search_start"
+field = "startup"
+name = "起點隨機題數"
+unit = "題"
+kind = "integer"
+default = 12
+min = 1
+blurb = "搜尋一開始先隨機出這麼多題，之後才照算過的結果挑下一題。"
+
+[[param]]
+key = "search.batch_size"
+page = "search_start"
+field = "batch"
+name = "每批題數"
+unit = "題"
+kind = "integer"
+default = 6
+min = 1
+blurb = "一次出幾題一起算。"
+
+[[param]]
+key = "search.max_workers"
+page = "search_start"
+field = "workers"
+name = "同時算幾個"
+unit = "個工作行程"
+kind = "integer"
+default = 6
+min = 1
+blurb = "同一時間開幾支工作行程算題目。"
+
+[[param]]
+key = "search.seed"
+page = "search_start"
+field = "seed"
+name = "亂數種子"
+unit = ""
+kind = "integer"
+default_note = "今天日期（年月日八位數）"
+range_note = "任意整數"
+blurb = "同一個種子、同一份設定，出的題目一樣。"
+
+[[param]]
+key = "search.constant_liar"
+page = "search_start"
+field = "liar"
+name = "同一批互相避開"
+unit = ""
+kind = "boolean"
+default = true
+blurb = "同一批還沒算完的題先當成算過了，免得一批裡出幾乎一樣的題。"
+
+# ---- 第三階段搜尋：開跑選項 ----
+
+[[param]]
+key = "gradient.max_steps"
+page = "gradient"
+field = "max-steps"
+name = "往下走步數上限"
+unit = "步"
+kind = "integer"
+source = { file = "material_gradient.toml", key = "descent.max_steps" }
+min = 1
+blurb = "連續下降最多走幾步，到了就停；這一跑改了只換這一跑。"
+
+[[param]]
+key = "gradient.family"
+page = "gradient"
+field = "family"
+name = "材料家族"
+unit = ""
+kind = "text"
+source = { file = "material_gradient.toml", key = "family.0.id" }
+range_note = "設定檔登記的那幾家"
+blurb = "交給搜尋的區從這一家材料開始找。"
+
+[[param]]
+key = "gradient.mount"
+page = "gradient"
+field = "mount"
+name = "裝法"
+unit = ""
+kind = "choice"
+default = "on_wall"
+choices = [{ value = "on_wall", label = "貼在原牆上" }, { value = "rigid", label = "貼在硬底上" }]
+blurb = "材料背後是原本的牆，還是當成硬底。"
+
+[[param]]
+key = "gradient.device"
+page = "gradient"
+field = "device"
+name = "用哪個算"
+unit = ""
+kind = "choice"
+default = "gpu"
+choices = [{ value = "gpu", label = "顯卡" }, { value = "cpu", label = "處理器" }]
+blurb = "顯卡算單精度、快；處理器算雙精度、慢。"
+
+[[param]]
+key = "gradient.frequency_batch"
+page = "gradient"
+field = "frequency-batch"
+name = "替身每批算幾個頻點"
+unit = "個頻點"
+kind = "integer"
+default_note = "空白＝一次全部"
+min = 1
+blurb = "顯卡記憶體不夠時才填，分批算。"
+
+# ---- 第三階段搜尋：建替身 ----
+
+[[param]]
+key = "surrogate.max_full_solves"
+page = "gradient"
+field = "max-full-solves"
+name = "完整解預算"
+unit = "次"
+kind = "integer"
+source = { file = "fem_reduced.toml", key = "build.max_full_solves" }
+min = 1
+blurb = "建替身最多做幾次完整求解，用完就停。"
+
+[[param]]
+key = "surrogate.stop_residual"
+page = "gradient"
+field = "stop-residual"
+name = "停止殘差"
+unit = ""
+kind = "number"
+source = { file = "fem_reduced.toml", key = "build.stop_residual" }
+min = 0
+min_open = true
+max = 1
+max_open = true
+blurb = "替身誤差小到這個值就停止加點。"
