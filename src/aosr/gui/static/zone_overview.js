@@ -1309,7 +1309,9 @@ function previewCandidates(items, raw) {
       .finally(() => {
         if (candidatePreview !== preview || !overviewOpen || draft?.mode !== "search") return;
         const painted = $("zone-panel-form")?.candidateRows;
-        if (preview.problem || preview.displayedPending || !painted || JSON.stringify(painted) !== JSON.stringify(preview.rows)) renderZoneOverview();
+        // 畫著的表單還標 pending（暫定列畫出來之後又改了「最深」，換成這一次判決，displayedPending 沒跟過來）：照樣重畫，標記才換成 checked。
+        const stale = $("zone-panel-form")?.dataset.candidates === "pending";
+        if (preview.problem || preview.displayedPending || stale || !painted || JSON.stringify(painted) !== JSON.stringify(preview.rows)) renderZoneOverview();
       });
   }
   return candidatePreview;

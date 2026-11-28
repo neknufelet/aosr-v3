@@ -225,8 +225,11 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
         # 名稱那一格不被那一句壓窄（#1340：勾選列照非勾選列的格子放，名稱擠成一字一行）：名稱寬過 150 像素、跟那一句左緣對齊。
         # 先等清單畫的是判決後那一版，兩格在同一次排版裡量（#1231：暫定列量到一半被重畫換掉，名稱格方框全 0）。
         _settled(page)
-        name, why = cast(list[dict[str, float]], row.evaluate("""row => ['.zv-material-text', '.zv-covered-why'].map(selector =>
-            row.querySelector(selector).getBoundingClientRect().toJSON())"""))
+        # 每一格都要剛好一個（跟逐格用定位器量時一樣嚴：同一列冒出兩個名稱格照樣紅）。
+        name, why = cast(list[dict[str, float]], row.evaluate("""row => ['.zv-material-text', '.zv-covered-why'].map(selector => {
+            const found = row.querySelectorAll(selector);
+            if (found.length !== 1) throw new Error(`${selector} 應該剛好一個，實際 ${found.length} 個`);
+            return found[0].getBoundingClientRect().toJSON(); })"""))
         assert name["width"] > 150 and abs(name["left"] - why["left"]) < 1, (name, why)
         plain = page.locator(f"#zone-panel-pick-{PLAIN_ID}")
         expect(plain).to_be_enabled()
