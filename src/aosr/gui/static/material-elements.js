@@ -4,7 +4,7 @@ function elementSwatch(row) {
   const texture = materialTexture(row.kind, row.material_class);
   const svg = materialSvg("svg", {viewBox: "0 0 50 50", class: "element-swatch", role: "img",
     "aria-label": row.name + "花紋"});
-  svg.append(materialSvg("rect", {width: 50, height: 50, fill: texture === "air" ? "white" : `url(#mat-${texture})`}));
+  svg.append(materialSvg("rect", {width: 50, height: 50, ...(texture === "air" ? {style: "fill:var(--mat-air)"} : {fill: `url(#mat-${texture})`})}));
   return svg;
 }
 

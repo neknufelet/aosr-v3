@@ -1,123 +1,148 @@
-/* 材料編輯頁：清單一筆一列；表單分塊，長欄名直排，多層構造一層一塊。 */
-/* 共用樣式把 .fields 設成 flex，會蓋掉 hidden；這一頁靠 hidden 切「能調／不能調」兩組欄位，所以要壓回去。 */
-#editor [hidden]{display:none!important}
-button.quiet{background:white;color:#15617b;box-shadow:inset 0 0 0 1px #15617b}
-button.danger{background:#9b2c22}
-.block{border-top:1px solid #d5e0e4;padding:.8rem 0}
-.block h3{font-size:1.05rem}
+/* 材料庫頁（#1351 換新外框）：左欄種類分頁與數據來源，中間清單與編輯器；顏色一律走 app.css 色票。
+   材料設計器也載這一份（剖面花紋、吸音曲線、來源標籤共用）。 */
+/* app.css 把 label、.fields、.actions 設成 flex，會蓋掉 hidden；這兩頁都靠 hidden 切換，所以全頁壓回去。 */
+[hidden]{display:none!important}
+
+/* 剖面花紋的示意色（material-cutaway.js 的 pattern 讀這幾格）：深底上壓暗、不搶畫面。 */
+body{--mat-wool:#8a7a45;--mat-wool-line:#c9ad5a;--mat-foam:#5d6a70;--mat-foam-dot:#9fb0b7;--mat-board:#7d6b52;
+  --mat-steel:#6c777d;--mat-fabric:#5b6b61;--mat-fabric-line:#93a79a;--mat-hole:#2a241b;--mat-wall:#555c61;--mat-wall-line:#8b959b;
+  --mat-air:var(--sunk);--mat-edge:var(--soft)}
+
+.app button.quiet{color:var(--soft)}
+.app button.danger{color:var(--bad);border-color:var(--bad)}
+.app #editor #save{background:var(--acc);border-color:var(--acc);color:var(--sunk);font-weight:700}
+.app #editor #save:disabled{background:transparent;border-color:var(--line);color:var(--faint)}
+.app input[type=number]{width:6.5rem}
+.app article{border-top:1px solid var(--line);padding:.6rem 0}
+.app .hint{margin:.2rem 0 .5rem}
+.app .notice{white-space:pre-line}
+
+/* 編輯器：表單分塊，長欄名直排，多層構造一層一塊。 */
+#editor{scroll-margin-top:calc(var(--top) + 8px);border-top:1px solid var(--line-strong);margin-top:18px;padding-top:6px}
+.block{border-top:1px solid var(--line);padding:.8rem 0}
+.block h3{font-size:14px}
 .block .fields label,.layer .fields label{flex-direction:column;align-items:flex-start}
 .block>label{display:flex;flex-direction:column;align-items:stretch;margin:.5rem 0}
 .block label.toggle{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:.4rem;margin:.4rem 0}
-.block textarea{font:inherit;width:100%;box-sizing:border-box;min-height:4.5rem;padding:.35rem;border:1px solid #97aeb8;border-radius:5px}
-#points{min-height:9rem;font-family:ui-monospace,monospace}
-.hint{color:#53636b;font-size:.92rem;margin:.2rem 0 .5rem}
+.app .block textarea{width:100%;min-height:4.5rem}
+#points{min-height:9rem;font-family:var(--mono)}
 .layers{list-style:none;padding:0;margin:.4rem 0}
-.layer{border:1px solid #cddde2;border-radius:8px;padding:.6rem .8rem;margin:.5rem 0;background:#f8fbfc}
+.layer{border:1px solid var(--line);border-radius:3px;padding:.6rem .8rem;margin:.5rem 0;background:var(--panel)}
 .layer-head{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
 .layer-head strong{min-width:4.5rem}
-.layer-head button{padding:.3rem .7rem}
+.app .layer-head button{padding:.3rem .7rem}
 #editor-message{white-space:pre-line}
-textarea:disabled,select:disabled{background:#edf1f2;color:#53636b}
+.app textarea:disabled{background:var(--panel);color:var(--faint)}
+
 /* 吸音曲線（段 2-2b）：標語兩顆、圖、底色說明、提醒。醒目提醒加左邊紅線，一般提醒照提示字。 */
-.badge{display:inline-block;border-radius:999px;padding:.15rem .7rem;font-size:.9rem;font-weight:600;background:#edf4f6;color:#17212a;margin:.1rem .2rem .1rem 0}
-.badge.basis-simulated{background:#e3eef7;color:#1d4f7a}
-.badge.basis-measured{background:#e1f1e6;color:#1f6136}
-.badge.basis-approximate{background:#fbecd4;color:#7a4a0c}
+.badge{display:inline-block;border-radius:3px;padding:.1rem .6rem;font-size:12.5px;font-weight:500;border:1px solid var(--line-strong);color:var(--ink);margin:.1rem .2rem .1rem 0}
+.badge.basis-simulated{color:var(--c1);border-color:var(--c1)}
+.badge.basis-measured{color:var(--good);border-color:var(--good)}
+.badge.basis-approximate{color:var(--warn);border-color:var(--warn)}
 #curve-chart{width:100%;max-width:900px}
 #curve-key,#curve-warnings{list-style:none;padding:0;margin:.4rem 0}
 #curve-key li{display:inline-flex;align-items:center;gap:.35rem;margin-right:1rem}
-.swatch{display:inline-block;width:1.4rem;height:.9rem;border:1px solid #b9c7cc}
+.swatch{display:inline-block;width:1.4rem;height:.9rem;border:1px solid var(--line-strong)}
+/* 這兩格底色要跟 material-ui.js 的 SPAN_FILL 同色（圖上的橘底、灰底）。 */
 .swatch.extrapolation{background:rgba(230,140,40,.22)}
 .swatch.model_fill{background:rgba(110,125,135,.2)}
-#curve-warnings li{margin:.3rem 0;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b}
-#curve-warnings li.strong{border-left-color:#9b2c22;color:#872c22;font-weight:600;background:#fbf1ef}
+#curve-warnings li{margin:.3rem 0;padding:.3rem .6rem;line-height:1.5;border-left:3px solid var(--line-strong);color:var(--soft)}
+#curve-warnings li.strong{border-left-color:var(--bad);color:var(--bad);font-weight:600}
 #curve-state{white-space:pre-line}
 /* 出處網址很長、沒有空白可斷：手機寬度要能在任何地方斷行，不然整塊表單會橫向捲。 */
 #curve-source{overflow-wrap:anywhere}
-/* 「鋼板直接貼在棉上」的構造（#1208）：界線頻率以下的淡藍底、圖例那一行與「為什麼」。 */
-.ref-note{margin:.3rem 0;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;font-weight:400;font-size:inherit;background:none;text-align:left;list-style:none}
-.ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(60,120,210,.16);border:1px solid #9db9e0}
+/* 「鋼板直接貼在棉上」的構造（#1208）：界線頻率以下的淡藍底、圖例那一行與「為什麼」。藍底的值有考卷釘住，深淺底都看得到。 */
+.ref-note{margin:.3rem 0;padding:.3rem .6rem;line-height:1.5;border-left:3px solid var(--line-strong);color:var(--soft);font-weight:400;font-size:inherit;background:none;text-align:left;list-style:none}
+.ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(60,120,210,.16);border:1px solid var(--c1)}
 .ref-note details{display:inline}
-.ref-note summary{display:inline;cursor:pointer;font-weight:400;font-size:inherit;color:#17616b;text-decoration:underline;text-underline-offset:3px;margin-left:.5em;white-space:nowrap}
+.app .ref-note summary{display:inline;cursor:pointer;font-weight:400;font-size:inherit;color:var(--fix);text-decoration:underline;text-underline-offset:3px;margin-left:.5em;white-space:nowrap;padding:0}
 .ref-note summary::after{content:" ▸"}
 .ref-note details[open] summary::after{content:" ▾"}
-.ref-note details[open] p{display:block;margin:.35rem 0 .1rem;color:#5b6a70;max-width:62em;white-space:normal}
+.ref-note details[open] p{display:block;margin:.35rem 0 .1rem;color:var(--soft);max-width:62em;white-space:normal}
 #curve-key li.ref-note{display:block;margin-right:0}
 .ref-band{position:absolute;left:0;top:0;height:100%;pointer-events:none;background:rgba(60,120,210,.16)}
-.ref-band-word{position:absolute;left:0;top:0;pointer-events:none;font-size:12.5px;line-height:1.3;color:#33434b;padding:5px 8px;white-space:nowrap}
+.ref-band-word{position:absolute;left:0;top:0;pointer-events:none;font-size:12.5px;line-height:1.3;color:var(--ink);padding:5px 8px;white-space:nowrap}
 
-main{max-width:1320px}
-.catalog-top,.catalog-tabs,#source-legend,#source-legend>span,.catalog-actions{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
+/* 左欄：種類分頁直排、數據來源圖例、說明收起來。 */
+.catalog-tabs{display:flex;flex-direction:column;gap:2px;margin-bottom:18px}
+.app .catalog-tabs button{display:flex;justify-content:space-between;align-items:baseline;text-align:left;border:0;border-left:2px solid transparent;border-radius:0;padding:7px 10px;color:var(--soft)}
+.app .catalog-tabs button:hover{color:var(--ink)}
+.app .catalog-tabs [aria-selected=true]{background:var(--acc-t);border-left-color:var(--acc);color:var(--ink);font-weight:600}
+.catalog-tabs small{font-weight:400;color:var(--soft);font-family:var(--mono);font-size:12px}
+#source-legend{display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--soft);margin-bottom:18px}
+#source-legend>strong{display:none}  /* 左欄小標已寫「數據來源」 */
+#source-legend>span{display:flex;align-items:center;gap:.6rem}
+.catalog-intro p{color:var(--soft);font-size:13px}
+
+/* 中間：清單一筆一列 */
+.catalog-top,.catalog-actions{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
 .catalog-top{justify-content:space-between}
-.catalog-top h1,.catalog-top p{margin:0}
-.catalog-top a{color:#15617b}
-#source-legend{border-top:1px solid #d5e0e4;padding-top:.7rem;gap:.5rem 1.5rem;font-size:.95rem}
-#source-legend>span{gap:.4rem}
-.source-badge{display:inline-flex;align-items:center;gap:.4rem;border-radius:2rem;padding:.15rem .65rem;background:#edf4f6;color:#225265;font-size:.9rem;font-weight:600;white-space:nowrap}
+.catalog-top p{margin:0;color:var(--soft);font-size:13px}
+.source-badge{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line-strong);border-radius:3px;padding:.05rem .55rem;color:var(--soft);font-size:12.5px;font-weight:500;white-space:nowrap}
 .source-badge i{position:relative;width:1.45rem;border-top:2px solid}
-.source-badge.measured{color:#24633f;background:#e1f1e6}
+.source-badge.literature{color:var(--fix);border-color:var(--fix)}
+.source-badge.measured{color:var(--good);border-color:var(--good)}
 .source-badge.measured i::before,.source-badge.measured i::after{content:"";position:absolute;width:4px;height:4px;top:-3px;left:3px;border-radius:50%;background:currentColor}
 .source-badge.measured i::after{left:auto;right:3px}
-.source-badge.model{background:white;border:1px dashed #7889ac;color:#4b5d86}
+.source-badge.model{border-style:dashed;color:var(--c1);border-color:var(--c1)}
 .source-badge.model i{border-top-style:dashed}
-.catalog-tabs{gap:.35rem;margin:0 .6rem -1px}
-.catalog-tabs button{border:1px solid #cddde2;background:#e5edf0;color:#33434b;border-radius:9px 9px 0 0;padding:.6rem 1.2rem}
-.catalog-tabs [aria-selected=true]{background:white;color:#15617b;border-bottom-color:white;font-weight:bold;z-index:1}
-.catalog-tabs small{font-weight:400;color:#53636b}
 .catalog-list{margin-top:.85rem}
 .catalog-grid{display:grid;grid-template-columns:minmax(85px,1.05fr) minmax(180px,2fr) minmax(115px,1.13fr) minmax(80px,.68fr) minmax(90px,.88fr) minmax(145px,1.25fr);align-items:center;gap:1rem}
-.columns{background:#edf4f6;border-radius:6px;padding:.55rem .8rem;font-weight:600}
-.columns small,.material-name small,.catalog-actions small{display:block;font-size:.84rem;font-weight:400;color:#53636b}
+.columns{border-bottom:1px solid var(--line);padding:.4rem .8rem;font-size:11.5px;font-weight:500;letter-spacing:.06em;color:var(--soft)}
+.columns small,.material-name small,.catalog-actions small{display:block;font-size:12px;font-weight:400;color:var(--soft);letter-spacing:0}
 .columns small{white-space:pre-line}
-.material-item{border:0;border-bottom:1px solid #d5e0e4;padding:.75rem .8rem .4rem;overflow-wrap:anywhere}
-.material-name strong{font-size:1.06rem}
-.material-depth{margin:.25rem 0;font-size:.95rem}
-.catalog-grid .cutaway{width:auto;max-width:100%;height:auto;max-height:78px;border:0;background:none}
-.preview{color:#53636b;font-size:.88rem}
-.preview-warning{display:inline-block;margin-top:.2rem;color:#854c12;font-weight:600}
+.app .material-item{border-top:0;border-bottom:1px solid var(--line);padding:.6rem .8rem .35rem;overflow-wrap:anywhere}
+.app .material-item:hover{background:var(--panel)}
+.material-name strong{font-size:14px;font-weight:500}
+.app .material-name a{color:var(--ink);text-decoration-color:var(--line-strong)}
+.material-depth{margin:.25rem 0;font-family:var(--mono);font-size:13px}
+.app .catalog-grid svg.cutaway{width:auto;max-width:100%;height:auto;max-height:78px;border:0;background:none}
+.preview{color:var(--soft);font-size:12.5px}
+.preview-warning{display:inline-block;margin-top:.2rem;color:var(--warn);font-weight:600}
 .material-details dd ul{margin:0;padding-inline-start:1.25rem}
-.curve{display:block;max-width:168px;box-sizing:border-box}
-.curve line{stroke:#e1eaed}
-.curve.measured{color:#24633f;fill:currentColor}
-.curve.literature{color:#15617b}
-.curve.model{color:#4b5d86}
+.app svg.curve{display:block;width:100%;max-width:168px;height:auto;background:none;border:0;border-bottom:1px solid var(--line)}
+.curve line{stroke:var(--line)}
+.curve.measured{color:var(--good);fill:currentColor}
+.curve.literature{color:var(--fix)}
+.curve.model{color:var(--c1)}
 .curve.model polyline{stroke-dasharray:5 3}
-.placement-tag{display:inline-block;border:1px solid #c2d0d5;border-radius:5px;padding:.12rem .4rem;font-size:.92rem}
+.placement-tag{display:inline-block;border:1px solid var(--line-strong);border-radius:3px;padding:.05rem .4rem;font-size:12.5px;color:var(--ink)}
 .catalog-actions{justify-content:flex-end;gap:.35rem}
-.catalog-actions button{padding:.3rem .65rem}
+.app .catalog-actions button{padding:.3rem .65rem}
 .material-details{margin-top:.3rem}
-.material-details summary{width:max-content;cursor:pointer;color:#53636b;font-size:.88rem}
-.material-details dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem .8rem;padding:.65rem;background:#f5f8f9}
+.app .material-details summary{width:max-content;font-size:12.5px;padding:2px 0}
+.material-details dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.3rem .8rem;padding:.65rem;background:var(--sunk);border:1px solid var(--line);font-size:13px}
+.material-details dt{color:var(--soft)}
 .material-details dd{margin:0}
-.catalog-group{margin-top:.75rem;border:1px solid #cddde2;border-radius:8px;background:#fafcfc}
-.catalog-group>summary{padding:.65rem .8rem;cursor:pointer;font-weight:bold}
-#list-state{color:#53636b}
+.catalog-group{margin-top:.75rem;border:1px solid var(--line);border-radius:3px;background:var(--panel)}
+.app .catalog-group>summary{padding:.55rem .8rem;font-weight:600;color:var(--ink);font-size:14px}
+#list-state{color:var(--soft);font-size:13px}
 @media(max-width:900px){
-  main{padding:.7rem}
   .columns{display:none}
-  .catalog-list::before{content:"無規入射吸音率 0～1 · 31.5 Hz～2 kHz";display:block;color:#53636b;font-size:.85rem;margin-bottom:.6rem}
+  .catalog-list::before{content:"無規入射吸音率 0～1 · 31.5 Hz～2 kHz";display:block;color:var(--soft);font-size:12.5px;margin-bottom:.6rem}
   .catalog-grid:not(.columns){grid-template-columns:90px minmax(0,1fr);gap:.45rem .8rem}
   .catalog-grid .cutaway{grid-column:1}
   .preview{grid-row:2;grid-column:1}
   .source-cell{grid-row:2;grid-column:2}
   .placement-cell,.catalog-actions{grid-column:1 / -1}
-  .placement-cell::before{content:"能貼在哪　";font-size:.9rem;color:#53636b}
+  .placement-cell::before{content:"能貼在哪　";font-size:12.5px;color:var(--soft)}
   .catalog-actions{justify-content:flex-start}
-  .catalog-tabs button{padding:.5rem}
-  .catalog-tabs small{display:block}
-  [role=tabpanel]{padding:.8rem}
+  .catalog-tabs{flex-direction:row;flex-wrap:wrap}
+  .app .catalog-tabs button{padding:.5rem;gap:.35rem;border-left:0;border-bottom:2px solid transparent}
+  .app .catalog-tabs [aria-selected=true]{border-bottom-color:var(--acc)}
 }
 
+/* 元件分頁 */
 .element-grid{display:grid;grid-template-columns:3.4rem minmax(0,1.2fr) minmax(0,1.25fr) minmax(0,.95fr) minmax(0,1.5fr) minmax(0,.7fr);gap:1rem}
-.element-row{padding:.9rem .8rem;overflow-wrap:anywhere;line-height:1.45}
-.element-row small,.element-range,.element-sizes dt{display:block;color:#53636b;font-size:.88rem}
+.app .element-row{padding:.9rem .8rem;overflow-wrap:anywhere;line-height:1.45;border-top:0;border-bottom:1px solid var(--line)}
+.element-row small,.element-range,.element-sizes dt{display:block;color:var(--soft);font-size:12.5px}
 .element-range,.element-name small,.element-sizes dt:not(:first-child){margin-top:.45rem}
-.element-swatch{width:100%;max-width:3.4rem;box-sizing:border-box;border-color:#899ba2;border-radius:4px}
+.app svg.element-swatch{width:100%;max-width:3.4rem;height:auto;border-color:var(--line-strong);border-radius:3px}
 .element-sizes,.element-sizes dd{margin:0}
 .element-mobile-label{display:none}
 @media(max-width:900px){
   .element-grid.columns{display:none}
-  .element-row{grid-template-columns:3rem minmax(0,1fr);gap:.65rem .8rem;padding:.85rem 0}
+  .app .element-row{grid-template-columns:3rem minmax(0,1fr);gap:.65rem .8rem;padding:.85rem 0}
   .element-row>div{grid-column:2}
-  .element-mobile-label{display:block;color:#53636b;font-size:.88rem}
+  .element-mobile-label{display:block;color:var(--soft);font-size:12.5px}
 }

@@ -11,7 +11,8 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import STATIC, GuiSettings, create_app
 
-ADOPTED = {"/room-model": "room_model", "/gradient": "gradient", "/search-start": "search_start"}  # 已換新外框的頁 → 它的腳本前綴
+ADOPTED = {"/room-model": "room_model", "/gradient": "gradient", "/search-start": "search_start",
+           "/materials": "materials", "/materials/designer": "material-designer"}  # 已換新外框的頁 → 它的腳本前綴
 
 
 def _app(tmp_path: Path) -> TestClient:

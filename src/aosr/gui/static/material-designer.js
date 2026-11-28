@@ -21,7 +21,7 @@ function button(text, action, attributes = {}) {
 function textureChip(layer) {
   const texture = materialTexture(layer.kind, layer.material_class);
   const svg = materialSvg("svg", {class: "chip", viewBox: "0 0 24 24", "aria-hidden": "true"});
-  svg.append(materialSvg("rect", {width: 24, height: 24, fill: texture === "air" ? "white" : `url(#mat-${texture})`}));
+  svg.append(materialSvg("rect", {width: 24, height: 24, ...(texture === "air" ? {style: "fill:var(--mat-air)"} : {fill: `url(#mat-${texture})`})}));
   return svg;
 }
 
@@ -329,6 +329,8 @@ const zoneEmbed = zoneParams.get("embed") === "zones" && window.parent !== windo
 const forCandidates = zoneEmbed && zoneParams.get("mode") === "search";
 if (zoneEmbed) {
   document.body.classList.add("embedded-zones");
+  // 嵌在分區頁的抽屜裡不要全站頂列與功能列（#1351）：外框是 app_shell.js 先產生的，這裡拿掉。
+  for (const node of document.querySelectorAll(".app-top,.app-rail")) node.remove();
   if (forCandidates) {
     const label = document.querySelector('.backs input[value="zone_wall"]').closest("label");
     label.classList.add("unavailable");
