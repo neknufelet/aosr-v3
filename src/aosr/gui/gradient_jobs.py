@@ -60,6 +60,7 @@ from aosr.gui.gradient_plan import (
 )
 from aosr.gui.material_curves import range_check
 from aosr.gui.material_editor import USER_LIBRARY_NAME, plain_error, user_library_path
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.gui.problem_text import checked_scheme
 from aosr.gui.search_view import held_search
 from aosr.gui.surrogate_slots import missing_parts, surrogate_path
@@ -381,7 +382,14 @@ class GradientJobs:
                 raise FileNotFoundError(f"沒有方案「{scheme_id}」")
             text = path.read_text(encoding="utf-8")
             design = read_design(self.data_dir, scheme_id)
-        return text, checked_scheme(json.loads(text)), design
+        scheme = checked_scheme(json.loads(text))
+        if scheme.scene.low_frequency_axis is None:
+            # 方案輸入頁沒有低頻軸這一格，網頁新存的方案是空的；網頁開的搜尋與替身一律用正式擺位搜尋軸（每八度 48 點，
+            # 決策紙 shared-search-flow-v1-stage-two-subset.md 第六節），交給命令列的快照也寫上它（#1348）。方案檔本身不改。
+            scheme = scheme.model_copy(update={"scene": scheme.scene.model_copy(
+                update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})
+            text = scheme.model_dump_json()
+        return text, scheme, design
 
     def _surrogate(self, scheme: Scheme) -> Path:
         path = surrogate_path(self.data_dir, scheme)

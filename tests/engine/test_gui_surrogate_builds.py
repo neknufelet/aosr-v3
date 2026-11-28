@@ -28,6 +28,7 @@ import httpx
 import pytest
 
 from aosr.config.capabilities import load_capabilities
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gradient import run
@@ -46,7 +47,7 @@ from aosr.gui.surrogate_builds import (
     BUILD_UNIT_PREFIX, RETIRED_DIR, RUNNING_STATES, STATE_TEXTS, SurrogateBuilds, SurrogateRequest,
 )
 from aosr.gui.material_editor import user_library_path
-from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, surrogate_path
+from aosr.gui.surrogate_slots import SLOTS_DIR, SURROGATE_FILE, missing_parts, slot_dir, slot_key, surrogate_path
 from aosr.materials import library
 from aosr.gui.zone_design import DesignSettings, ZoneDesign, write_design
 from aosr.physics.fem_reduced import ReducedModel
@@ -447,19 +448,28 @@ def test_one_heavy_job_on_the_machine_both_ways(tmp_path: Path) -> None:
         builds.start(NAME, QUICK.model_copy(update={"replace": True}))
 
 
-@pytest.mark.parametrize(("search", "axis", "message"), [
-    (False, True, "沒有任何一區交給搜尋"),
-    (True, False, "低頻軸"),
-])
-def test_refuses_before_launching_what_the_search_would_refuse(tmp_path: Path, search: bool, axis: bool,
-                                                               message: str) -> None:
+def test_refuses_before_launching_what_the_search_would_refuse(tmp_path: Path) -> None:
     """抓開建前不擋搜尋開跑一定會拒的情況（白等幾個小時才知道不能用）。"""
-    base = scheme()
-    case = base if axis else base.model_copy(update={"scene": base.scene.model_copy(update={"low_frequency_axis": None})})
-    _, launcher, _, builds = _fake(tmp_path, case, search=search)
-    with pytest.raises(PlanRefused, match=message):
+    _, launcher, _, builds = _fake(tmp_path, scheme(), search=False)
+    with pytest.raises(PlanRefused, match="沒有任何一區交給搜尋"):
         builds.start(NAME, QUICK)
     assert launcher.launched == []
+
+
+def test_a_scheme_saved_without_a_low_frequency_axis_builds_on_the_formal_search_axis(tmp_path: Path) -> None:
+    """抓方案輸入頁存的方案（沒有低頻軸）建不了替身、開不了搜尋（#1348：老闆 11-28 卡在這裡）；
+    交給命令列的快照要寫正式擺位搜尋軸、格子跟寫明這條軸的方案同一格，方案檔本身不動。"""
+    base = scheme()
+    blank = base.model_copy(update={"scene": base.scene.model_copy(update={"low_frequency_axis": None})})
+    formal = base.model_copy(update={"scene": base.scene.model_copy(update={"low_frequency_axis": LowFrequencyAxis.SEARCH_48})})
+    data_dir, launcher, _, builds = _fake(tmp_path, blank)
+    saved = (data_dir / "schemes" / f"{NAME}.json").read_text(encoding="utf-8")
+    view = builds.start(NAME, QUICK)
+    argv = launcher.launched[0][1]
+    snapshot = Scheme.model_validate_json(Path(argv[argv.index("--scheme") + 1]).read_text(encoding="utf-8"))
+    assert snapshot.scene.low_frequency_axis is LowFrequencyAxis.SEARCH_48 and snapshot == formal
+    assert argv[argv.index("--slot") + 1] == str(slot_dir(data_dir, formal)) and view["slot_key"] == slot_key(formal)
+    assert (data_dir / "schemes" / f"{NAME}.json").read_text(encoding="utf-8") == saved
 
 
 def test_states_from_files_and_service(tmp_path: Path) -> None:
