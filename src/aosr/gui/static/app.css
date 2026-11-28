@@ -15,6 +15,7 @@
   --fix:#6fb3aa;       /* 指定、連結以外的第二意思 */
   --good:#8fbf7f; --warn:#d9a45a; --bad:#e2776a;
   --c1:#6fa8dc; --c2:#ef8a2e; --c3:#8fbf7f; --c4:#b39ddb;   /* 圖表線 */
+  --c5:#e88fb4; --c6:#5fc3d6; --c7:#d4c95a; --c8:#c0c4c8;   /* 圖表線（多於四條時，#1350） */
   --sans:system-ui,-apple-system,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
   --rail:56px; --left:340px; --right:300px; --top:44px;

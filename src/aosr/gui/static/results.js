@@ -51,11 +51,11 @@ function visibleResponses() {
   return selectedPair ? candidates.filter((item) =>
     item.receiver_id === selectedPair.receiver_id || item.receiver_id === selectedPair.reference_id) : candidates;
 }
-// 曲線顏色（只是畫面上分得出哪一條，不帶任何意義）；色票只有四條線色，後四條借狀態色與次要字色（#1350）。
+// 曲線顏色（只是畫面上分得出哪一條，不帶任何意義），八條線色都在色票（#1350）。
 // 顏色從外框的色票讀（app.css，#1350），深底上分得開；讀不到才用後面的備用色。
 const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 const LINE_COLORS = [["--c1", "#6fa8dc"], ["--c2", "#ef8a2e"], ["--c3", "#8fbf7f"], ["--c4", "#b39ddb"],
-  ["--fix", "#6fb3aa"], ["--bad", "#e2776a"], ["--warn", "#d9a45a"], ["--soft", "#a0a7ad"]].map(([name, fallback]) => css(name, fallback));
+  ["--c5", "#e88fb4"], ["--c6", "#5fc3d6"], ["--c7", "#d4c95a"], ["--c8", "#c0c4c8"]].map(([name, fallback]) => css(name, fallback));
 const AXIS = () => ({stroke: css("--soft", "#a0a7ad"), grid: {stroke: css("--line", "#363b40"), width: 1},
                       ticks: {stroke: css("--line", "#363b40"), width: 1}});
 function drawChart() {
