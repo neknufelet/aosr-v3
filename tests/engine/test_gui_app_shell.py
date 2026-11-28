@@ -43,7 +43,8 @@ def test_adopted_pages_use_the_new_frame_and_keep_every_script_id(tmp_path: Path
             html = client.get(path).text
             links = re.findall(r'<link rel="stylesheet" href="/static/([^"]+)"', html)
             assert links[0] == "app.css" and "style.css" not in links
-            assert '<script src="/static/app_shell.js"' in html and '<body class="app">' in html
+            scripts = re.findall(r'<script src="/static/([^"]+)"', html)
+            assert "app_shell.js" in scripts and '<body class="app">' in html
             ids = set(re.findall(r'id="([^"]+)"', html))
             for script in STATIC.glob(f"{prefix}*.js"):
                 wanted = set(re.findall(r'\$\("([\w-]+)"\)', script.read_text(encoding="utf-8")))
