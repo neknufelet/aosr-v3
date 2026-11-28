@@ -248,9 +248,9 @@ def test_browser_archive_records_are_registered_without_verdict_lines() -> None:
         assert name in names
 
 
-def test_five_explicit_shards_keep_two_required_checks() -> None:
-    """五台手寫工作、不改合併門的兩個名字或每片三十分鐘上限。"""
-    assert _shards() == [f'shard-{letter}' for letter in 'abcde']
+def test_six_explicit_shards_keep_two_required_checks() -> None:
+    """六台手寫工作（#1363 由五台加一台）、不改合併門的兩個名字或每片三十分鐘上限。"""
+    assert _shards() == [f'shard-{letter}' for letter in 'abcdef']
     jobs = _jobs()
     for shard in _shards():
         assert 'strategy' not in jobs[shard]
