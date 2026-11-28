@@ -24,6 +24,7 @@ body.app{margin:0;font:14px/1.5 var(--sans);color:var(--ink);min-height:100vh;
   background:linear-gradient(90deg,var(--sunk) var(--rail),var(--bg) var(--rail));  /* 功能列那一條底色一路到頁尾 */
   display:grid;grid-template:var(--top) 1fr/var(--rail) 1fr}
 .app *{box-sizing:border-box}
+.app [hidden]{display:none!important}  /* 下面幾個元件設了 display，會蓋掉 hidden；腳本靠 hidden 切換區塊 */
 .app a{color:var(--acc)}
 .app .mono,.app .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
