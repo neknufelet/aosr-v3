@@ -9,10 +9,11 @@ import os
 from pathlib import Path
 from typing import cast
 
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Locator, Page, expect
 
 from aosr.materials.library import builtin_entries, fixed_surface
 import json
+import re
 
 from tests.engine._construction_cases import construction
 from tests.engine._construction_preset_answers import FITTED_VPR_IDS
@@ -234,10 +235,67 @@ def test_map_names_the_backing_until_switched_back(tmp_path: Path, browser: Brow
         zone = page.locator(f"#zone-map [data-wall='{ZONE[0]}'][data-zone='{ZONE[1]}']")
         expect(zone.locator(".zv-backing-label")).to_have_text("背後 VPR")
         expect(zone.locator("title")).to_contain_text("由程式最佳化，背後 VPR")
+        _laid_apart(zone)
         _shot(page, "backing-map.png")
         _click_zone(page, "/".join(ZONE))
         page.locator("#zone-panel-backing-pick").select_option("")
         _apply(page)
         expect(zone.locator(".zv-backing-label")).to_have_count(0)
         expect(zone.locator("title")).not_to_contain_text("背後")
+        assert base
+
+
+def _laid_apart(zone: Locator) -> None:
+    """那一區上的號碼圈、做法字、背後那一行、配對記號互不重疊，而且都在那一區裡面（#1338 審查：只核字會漏掉壓字與越界）。"""
+    boxes = cast(list[dict[str, float]], zone.evaluate("""group => {
+        const box = node => { const b = node.getBBox(); return {name: node.getAttribute('class') || node.tagName, x: b.x, y: b.y, r: b.x + b.width, b: b.y + b.height}; };
+        const parts = [...group.querySelectorAll('.zv-badge, .zv-search-label, .zv-backing-label, .zv-pair-mark, .zv-missed-bg, .zv-pair-words:not(.zv-hide)')];
+        return [box(group.querySelector('.zv-fill')), ...parts.map(box)]; }"""))
+    fill, parts = boxes[0], boxes[1:]
+    assert any(part["name"] == "zv-backing-label" for part in parts), parts
+    for part in parts:
+        assert fill["x"] - 0.5 <= part["x"] and part["r"] <= fill["r"] + 0.5 and fill["y"] - 0.5 <= part["y"] and part["b"] <= fill["b"] + 0.5, (part, fill)
+    # 「沒配成一對」黑條本來就墊在那一句底下：兩個算同一件，不互比。
+    apart = [part for part in parts if part["name"] not in ("zv-pair-words zv-missed-words",)]
+    for index, first in enumerate(apart):
+        for second in apart[index + 1:]:
+            overlap = min(first["r"], second["r"]) - max(first["x"], second["x"]) > 0.5 and min(first["b"], second["b"]) - max(first["y"], second["y"]) > 0.5
+            assert not overlap, (first, second)
+
+
+def test_long_backing_name_is_cut_inside_the_zone(tmp_path: Path, browser: Browser) -> None:
+    """自組剛背構造短名是一長串大寫英文：圖上那一行截短加「…」、整行留在那一區裡面。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        own = construction(id="lab_wide", label="WWWWWWWWWWWWWWWWWWWW 自編剛背")
+        assert page.request.put(f"{base}/api/materials/lab_wide", data=own).ok
+        _open_search_panel(page)
+        page.locator("#zone-panel-backing-pick").select_option("lab_wide")
+        page.locator("#zone-panel-depth").fill("25")
+        expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
+        _apply(page)
+        zone = page.locator(f"#zone-map [data-wall='{ZONE[0]}'][data-zone='{ZONE[1]}']")
+        expect(zone.locator(".zv-backing-label")).to_have_text(re.compile(r"^背後 W+…$"))
+        _laid_apart(zone)
+
+
+def test_ceiling_with_a_backing_names_it_on_the_plan(tmp_path: Path, browser: Browser) -> None:
+    """天花那一塊（自編房間裡最大的那塊）由程式最佳化、背後換成一筆：天花圖上那一塊也寫「背後 ○○」（#1338 審查：地板、天花另一支畫法）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.set_viewport_size({"width": 1440, "height": 900})
+        _open_overview(page)
+        _click_zone(page, "ceiling/auto1")
+        page.locator("#zone-panel-mode-search").check()
+        pick = page.locator("#zone-panel-backing-pick")
+        expect(pick).to_be_visible()
+        pick.select_option(VPR)
+        page.locator("#zone-panel-depth").fill("60")
+        expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
+        _apply(page)
+        zone = page.locator("#zone-map [data-wall='ceiling'][data-zone='auto1']")
+        expect(zone.locator(".zv-backing-label")).to_have_text("背後 VPR")
+        expect(zone.locator("title")).to_contain_text("背後 VPR")
         assert base
