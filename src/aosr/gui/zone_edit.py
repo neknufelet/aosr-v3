@@ -12,7 +12,8 @@
 切之前的分區已經對不上牆面時（例如房間改小），中心點沒被蓋到就取離它最近的那一區，所以「清掉這一面」永遠做得到。
 每一塊沿用了誰回在 ``inherited``：第 3 段要靠它把每區做法跟過重編的自動代號。
 
-吸附格距、最小邊是工程暫定（太碎的話網格與替身會爆），只寫在這裡，經 /api/input-defaults 交給網頁。
+吸附格距、最小邊是工程暫定（太碎的話網格與替身會爆），住進階參數清單 ``advanced_params.toml``（#1343），
+這裡開機讀一次，經 /api/input-defaults 交給網頁。
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from starlette.routing import Route
 
 from aosr.geometry.shoebox import Room
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme
+from aosr.gui.params_view import advanced_number
 from aosr.gui.wall_words import LEFT, OPPOSITE, RIGHT, draft_wall_words
 from aosr.physics.report_surfaces import RectangleZone, validate_surface_partition
 from aosr.reporting.scheme import Scheme
@@ -37,8 +39,8 @@ from aosr.physics.zone_fill import FILL_PREFIX, Box, FillResult, fill_wall, wall
 if TYPE_CHECKING:
     from aosr.gui.zone_symmetry import Frame, ZoneFrame
 
-SNAP_M = 0.05
-MIN_SIDE_M = 0.20
+SNAP_M = advanced_number("zone_cut.snap_m")
+MIN_SIDE_M = advanced_number("zone_cut.min_side_m")
 # 演算法容差（同 fem_lane 的 *_TOL：判「是不是同一條邊」，不是精度契約），單位公尺。
 EDGE_MERGE_TOL = 1e-6
 RESIZE_EDGE_M = 0.001

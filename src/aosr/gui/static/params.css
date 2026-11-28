@@ -1,0 +1,26 @@
+/* 「所有參數」頁（#1343）：色票照設計系統外框的暗色那一組；外框合併前先用這一份小檔，不碰 style.css。 */
+:root{--bg:#1f2226;--panel:#262a2e;--sunk:#1b1e21;--line:#363b40;--ink:#e3e5e6;--soft:#959ca2;--faint:#5f666c;
+--acc:#ef8a2e;--bad:#e2776a;--sans:Lato,"Noto Sans TC",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace;color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font:14px/1.5 var(--sans);color:var(--ink);background:var(--bg)}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 48px}
+a{color:var(--acc)}
+h1{font-size:20px;font-weight:600;margin-bottom:4px}
+.say{color:var(--soft)}
+.faint{color:var(--faint);font-size:12.5px;margin-top:2px}
+#message:empty{display:none}
+#message.bad{color:var(--bad)}
+section{margin-top:26px}
+h2{font:500 12px var(--sans);color:var(--soft);letter-spacing:.12em;padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
+h2 a{font-size:12px;letter-spacing:0}
+.wrap{overflow-x:auto}
+table{width:100%;min-width:960px;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.c-name{width:10em}.c-value{width:9em}.c-unit{width:6em}.c-range{width:11em}.c-key{width:15.5em}.c-from{width:14em}
+th{color:var(--soft);font-weight:500;text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+tr:hover td{background:var(--panel)}
+td.key,td.from{font-family:var(--mono);font-size:12px;color:var(--soft)}
+td.value{font-family:var(--mono);color:var(--acc);white-space:nowrap}
+td.value.none{font-family:var(--sans);color:var(--ink)}
+td.blurb{color:var(--soft)}
+td.key,td.from{overflow-wrap:anywhere}

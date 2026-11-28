@@ -694,6 +694,10 @@ def test_routes_start_stop_and_report_errors(tmp_path: Path) -> None:
         preview = await client.post(f"/api/gradient/schemes/{NAME}/plan", content=b"", headers={"content-type": "application/json"})
         assert preview.status_code == 200 and preview.json()["surrogate"]["found"] is True
         assert preview.json()["defaults"]["max_steps"] == 60
+        # #1343：開跑頁拿到的預設逐格等於進階參數清單（API 那一份）。
+        listed_params = {row["key"]: row["default"] for row in (await client.get("/api/params")).json()["params"]}
+        assert {key: preview.json()["defaults"][key] for key in ("max_steps", "family", "mount", "device")} == {
+            key: listed_params[f"gradient.{key}"] for key in ("max_steps", "family", "mount", "device")}
         started = await client.post(f"/api/gradient/schemes/{NAME}/start", json={"device": "cpu"})
         assert started.status_code == 200, started.text
         job_id = started.json()["job_id"]
