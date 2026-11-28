@@ -35,6 +35,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
 from tests.engine._construction_cases import construction
 from tests.engine._cpu_pins import forward_cpu_pins
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 from tests.engine._bonded_backing_cases import BONDED_VPR, MELAMINE_50, MELAMINE_100, MELAMINE_BONDED, SLOTTED_FRONT, STEEL_1MM, STEEL_2_5MM
 from tests.engine._zone_symmetry_room import FRONT_PAIR, NAME, SIDE, symmetry_document
 from tests.engine.test_gui_gradient_jobs import FakeLauncher
@@ -101,14 +102,14 @@ def test_it_reads_the_layers_and_never_the_name() -> None:
     assert cast(Doc, reference_only.listing_block((named, quiet, table)))["ids"] == ["own_quiet_panel", "own_table_panel"]
 
 
-def test_only_fixed_entries_are_judged_and_no_builtin_material_is_one() -> None:
-    """可最佳化材料與可調 VPR 不歸這一支（程式最佳化本來就不收可調 VPR，#1200）；內建材料一筆都不是。"""
+def test_only_fixed_entries_are_judged_and_the_fitted_1mm_preset_is_flagged() -> None:
+    """可最佳化材料與可調 VPR 不歸這一支（程式最佳化本來就不收可調 VPR，#1200）；本次收錄的 1 毫米擬合預設命中。"""
     from tests.engine.test_material_library_vpr import VPR, _vpr
 
     tunable = _ENTRY.validate_python(_vpr())
     assert tunable.id == VPR and tunable.kind == "tunable_layers"
     assert reference_only.entry_reference_only(tunable) is False
-    assert reference_only.listing_block(builtin_entries()) is None
+    assert cast(Doc, reference_only.listing_block(builtin_entries()))["ids"] == list(FITTED_VPR_IDS)
 
 
 def _band_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upper: str) -> None:
@@ -335,9 +336,17 @@ def _client(data_dir: Path) -> TestClient:
     return TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=data_dir)), base_url="http://127.0.0.1")
 
 
-def test_the_library_listing_names_the_hits_beside_the_rows_and_never_inside_them(tmp_path: Path) -> None:
+def _without_fitted_builtins(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.gui import material_editor
+
+    entries = tuple(entry for entry in builtin_entries() if entry.id not in FITTED_VPR_IDS)
+    monkeypatch.setattr(material_editor, "builtin_entries", lambda: entries)
+
+
+def test_the_library_listing_names_the_hits_beside_the_rows_and_never_inside_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """材料庫清單（分區頁與材料頁共用）：命中的代號與字放在旁邊一格；每一筆材料那一列的鍵、材料內文都跟沒有這一支時一樣
     （分區頁會把材料那一筆原樣送回曲線介面，材料頁會把它存回材料庫檔）。材料庫裡一筆都沒有時，回覆的鍵跟主線一樣。"""
+    _without_fitted_builtins(monkeypatch)
     plain_dir, hit_dir = tmp_path / "plain", tmp_path / "hit"
     _write_user_library(plain_dir, ENTRIES[1:])
     _write_user_library(hit_dir)
@@ -402,6 +411,7 @@ from aosr.gui.gradient_plan import GradientRequest, PlanRefused
 from aosr.reporting.scheme import Scheme
 from tests.engine._zone_symmetry_room import FRONT_PAIR, symmetry_document
 from tests.engine.test_gui_gradient_jobs import FakeLauncher
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 from tests.engine.test_gui_vpr_reference import HIT, REFUSED, _design, _write_user_library
 
 assert "jax" not in sys.modules, "載入期就有 JAX（另一題在守）"
@@ -412,7 +422,7 @@ design = _design(["glass_wool_48k", HIT, "none"])
 client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=data)), base_url="http://127.0.0.1")
 assert client.get("/").status_code == 200
 listing = client.get("/api/materials").json()
-assert listing["reference_only"]["ids"] == [HIT], listing.get("reference_only")
+assert listing["reference_only"]["ids"] == [*FITTED_VPR_IDS, HIT], listing.get("reference_only")
 limits = client.post("/api/zone-limits", json={"scheme": document, "design": design.model_dump(mode="json")}).json()
 assert limits["reference_only"][0]["text"] == REFUSED, limits.get("reference_only")
 after_page = "jax" in sys.modules
@@ -498,6 +508,7 @@ def _no_band(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_library_without_such_a_construction_never_reads_the_band(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """沒有命中的材料庫不靠界線：把界線換成讀不出來，材料庫清單、限制檢查、曲線三個介面照樣 200，回覆跟界線讀得出來時
     （同一跑先打一次）一模一樣，鍵也就是主線那幾個。有命中的材料庫同樣的植法會炸（對照：這一題真的植到了）。"""
+    _without_fitted_builtins(monkeypatch)
     _write_user_library(tmp_path, ENTRIES[1:])
     client = _client(tmp_path)
     design = _zones_design({"x0": {"a": ["glass_wool_48k", PLAIN_ID, "none"]}})

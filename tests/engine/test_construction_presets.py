@@ -15,8 +15,9 @@ from aosr.gui.input_setup import input_defaults
 from aosr.reporting.physics_identity import physics_identity_parts
 from aosr.reporting.validation import validate_scheme
 from aosr.reporting.scheme import Scheme
-from tests.engine._construction_preset_answers import NEW_ROWS
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS, NEW_ROWS
 from aosr.runtime import child_process_env
+from tests.engine._cpu_pins import forward_cpu_pins
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
 from tests.engine._surface_zone_cases import NEW, zone_document
@@ -67,6 +68,17 @@ def test_presets_equal_decided_rows_and_validate() -> None:
         assert preset.links and all(link.startswith("https://") for link in preset.links)
         assert "實際產品流阻可能差數倍" in preset.notes
         assert not validate_scheme(preset_document(preset.material), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+
+
+def test_fitted_vpr_notes_report_the_front_layer_ranking_reversal() -> None:
+    key, = FITTED_VPR_IDS
+    preset = next(row for row in load_construction_presets(config_path("construction_presets.toml")) if row.id == key)
+    notes = " ".join(preset.notes)
+    assert "兩版結論相近" not in notes
+    for fact in ("十個三分之一倍頻帶中心點", "最大吸音率模型差為 0.23", "100 赫茲無規入射",
+                 "真實板重版以 10 公分較高（0.30270 對 5 公分的 0.26386）",
+                 "擬合版以 5 公分較高（0.49146 對 10 公分的 0.47979）", "貼棉後的成品尚無實測"):
+        assert fact in notes
 
 
 def test_presets_stay_outside_physics_identity_and_defaults_are_plain_data() -> None:
@@ -125,6 +137,14 @@ def test_every_preset_runs_through_late_surface_core(tmp_path: Path) -> None:
     child = subprocess.run([sys.executable, "-B", "-m", "tests.engine._construction_presets_probe"],
         cwd=Path(__file__).resolve().parents[2], env=env, text=True, capture_output=True, timeout=120)
     assert child.returncode == 0, child.stderr
+
+
+def test_fitted_vpr_five_points_match_written_notes(tmp_path: Path) -> None:
+    env = forward_cpu_pins(child_process_env(threads=1))
+    env["TMPDIR"] = str(tmp_path)
+    run = subprocess.run([sys.executable, "-B", "-m", "tests.engine._construction_presets_probe", "fitted_vpr"],
+                         env=env, capture_output=True, text=True, timeout=120)
+    assert run.returncode == 0, run.stderr
 
 
 @pytest.mark.parametrize("case", ("blank-label", "blank-source", "bad-link", "duplicate-id", "duplicate-label", "extra", "non-ascii-id"))

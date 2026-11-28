@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 from pydantic import TypeAdapter
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
@@ -13,11 +14,20 @@ from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import config_path
 from aosr.gradient.surrogate_coverage import family_coverage
+from aosr.gui.gradient_plan import GradientRequest, plan_search
 from aosr.gui.material_editor import material_routes, user_library_path
 from aosr.gui.material_surfaces import placement
+from aosr.gui.zone_design import DesignSettings
 from aosr.gui.zone_modes import Origin, zone_material
 from aosr.materials import library, search_library
-from aosr.materials.construction_models import ConstantImpedance
+from aosr.materials.construction_models import Assembly, ConstantImpedance, MountedOnWall
+from aosr.reporting.scheme import Scheme
+
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS, NEW_ROWS
+from tests.engine._directivity import DIRECTIVITY
+from tests.engine._furniture_cases import CAPABILITIES
+from tests.engine._zone_symmetry_room import NAME, symmetry_document
+from tests.engine.test_gui_app import _app
 
 ANSWER = Path(__file__).parent / "data" / "material_construction_baseline.json"
 
@@ -101,10 +111,69 @@ def test_legacy_materials_match_pre_construction_main(tmp_path: Path) -> None:
     listing = actual.pop("listing")
     catalog = {entry.id for entry in library.catalog_entries()}
     assert isinstance(listing, dict) and isinstance(listing["materials"], list)
-    listing["materials"] = [row for row in listing["materials"] if row["entry"]["id"] not in catalog]
+    listing["materials"] = [row for row in listing["materials"] if row["entry"]["id"] not in catalog | set(FITTED_VPR_IDS)]
     assert_old_fields(listing, expected.pop("listing"))
     assert actual == expected
 
+
+def test_fitted_vpr_library_rows_apply_as_fixed_materials(tmp_path: Path) -> None:
+    with TestClient(Starlette(routes=material_routes(tmp_path))) as client:
+        response = client.get("/api/materials")
+    assert response.status_code == 200
+    rows = {row["entry"]["id"]: row["entry"] for row in response.json()["materials"]}
+    wall = ConstantImpedance(impedance_pa_s_m=7654.)
+    for key in FITTED_VPR_IDS:
+        entry = library.FixedEntry.model_validate(rows[key])
+        assert isinstance(entry.material, Assembly)
+        applied = zone_material(wall, Origin(wall, "current"), entry, "x0")
+        assert isinstance(applied.material, MountedOnWall)
+        assert applied.material.layers == entry.material.layers and applied.material.wall == wall
+
+
+def test_whole_wall_fitted_vpr_backs_only_the_searchable_front_layers(tmp_path: Path) -> None:
+    """自編房間前牆由輸入頁設原牆，再交給程式挑玻璃棉或不貼。只建候選配置。"""
+    from aosr.gradient.boundary import named_materials
+    from aosr.gradient.cli import start_designs
+    from aosr.gradient.material_gradient import baseline_theta, design_names
+    from aosr.gradient.start_config import presets_table, scene_wall_materials
+    from aosr.gradient.surface_design import design_template_material
+    from aosr.gradient.template_rounds import TemplateContext, swap
+
+    key, = FITTED_VPR_IDS
+    expected = Assembly.model_validate({"kind": "assembly", "backing": "rigid", "layers": NEW_ROWS[key][1]})
+    with _app(tmp_path) as client:
+        edited = client.post("/api/input-edit", json={"scheme": symmetry_document(), "action": "wall_preset",
+                                                      "wall": "x0", "value": key})
+        assert edited.status_code == 200, edited.text
+        document = edited.json()["scheme"]
+        original = client.post("/api/zone-material", json={"scheme": document, "wall": "x0", "zone": "whole_wall",
+                                                            "choice": "original"})
+        assert original.status_code == 200, original.text
+        document["scene"]["surface_zones_by_wall"]["x0"][0]["material"] = original.json()["material"]
+
+    scheme = Scheme.model_validate(document)
+    choice = {"mode": "search", "allowed": ["glass_wool_48k", "none"]}
+    design = DesignSettings.model_validate({"schema_version": "aosr.zone_design.v1", "scheme_id": NAME,
+                                            "zones": {"x0": {"whole_wall": choice}}})
+    settings = load_material_gradient_settings(config_path("material_gradient.toml"))
+    table = presets_table()
+    plan = plan_search(scheme, design, GradientRequest(), settings)
+    start, allowed = start_designs(scheme, settings, table, plan.presets, mount=plan.request.mount, fixed=plan.fixed_surfaces,
+                                   caps=plan.max_depths, allowed=plan.allowed, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    front = next(item for item in start if item.surface_id == "x0")
+    assert allowed["x0"] == ("glass_wool_48k", "none") and front.family_id == "glass_wool_48k"
+    mounted = design_template_material(front)
+    assert isinstance(mounted, MountedOnWall) and mounted.wall == expected
+    assert [layer.kind for layer in mounted.layers] == ["porous", "air"]
+    assert design_names(start) == ("x0.layer1.thickness_m", "x0.layer2.thickness_m")
+
+    walls = scene_wall_materials(scheme, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    context = TemplateContext(settings, table, named_materials(walls),
+                              lambda _: pytest.fail("建立候選配置不應計分"), mount=plan.request.mount,
+                              fixed_surfaces=plan.fixed_surfaces, allowed=allowed)
+    bare, _ = swap(start, baseline_theta(start), "x0", "none", context)
+    kept = next(item for item in bare if item.surface_id == "x0")
+    assert kept.material is None and kept.kept_material == expected and design_names(bare) == ()
 
 def test_wall_porous_bytes_match_main() -> None:
     base = ConstantImpedance(impedance_pa_s_m=7654.0)

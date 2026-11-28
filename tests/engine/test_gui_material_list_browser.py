@@ -10,14 +10,15 @@ from playwright.sync_api import Browser, Route, expect
 
 from aosr.gui.material_editor import user_library_path
 from aosr.materials.library import SCHEMA_VERSION, catalog_entries
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine._construction_cases import construction
 from tests.engine.test_material_library_vpr import _panel, _table, _vpr, _wool
 
 
-# 成品那一頁：內建構造預設＋自編 6 筆裡的成品 19 筆，加文獻硬面（門、窗、木地板…）每筆一行。
-PRODUCTS = 19 + len(catalog_entries())
+# 成品那一頁：內建構造預設＋自編 6 筆裡的成品原有 19 筆，加本次收錄的 1 毫米擬合預設與文獻硬面（門、窗、木地板…）每筆一行。
+PRODUCTS = 19 + len(FITTED_VPR_IDS) + len(catalog_entries())
 
 
 def _sample_library(folder: Path) -> None:

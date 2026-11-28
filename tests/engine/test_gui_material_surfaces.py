@@ -12,6 +12,7 @@ from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.material_editor import user_library_path
 from aosr.gui.material_surfaces import GROUP_SHORT_WORDS, GROUP_WORDS, WALLS, placement
 from aosr.materials.library import LibraryEntry, builtin_entries, dump_user_library
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
 from tests.engine._sample_material_library import SAMPLE_USER_ENTRIES
 from tests.engine.test_material_construction_baseline import legacy_entries
 
@@ -26,6 +27,7 @@ BUILTIN_GROUPS = {
     "perforated_gypsum_8_18r_backed_gw30_ceiling": "ceiling_build",
     "perforated_0p8mm_d10_gw24k_50mm": "wall", "mpp_t1mm_d0p5_gap50": "wall", "mpp_t0p5mm_d0p5_gap50": "wall",
     "slotted_gypsum_b6_backed_gap65": "wall", "slotted_wood_typ9_absorber40_gap98": "wall",
+    **dict.fromkeys(FITTED_VPR_IDS, "wall"),
     "carpet_on_concrete": "floor",
     # 文獻硬面是整面的表面阻抗（阻抗表），只能整面換掉，歸「牆面、地面本身」。
     "door_wood_solid": "surface_itself", "glass_single_3mm": "surface_itself", "glass_double_gap30": "surface_itself",

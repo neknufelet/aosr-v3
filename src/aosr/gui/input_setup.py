@@ -16,11 +16,13 @@ from aosr.config.representative_speakers import load_representative_speakers
 from aosr.config.construction_presets import load_construction_presets
 from aosr.gui.construction_input import material_field_values, material_open_area_texts, web_scheme_problems
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, material_form_spec, plain_problems, speaker_name
+from aosr.gui import reference_only
 from aosr.gui.labels import WALLS
 from aosr.gui.room_facts import metres, room_facts
 from aosr.gui.wall_words import draft_layout, draft_wall_words
 from aosr.gui.zone_edit import zone_cut_defaults
 from aosr.gui.zone_symmetry import symmetry_axis
+from aosr.materials.construction_models import Assembly
 from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
@@ -78,9 +80,11 @@ def input_defaults() -> dict[str, object]:
     """唯讀端點：數字、准用材質、角色與擺法由伺服器給，中文名稱走名稱表。"""
     speakers = load_representative_speakers(config_path("representative_speakers.toml"))
     presets = load_construction_presets(config_path("construction_presets.toml"))
+    limited = [p.id for p in presets if reference_only.reference_only(Assembly.model_validate(p.material))]
     return {"furniture": deepcopy(FURNITURE_DEFAULTS), "shortcuts": deepcopy(SHORTCUTS),
             "roles": ROLES, "relative_yaw": RELATIVE_YAW, "mounts": MOUNTS,
             "construction_presets": [preset.model_dump(mode="json") for preset in presets],
+            "preset_reference_words": dict.fromkeys(limited, reference_only.words()["band_words"]) if limited else {},
             "material_form": material_form_spec(),
             "materials": {kind: [material for material, kinds in FURNITURE_MATERIAL_KINDS.items() if kind in kinds]
                           for kind in FURNITURE_DEFAULTS},

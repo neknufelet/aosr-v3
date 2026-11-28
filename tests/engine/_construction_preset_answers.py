@@ -37,3 +37,10 @@ NEW_ROWS: dict[str, tuple[str, list[dict[str, object]]]] = {
         {"kind": "porous", "thickness_m": .007, "model": "komatsu", "material_class": "fibrous",
          "flow_resistivity_pa_s_m2": 7800.}]),
 }
+
+FITTED_VPR_IDS = ("vpr_steel1mm_melamine100_fraunhofer_fit",)
+
+NEW_ROWS[FITTED_VPR_IDS[0]] = ("VPR 鋼板 1 mm＋美耐皿 100 mm（依 Kristl 圖 2.4 的 Fraunhofer 量測擬合）", [
+    {"kind": "board", "surface_mass_kg_m2": 5.154026, "resistance_pa_s_m": 516.847107},
+    {"kind": "porous", "thickness_m": .1, "model": "komatsu", "material_class": "foam", "flow_resistivity_source": "measured",
+     "flow_resistivity_pa_s_m2": 8644., "frame_compression_modulus_pa": 1000., "frame_loss_factor": 1.}])

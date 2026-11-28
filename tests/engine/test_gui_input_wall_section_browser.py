@@ -12,9 +12,13 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, Page, Route, expect
 
+from aosr.gui.reference_only import words
 from aosr.materials.library import builtin_entries
 from aosr.reporting.scheme import Scheme
 from tests.engine._input_page_steps import open_fact_editor, open_fold, open_scheme, reveal
+from tests.engine._construction_preset_answers import FITTED_VPR_IDS
+from tests.engine._zone_symmetry_room import NAME, symmetry_document
+from tests.engine.test_gui_input_setup_browser import _filled
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine._surface_zone_cases import ROOM_109, room109_document
 from tests.engine._zone_naming_room import ZONE_NAMING_SCHEME, write_zone_naming_library
@@ -481,4 +485,20 @@ def test_every_box_in_section_two_lives_in_one_place(tmp_path: Path, browser: Br
         duplicated = page.evaluate("""() => { const ids = [...document.querySelectorAll('[id]')].map(node => node.id);
           return ids.filter((id, index) => ids.indexOf(id) !== index); }""")
         assert duplicated == []
+        _assert_quiet(watched)
+
+
+def test_whole_wall_fitted_preset_shows_low_frequency_limit(tmp_path: Path, browser: Browser) -> None:
+    _write(tmp_path, symmetry_document())
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_scheme(page, NAME)
+        _wall(page, "x0")
+        open_fact_editor(page, "edit-wall-original")
+        _filled(page, "#material-kind-x0", "assembly")
+        _filled(page, "#preset-x0", FITTED_VPR_IDS[0])
+        warning = page.locator("#wall-original-editor").get_by_text(str(words()["band_words"]), exact=False)
+        expect(warning).to_be_visible()
+        _filled(page, "#preset-x0", "glass_wool_48k_50mm")
+        expect(warning).to_have_count(0)
         _assert_quiet(watched)
