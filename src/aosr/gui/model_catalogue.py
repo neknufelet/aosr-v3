@@ -18,6 +18,8 @@ from aosr.materials import construction_models
 
 NO_RANGE: Final = "未列有效範圍"
 NOT_LISTED: Final = "repo 未列"
+RELATED_NOTE: Final = "相關文獻（外部對照報告用它比對；aosr 實作是否照它：未核對）"
+BACKGROUND_NOTE: Final = "背景文獻（aosr 沒有實作這些模型）"
 _AT = r"^[A-Za-z0-9_./-]+:[1-9][0-9]*$"
 _UNIT = r"無量綱|比例|[A-Za-z0-9·/²³°%]+"
 _CODE = r"^src/aosr/[a-z_/]+\.py::[A-Za-z_][A-Za-z0-9_]*$"
@@ -60,13 +62,38 @@ class Citation(_Frozen):
     venue: str | None = None
     doi: str | None = None
     registry: str | None = Field(default=None, pattern=r"^komatsu$")
+    reference: str | None = None
+    note: str = ""
     at: str = Field(pattern=_AT)
 
     @model_validator(mode="after")
     def _one_home(self) -> Citation:
-        if self.registry is not None and (self.title or self.venue or self.doi):
-            raise ValueError("書目從登記簿讀時，題名、期刊、DOI 不准再抄一份")
+        homes = (self.registry is not None) + (self.reference is not None)
+        if homes > 1 or (homes and (self.title or self.venue or self.doi)):
+            raise ValueError("書目從登記簿或核過的外部書目讀時，題名、期刊、DOI 不准再抄一份，兩處也只能擇一")
+        if self.reference is not None and not self.note:
+            raise ValueError("掛核過的外部書目要寫 note：書目核過不等於 aosr 照它實作")
         return self
+
+
+class Reference(_Frozen):
+    """核過的外部書目：書目核過，不代表 aosr 照它實作；怎麼掛在模型上由各欄位分開標。"""
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    text: str = Field(min_length=1)
+    doi: str = Field(pattern=r"^10\.[0-9]{4,}/\S+$")
+    verified: str = Field(min_length=1)
+
+
+class Unimplemented(_Frozen):
+    """aosr 沒有實作、只為了跟外部對照時知道出處而列的模型。"""
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    name: str = Field(min_length=1)
+    why: str = Field(min_length=1)
+    references: tuple[str, ...] = Field(min_length=1)
+    at: str = Field(pattern=_AT)
+    mark: str = Field(min_length=1)
 
 
 class Origin(_Frozen):
@@ -85,6 +112,8 @@ class Model(_Frozen):
     blurb: str = Field(min_length=1)
     range: ModelRange
     citation: Citation | None = None
+    related: tuple[str, ...] = ()
+    background: tuple[str, ...] = ()
     origin: Origin
 
     @model_validator(mode="after")
@@ -105,12 +134,23 @@ class NotModel(_Frozen):
 class ModelCatalogue(_Frozen):
     model: tuple[Model, ...] = Field(min_length=1)
     not_model: tuple[NotModel, ...] = ()
+    reference: tuple[Reference, ...] = ()
+    unimplemented: tuple[Unimplemented, ...] = ()
 
     @model_validator(mode="after")
     def _unique(self) -> ModelCatalogue:
         ids = [model.id for model in self.model]
         if len(set(ids)) != len(ids):
             raise ValueError("模型代號不准重複")
+        known = {item.id for item in self.reference}
+        if len(known) != len(self.reference):
+            raise ValueError("外部書目代號不准重複")
+        used = [ref for model in self.model for ref in (*model.related, *model.background)]
+        used += [model.citation.reference for model in self.model if model.citation and model.citation.reference]
+        used += [ref for item in self.unimplemented for ref in item.references]
+        unknown = sorted(set(used) - known)
+        if unknown:
+            raise ValueError(f"指到沒登記的外部書目：{unknown}")
         return self
 
 
@@ -138,7 +178,7 @@ def described(description: str) -> tuple[str, str]:
     inner = description.partition("（")[2]
     name = re.split(r"[，：；）]", inner, maxsplit=1)[0]
     rest = inner[len(name):]
-    unit = re.split(r"[；）]", rest[1:], maxsplit=1)[0] if rest.startswith("，") else ""
+    unit = re.split(r"[；：）]", rest[1:], maxsplit=1)[0] if rest.startswith("，") else ""
     return name, unit if re.fullmatch(_UNIT, unit) else ""
 
 
@@ -168,13 +208,20 @@ def _komatsu_range(ranges: KomatsuRanges) -> list[dict[str, object]]:
     return rows
 
 
-def catalogue_listing(path: str | Path, ranges_path: str | Path) -> list[dict[str, object]]:
-    """整份目錄，參數、Komatsu 範圍與書目已現讀解開；給 ``/api/params`` 的 ``models``。"""
+def _reference_row(reference: Reference) -> dict[str, str]:
+    return {"id": reference.id, "text": reference.text, "doi": "https://doi.org/" + reference.doi, "verified": reference.verified}
+
+
+def catalogue_listing(path: str | Path, ranges_path: str | Path) -> dict[str, list[dict[str, object]]]:
+    """整份目錄，參數、Komatsu 範圍與書目已現讀解開；給 ``/api/params`` 的 ``models`` 與 ``unimplemented``。"""
     catalogue = load_model_catalogue(path)
+    references = {item.id: item for item in catalogue.reference}
     komatsu = load_porous_model_ranges(ranges_path).komatsu
     out: list[dict[str, object]] = []
     for model in catalogue.model:
-        row = model.model_dump(mode="json", exclude={"params", "range", "citation"})
+        row = model.model_dump(mode="json", exclude={"params", "range", "citation", "related", "background"})
+        row["related"] = {"note": RELATED_NOTE, "items": [_reference_row(references[ref]) for ref in model.related]}
+        row["background"] = {"note": BACKGROUND_NOTE, "items": [_reference_row(references[ref]) for ref in model.background]}
         row["params"] = [param_row(param) for param in model.params]
         span = model.range
         row["range"] = {
@@ -187,13 +234,18 @@ def catalogue_listing(path: str | Path, ranges_path: str | Path) -> list[dict[st
             row["citation"] = None
         else:
             provenance = komatsu.provenance if cite.registry else None
+            verified = references[cite.reference] if cite.reference else None
             row["citation"] = {
                 "authors": list(cite.authors),
                 "year": cite.year if cite.year is not None else NOT_LISTED,
-                "reference": provenance.reference if provenance else
+                "reference": provenance.reference if provenance else verified.text if verified else
                 " ".join(part for part in (cite.title, cite.venue) if part) or NOT_LISTED,
-                "doi": provenance.doi if provenance else cite.doi or NOT_LISTED,
+                "doi": provenance.doi if provenance else "https://doi.org/" + verified.doi if verified else cite.doi or NOT_LISTED,
+                "verified": verified.verified if verified else None,
+                "note": cite.note,
                 "at": cite.at,
             }
         out.append(row)
-    return out
+    missing = [{**item.model_dump(mode="json", exclude={"references"}),
+                "references": [_reference_row(references[ref]) for ref in item.references]} for item in catalogue.unimplemented]
+    return {"models": out, "unimplemented": missing}

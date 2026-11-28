@@ -59,7 +59,25 @@ function table(page, params) {
 // 吸音模型目錄：外殼 <details> 寫在 HTML、預設收起；這裡只填內容，不打開。
 function cite(citation) {
   if (!citation) return "repo 未列引用";
-  return [citation.authors.join("、"), citation.year, citation.reference, citation.doi].join("；");
+  const parts = [citation.authors.join("、"), citation.year, citation.reference, citation.doi];
+  if (citation.verified) parts.push(`書目核對：${citation.verified}`);
+  if (citation.note) parts.push(citation.note);
+  return parts.join("；");
+}
+
+// 核過的外部書目：書目核過不等於 aosr 照它實作，標語跟著伺服器給的 note 走。
+function refList(block) {
+  if (!block.items.length) return null;
+  return el("div", {class: "mrefs"}, el("p", {class: "mlabel", text: block.note}),
+    el("ul", {}, ...block.items.map((item) =>
+      el("li", {text: `${item.text} ${item.doi}（書目核對：${item.verified}）`}))));
+}
+
+function unimplementedCard(item) {
+  return el("article", {class: "model"},
+    el("h3", {text: `${item.name}（沒有實作）`}),
+    el("p", {class: "say", text: item.why}, el("span", {class: "mat", text: `（${item.at}）`})),
+    refList({note: "出處文獻", items: item.references}));
 }
 
 function rangeText(span) {
@@ -81,7 +99,9 @@ function modelCard(model) {
     line("有效範圍", rangeText(model.range), model.range.at),
     line("引用", cite(model.citation), model.citation ? model.citation.at : null),
     line("程式", [model.code, ...model.compute.filter((name) => name !== model.code)].join("、"), null),
-    line("來源", model.origin.text, model.origin.at));
+    line("來源", model.origin.text, model.origin.at),
+    refList(model.related),
+    refList(model.background));
 }
 
 async function load() {
@@ -103,7 +123,8 @@ async function load() {
     .filter(([, params]) => params.length)
     .map(([page, params]) => table(page, params)));
   byId("catalogue").textContent = `目錄檔：${body.catalogue}`;
-  byId("model-list").replaceChildren(...body.models.map(modelCard));
+  byId("model-list").replaceChildren(...body.models.map(modelCard),
+    ...(body.unimplemented.length ? [el("h3", {class: "msub", text: "沒有實作的模型"}), ...body.unimplemented.map(unimplementedCard)] : []));
 }
 
 window.addEventListener("DOMContentLoaded", load);

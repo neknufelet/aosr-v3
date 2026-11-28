@@ -27,7 +27,7 @@ PAGE: Final = Path(__file__).resolve().parent / "static" / "params.html"
 
 
 @cache
-def model_catalogue() -> list[dict[str, object]]:
+def model_catalogue() -> dict[str, list[dict[str, object]]]:
     return catalogue_listing(CATALOGUE, RANGES)
 
 
@@ -66,7 +66,7 @@ def params_listing() -> dict[str, object]:
                                else REGISTRY_FILE if param.default is not None else None)
         rows.append(row)
     return {"registry": REGISTRY_FILE, "pages": [page.model_dump(mode="json") for page in registry.page], "params": rows,
-            "catalogue": CATALOGUE_FILE, "models": model_catalogue()}
+            "catalogue": CATALOGUE_FILE, **model_catalogue()}
 
 
 async def _listing(request: Request) -> Response:

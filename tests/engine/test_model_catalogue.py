@@ -19,7 +19,7 @@ from starlette.testclient import TestClient
 from aosr.config.paths import config_path
 from aosr.config.porous_model_ranges import KomatsuRanges, load_porous_model_ranges
 from aosr.gui.app import GuiSettings, create_app
-from aosr.gui.model_catalogue import NO_RANGE, ModelCatalogue, load_model_catalogue
+from aosr.gui.model_catalogue import NO_RANGE, RELATED_NOTE, ModelCatalogue, load_model_catalogue
 from aosr.gui.params_view import CATALOGUE, params_listing
 from aosr.materials import construction_models
 from aosr.materials.construction_models import Layer, PorousLayer, SurfaceMaterial
@@ -175,3 +175,58 @@ def test_bad_sample_base_loads_without_the_bad_part(tmp_path: Path) -> None:
 def test_bad_catalogue_refuses_to_load(tmp_path: Path, model: str) -> None:
     with pytest.raises(ValidationError):
         load_model_catalogue(_bad_sample(tmp_path, model))
+
+
+# 主對話 11-28 用 Crossref 核過的外部書目（工作區 verified-references.md）：代號 → DOI。考卷不連網，只核結構與字串。
+VERIFIED_DOIS = {
+    "miki_1990": "10.1250/ast.11.19",
+    "maa_1998": "10.1121/1.423870",
+    "ingard_1953": "10.1121/1.1907235",
+    "kristiansen_vigran_1994": "10.1016/0003-682X(94)90039-6",
+    "delany_bazley_1970": "10.1016/0003-682X(70)90031-9",
+    "allard_champoux_1992": "10.1121/1.402824",
+    "johnson_koplik_dashen_1987": "10.1017/S0022112087000727",
+    "champoux_allard_1991": "10.1063/1.349482",
+}
+
+
+def test_verified_references_carry_doi_and_check_stamp() -> None:
+    references = {item.id: item for item in _catalogue().reference}
+    assert {key: item.doi for key, item in references.items()} == VERIFIED_DOIS
+    assert all(item.verified == "Crossref 2026-11-28" and item.text for item in references.values())
+
+
+def test_verified_references_hang_where_the_note_says() -> None:
+    """書目核過≠aosr 照它實作：Miki 掛引用並註明係數未核；孔板三筆只當相關文獻；Komatsu 掛背景；JCA 兩筆只在「沒有實作」。"""
+    models = {model.id: model for model in _catalogue().model}
+    miki = models["porous_miki"].citation
+    assert miki is not None and miki.reference == "miki_1990" and "未核對" in miki.note
+    assert models["micro_perforated"].related == ("maa_1998",)
+    assert models["perforated"].related == ("ingard_1953",)
+    assert models["slotted"].related == ("kristiansen_vigran_1994",)
+    assert set(models["porous_komatsu"].background) == {"delany_bazley_1970", "allard_champoux_1992"}
+    jca = {"johnson_koplik_dashen_1987", "champoux_allard_1991"}
+    for model in models.values():
+        hung = set(model.related) | set(model.background) | ({model.citation.reference} if model.citation else set())
+        assert not hung & jca, f"JCA 書目不准掛在現有模型 {model.id}"
+    unimplemented = {item.id: item for item in _catalogue().unimplemented}
+    assert set(unimplemented["jca"].references) == jca
+    assert "JCA" in _line(unimplemented["jca"].at)
+
+
+def test_api_shows_references_with_their_caveats(tmp_path: Path) -> None:
+    with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        body = client.get("/api/params").json()
+    models = {model["id"]: model for model in body["models"]}
+    assert models["porous_miki"]["citation"]["doi"] == "https://doi.org/" + VERIFIED_DOIS["miki_1990"]
+    assert "未核對" in models["porous_miki"]["citation"]["note"]
+    related = models["micro_perforated"]["related"]
+    assert related["note"] == RELATED_NOTE and related["items"][0]["doi"].endswith(VERIFIED_DOIS["maa_1998"])
+    assert [item["id"] for item in body["unimplemented"]] == ["jca"]
+    script = (STATIC / "params.js").read_text(encoding="utf-8")
+    assert "body.unimplemented" in script and "related" in script and "background" in script
+
+
+def test_bad_reference_id_refuses_to_load(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        load_model_catalogue(_bad_sample(tmp_path, 'range = { note = "未列有效範圍" }\nrelated = ["nobody_2000"]'))
