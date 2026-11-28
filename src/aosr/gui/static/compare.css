@@ -1,7 +1,7 @@
 /* 比較頁自己的樣式；外框在 app.css、三頁共用的在 report_frame.css（#1350）。 */
 #rerun-holder{display:flex;gap:.5rem;flex-wrap:wrap}
 #rerun-holder:not(:empty){margin-top:.75rem}
-.compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
+.app .compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}  /* 外框的 .app .drawings 比較強，這裡要同一層才蓋得過 */
 #plan-a-detail,#plan-b-detail{white-space:pre-line}
 /* 上排：摘要與「改了哪裡」寬螢幕左右並排、窄螢幕照閱讀順序上下排；頻響疊圖在下面佔滿整頁寬。 */
 /* 「座位與聲道設定核對」由 compare.js 擺在右欄、左欄或兩欄底下（挑兩欄最等高的）。
