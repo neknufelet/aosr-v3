@@ -29,8 +29,9 @@ import shlex
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from itertools import takewhile
 from pathlib import Path
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, note, repo_root
@@ -41,7 +42,7 @@ SELF = "governance/pin_tests.py"
 TESTS_DIR = "tests"
 BASE_REF = "origin/main"
 # SHA-256 的十六進位長度；前後不准再接十六進位字元（更長的字串不算）。
-PIN = re.compile(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])")
+PIN = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])")
 # 瀏覽器考卷不進清單：它們受機器負載影響、偶發紅（#1231），擋 push 的東西不能偶發紅；雲端照跑。
 BROWSER_SUFFIX = "_browser.py"
 # 相對主線動到這些路徑才要收據：程式、考卷、答案檔，以及會改執行環境身分的依賴鎖檔。
@@ -49,11 +50,17 @@ GATED = ("src/", "tests/", "blueprint/", "pyproject.toml", "uv.lock")
 # 同一行指令裡先動提交再推：掛鉤在整行執行前就判，看不到之後才出現的那顆提交，所以整行擋下。
 REWRITE_VERBS = frozenset({"commit", "merge", "rebase", "cherry-pick", "pull", "am", "reset", "revert",
                            "checkout", "switch"})
-# 不會把提交送上去的 push：刪遠端分支、演練。
-HARMLESS_PUSH_FLAGS = frozenset({"--delete", "-d", "--dry-run", "-n"})
+# 不會把提交送上去的 push：刪遠端分支、演練、只印說明；短旗標合寫（-nv）也算。
+HARMLESS_PUSH_FLAGS = frozenset({"--delete", "--dry-run", "--help"})
+HARMLESS_SHORT_FLAGS = re.compile(r"-[A-Za-z]*[ndh][A-Za-z]*")
+# 後面跟著一個值的 push 旗標：那個值不是遠端也不是來源。
+PUSH_FLAGS_WITH_VALUE = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
+# 一次推很多條、看不出是哪幾顆的寫法：不猜，擋下請人寫明來源。
+UNREADABLE_PUSH_FLAGS = frozenset({"--all", "--mirror", "--branches"})
 OPERATOR_CHARS = frozenset(";&|()")
-# 包在指令前面、不改變「後面那個才是真的指令」的字；以及用 -c 帶一整段指令的殼層。
-WRAPPERS = frozenset({"command", "env", "time", "nice", "exec", "sudo", "noglob"})
+# 包在指令前面、不改變「後面那個才是真的指令」的字（含殼層的 then／do／else 這類關鍵字）；以及用 -c 帶一整段指令的殼層。
+WRAPPERS = frozenset({"command", "env", "time", "nice", "exec", "sudo", "noglob",
+                      "if", "then", "elif", "else", "while", "until", "do", "!", "{"})
 SHELLS = frozenset({"bash", "sh", "zsh"})
 RUN_LINE = "uv run python -m governance.pin_tests"
 
@@ -89,27 +96,34 @@ def has_pin(tree: ast.Module) -> bool:
                for node in ast.walk(tree))
 
 
-def imported(tree: ast.Module) -> set[str]:
-    """這支檔匯入的模組點記法；``from a.b import c`` 兩種都記（``a.b`` 與 ``a.b.c``）。"""
+def imported(tree: ast.Module, module: str = "") -> set[str]:
+    """這支檔匯入的模組點記法；``from a.b import c`` 兩種都記（``a.b`` 與 ``a.b.c``）。
+
+    ``module`` 是這支檔自己的點記法，用來把相對匯入（``from ._answers import X``）換成完整名字。"""
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            names.add(node.module)
-            names.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            package = module.split(".")[:-node.level] if node.level else []
+            base = ".".join([*package, *([node.module] if node.module else [])])
+            names.add(base)
+            names.update(f"{base}.{alias.name}" for alias in node.names)
     return names
+
+
+def _dotted(name: str) -> str:
+    return name.removesuffix(".py").replace("/", ".")
 
 
 def pin_files(root: Path) -> list[str]:
     """釘值考卷清單（相對 ``root``、排序過）。一支都沒有就是這一跑沒量到東西。"""
     trees = {path.relative_to(root).as_posix(): _parsed(path)
              for path in sorted((root / TESTS_DIR).rglob("*.py"))}
-    answers = {name.removesuffix(".py").replace("/", ".") for name, tree in trees.items()
-               if Path(name).name.startswith("_") and has_pin(tree)}
+    answers = {_dotted(name) for name, tree in trees.items() if Path(name).name.startswith("_") and has_pin(tree)}
     chosen = [name for name, tree in trees.items()
               if Path(name).name.startswith("test_") and not name.endswith(BROWSER_SUFFIX)
-              and (has_pin(tree) or imported(tree) & answers)]
+              and (has_pin(tree) or imported(tree, _dotted(name)) & answers)]
     if not chosen:
         raise ToolBroken(f"{TESTS_DIR}/ 底下一支釘值考卷都沒找到，沒有東西可跑")
     return chosen
@@ -123,10 +137,16 @@ def tree_state(root: Path, git: Git = _git) -> tuple[str, bool]:
 
 
 def run_pytest(root: Path, files: Sequence[str], jobs: int | None) -> int:
-    """跑考卷，輸出直接給叫的人看；回 pytest 的離開碼。"""
+    """跑考卷，輸出直接給叫的人看；回 pytest 的離開碼。
+
+    環境裡的 ``PYTEST_ADDOPTS`` 不帶進去：它可以讓 pytest 只清點不執行（離開碼照樣 0），那種收據不算驗過。"""
     workers = () if jobs is None else ("-n", str(jobs))
     argv = (sys.executable, "-m", "pytest", "-p", "no:cacheprovider", *workers, *files)
-    return subprocess.run(argv, cwd=root, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}).returncode
+    return subprocess.run(argv, cwd=root, env=pytest_env(os.environ)).returncode
+
+
+def pytest_env(environ: Mapping[str, str]) -> dict[str, str]:
+    return {**{key: value for key, value in environ.items() if key != "PYTEST_ADDOPTS"}, "PYTHONDONTWRITEBYTECODE": "1"}
 
 
 def receipt_path(root: Path) -> Path:
@@ -143,8 +163,8 @@ def write_receipt(root: Path, *, head: str, dirty: bool, code: int, files: Seque
 def run(root: Path, *, jobs: int | None, git: Git = _git,
         pytest_call: Callable[[Path, Sequence[str], int | None], int] = run_pytest) -> int:
     """跑清單並留收據。樹不乾淨照跑、照留，但收據記不乾淨，``gate`` 不收。"""
+    head, dirty = tree_state(root, git)  # 先記提交再列清單：列的途中提交變了，收尾那一次比對看得到。
     files = pin_files(root)
-    head, dirty = tree_state(root, git)
     start = time.perf_counter()
     code = pytest_call(root, files, jobs)
     after_head, after_dirty = tree_state(root, git)
@@ -161,7 +181,8 @@ def needs_receipt(root: Path, rev: str = "HEAD", git: Git = _git) -> bool:
     """``rev`` 相對主線有沒有動到 ``GATED`` 的路徑。"""
     base = git(root, ("merge-base", rev, BASE_REF))
     changed = git(root, ("diff", "--name-only", base, rev)).splitlines()
-    return any(name == prefix or name.startswith(prefix) for name in changed for prefix in GATED)
+    return any(name == prefix or (prefix.endswith("/") and name.startswith(prefix))
+               for name in changed for prefix in GATED)
 
 
 def receipt_problem(root: Path, head: str) -> str:
@@ -178,7 +199,9 @@ def receipt_problem(root: Path, head: str) -> str:
         return f"收據是 {str(seen)[:12]} 那顆的，現在要推的是 {head[:12]}"
     if dirty is not False:
         return "收據是在還有沒提交的改動時跑的"
-    return "" if code == 0 else f"釘值考卷上次沒過（pytest 離開碼 {code}）"
+    if type(code) is not int or code != 0:
+        return f"釘值考卷上次沒過（pytest 離開碼 {code!r}）"
+    return ""
 
 
 def check(root: Path, rev: str = "HEAD", git: Git = _git) -> str:
@@ -189,8 +212,8 @@ def check(root: Path, rev: str = "HEAD", git: Git = _git) -> str:
     return problem and f"{root}：{problem}。先在這棵樹跑 `{RUN_LINE}`（過了再推）"
 
 
-def _segments(command: str) -> Iterator[list[str]]:
-    """把一行殼層指令切成一段一段（引號裡的字不切）；引號沒收好就退回用空白與運算子粗切。"""
+def _segments(command: str) -> Iterator[tuple[list[str], str]]:
+    """把一行殼層指令切成（一段的字、結束它的運算子）；引號裡的字不切，引號沒收好就退回用空白與運算子粗切。"""
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
@@ -201,11 +224,11 @@ def _segments(command: str) -> Iterator[list[str]]:
     segment: list[str] = []
     for token in tokens:
         if set(token) <= OPERATOR_CHARS:
-            yield segment
+            yield segment, token
             segment = []
         else:
             segment.append(token)
-    yield segment
+    yield segment, ""
 
 
 def _unwrapped(segment: Sequence[str]) -> list[str]:
@@ -245,10 +268,11 @@ def _git_call(segment: Sequence[str], directory: str) -> GitCall | None:
 
 
 def git_calls(command: str, cwd: str) -> list[GitCall]:
-    """整行指令裡的每一次 git 呼叫，照出現順序；``cd <目錄>`` 之後的呼叫算在那個目錄。"""
+    """整行指令裡的每一次 git 呼叫，照出現順序；``cd <目錄>`` 之後的呼叫算在那個目錄，出了括號（子殼層）就還原。"""
     calls: list[GitCall] = []
     directory = cwd
-    for segment in _segments(command.replace("\n", " ; ")):
+    outer: list[str] = []
+    for segment, operator in _segments(command.replace("\n", " ; ")):
         if len(segment) >= 2 and segment[0] == "cd":
             directory = str(Path(directory) / Path(segment[1]).expanduser())
         inner = _inner_script(segment)
@@ -257,47 +281,72 @@ def git_calls(command: str, cwd: str) -> list[GitCall]:
         call = _git_call(segment, directory)
         if call is not None:
             calls.append(call)
+        for char in operator:
+            if char == "(":
+                outer.append(directory)
+            elif char == ")" and outer:
+                directory = outer.pop()
     return calls
 
 
-def pushed_rev(call: GitCall) -> str:
-    """這次 push 送的是哪一顆：``git push <遠端> <來源>[:<目的>]`` 只有一個來源時取它，其餘一律當 HEAD。"""
-    plain = [arg for arg in call.args if not arg.startswith("-")]
-    if len(plain) != 2:
-        return "HEAD"
-    return plain[1].lstrip("+").split(":")[0] or "HEAD"
+def push_sources(call: GitCall) -> list[str] | None:
+    """這次 push 要送出的來源。空清單＝不會送出提交（演練、說明、全是刪除）；``None``＝看不出是哪幾顆。
 
-
-def _sends_commits(call: GitCall) -> bool:
-    return (call.verb == "push" and not HARMLESS_PUSH_FLAGS & set(call.args)
-            and not any(arg.startswith(":") for arg in call.args))
+    沒寫來源（``git push``、``git push <遠端>``）當成 HEAD。遠端設定裡另外指定來源的寫法這裡不讀。"""
+    args = tuple(takewhile(lambda arg: not arg.startswith("#"), call.args))  # 行尾註解不是引數。
+    if HARMLESS_PUSH_FLAGS & set(args) or any(HARMLESS_SHORT_FLAGS.fullmatch(arg) for arg in args):
+        return []
+    if UNREADABLE_PUSH_FLAGS & set(args):
+        return None
+    plain: list[str] = []
+    skip = False
+    for arg in args:
+        if skip or arg.startswith("-"):
+            skip = arg in PUSH_FLAGS_WITH_VALUE
+            continue
+        plain.append(arg)
+    refspecs = [arg.lstrip("+") for arg in plain[1:]]
+    if not refspecs:
+        return ["HEAD"]
+    sources = [refspec.split(":")[0] for refspec in refspecs if not refspec.startswith(":")]
+    return None if any("*" in source for source in sources) else sources
 
 
 def gate(command: str, cwd: str, git: Git = _git) -> list[str]:
     """整行指令不准執行的理由（空的就是可以）。"""
     calls = git_calls(command, cwd)
-    pushes = [call for call in calls if _sends_commits(call)]
-    if not pushes:
-        return []
-    if any(call.verb in REWRITE_VERBS for call in calls):
-        return ["git push 要自己一行下：同一行裡先提交（或合併、切換）再推，推之前看不到那顆新提交。"
-                f"先提交，跑 `{RUN_LINE}`，再單獨 git push"]
-    targets = dict.fromkeys((call.directory, pushed_rev(call)) for call in pushes)
-    return [problem for directory, rev in targets if (problem := _push_problem(directory, rev, git))]
+    problems: list[str] = []
+    for index, call in enumerate(calls):
+        sources = push_sources(call) if call.verb == "push" else []
+        if sources == []:
+            continue
+        if any(earlier.verb in REWRITE_VERBS for earlier in calls[:index]):
+            problems.append("git push 要自己一行下：同一行裡先提交（或合併、切換）再推，推之前看不到那顆新提交。"
+                            f"先提交，跑 `{RUN_LINE}`，再單獨 git push")
+        else:
+            problems.extend(_push_problems(call.directory, sources, git))
+    return list(dict.fromkeys(problems))
 
 
-def _push_problem(directory: str, rev: str, git: Git) -> str:
+def _push_problems(directory: str, sources: Sequence[str] | None, git: Git) -> list[str]:
     try:
         root = Path(git(Path(directory), ("rev-parse", "--show-toplevel")))
     except ToolBroken:
-        return ""  # 不是 git 工作樹：讓 git 自己報錯，這裡不擋。
+        return []  # 不是 git 工作樹：讓 git 自己報錯，這裡不擋。
     if not (root / SELF).is_file():
-        return ""  # 這棵樹的分支比這支工具還舊，跑不了那一行：不擋，跟上主線之後才開始管。
-    try:
-        git(root, ("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"))
-    except ToolBroken:
-        return ""  # 來源不是這棵樹認得的提交：讓 git 自己報錯。
-    return check(root, rev, git)
+        return []  # 這棵樹的分支比這支工具還舊，跑不了那一行：不擋，跟上主線之後才開始管。
+    if sources is None:
+        return [f"{root}：看不出這一行要推哪幾顆提交（一次推全部，或來源帶萬用字元）。"
+                "改成寫明來源，例如 git push <遠端> HEAD:<分支>"]
+    problems: list[str] = []
+    for rev in dict.fromkeys(sources):
+        try:
+            git(root, ("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"))
+        except ToolBroken:
+            problems.append(f"{root}：解析不到要推的來源 {rev}。寫成 HEAD 或這棵樹認得的分支名")
+            continue
+        problems.extend(filter(None, [check(root, rev, git)]))
+    return problems
 
 
 def main(argv: Sequence[str] | None = None) -> int:
