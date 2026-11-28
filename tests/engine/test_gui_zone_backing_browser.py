@@ -341,9 +341,9 @@ def test_backing_line_never_sits_on_the_badge_or_pair_marks(tmp_path: Path, brow
         assert base
 
 
-def test_leaving_with_an_unapplied_backing_says_so_and_stays(tmp_path: Path, browser: Browser) -> None:
-    """選了背後、沒按套用就按「回房間方案輸入」：不關頁、講一句先套用或取消（#1340：老闆選了 VPR 沒套用，存檔裡沒有）；
-    按取消之後就照常回去。"""
+def test_leaving_with_an_unapplied_backing_says_so_on_the_input_page(tmp_path: Path, browser: Browser) -> None:
+    """選了背後、沒按套用就回「房間方案輸入」：草稿照留（回來接著改），輸入頁講一句沒套用、儲存不會帶上
+    （#1340：老闆選了 VPR 沒套用，存檔裡沒有）；回分區頁那一句就收掉，套用後再回去也不講。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -352,16 +352,22 @@ def test_leaving_with_an_unapplied_backing_says_so_and_stays(tmp_path: Path, bro
         expect(page.locator("#zone-page-search")).to_have_text("套用並拿去搜尋")
         page.locator("#zone-details summary").click()
         page.locator("#zone-page-close").click()
-        expect(page.locator("#zone-page")).to_be_visible()
-        expect(page.locator("#zone-page")).to_contain_text("右欄還有沒套用的改動")
-        page.get_by_role("button", name="取消", exact=True).click()
+        expect(page.locator("#zone-map")).to_be_hidden()
+        expect(page.locator("#zone-pending-note")).to_be_visible()
+        expect(page.locator("#zone-pending-note")).to_contain_text("沒套用")
+        page.locator("#zone-page-open").click()
+        expect(page.locator("#zone-pending-note")).to_be_hidden()
+        expect(page.locator("#zone-panel-backing-pick")).to_have_value(VPR)
+        page.locator("#zone-panel-apply").click()
+        page.locator("#zone-details summary").click()
         page.locator("#zone-page-close").click()
         expect(page.locator("#zone-map")).to_be_hidden()
+        expect(page.locator("#zone-pending-note")).to_be_hidden()
         assert base
 
 
 def test_backing_changed_back_to_the_wall_is_not_unapplied(tmp_path: Path, browser: Browser) -> None:
-    """背後改成 VPR 又改回原牆＝跟存的一樣：回房間方案輸入照常走、不擋（#1340 審查）。"""
+    """背後改成 VPR 又改回原牆＝跟存的一樣：回房間方案輸入不講沒套用（#1340 審查）。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
@@ -376,4 +382,5 @@ def test_backing_changed_back_to_the_wall_is_not_unapplied(tmp_path: Path, brows
         expect(page.locator("#zone-page-search")).to_have_text("拿去搜尋")
         page.locator("#zone-page-close").click()
         expect(page.locator("#zone-map")).to_be_hidden()
+        expect(page.locator("#zone-pending-note")).to_have_count(0)
         assert base

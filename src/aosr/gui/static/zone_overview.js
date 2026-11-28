@@ -2616,13 +2616,19 @@ function noteLines() {
 // 那一行寫什麼：留著的那一句在前，訊息列後來換的警示（跟它不同句才寫）接在後面。
 function saidWords() { return [keptSaid, pageSaid === keptSaid ? "" : pageSaid].filter(Boolean).join("；"); }
 
-function closeOverview() {
-  // 右欄有自己點過、還沒套用的改動（#1340：選了背後沒按套用就回輸入頁，存檔裡什麼都沒有）：先講一句、不關。
-  if (hasPendingDraft() && $("zone-panel-apply") && !$("zone-panel-apply").disabled) {
-    zoneNote("右欄還有沒套用的改動：先按「套用到」那一顆，或按「取消」放掉，再回房間方案輸入", "notice");
-    $("zone-panel-apply").focus();
-    return;
+// 右欄的草稿離開這一頁照樣留著（回來接著改），但沒套用就不進存檔（#1340：選了背後沒按套用就回輸入頁、按儲存，存檔裡什麼都沒有）：
+// 回輸入頁時在「設定每一區貼什麼」旁邊講一句；再打開這一頁就收掉。
+function pendingNote(show) {
+  let note = $("zone-pending-note");
+  if (!note && show) {
+    note = el("small", "notice", "分區頁右欄還有沒套用的改動，儲存不會帶上：回去按「套用到」");
+    note.id = "zone-pending-note"; note.setAttribute("role", "status");
+    $("zone-page-open")?.after(note);
   }
+  if (note) note.hidden = !show;
+}
+function closeOverview() {
+  pendingNote(hasPendingDraft());
   if (cutting) restoreElevation();
   overviewOpen = false;
   familyOpen.clear();
@@ -2760,7 +2766,7 @@ window.zoneOverviewResized = (wall, zone, next) => {
 window.renderZoneOverview = renderZoneOverview;
 window.openZoneOverview = id => {
   if (!overviewOpen) overviewReturnY = window.scrollY;
-  overviewOpen = true; pageSaid = "";
+  overviewOpen = true; pageSaid = ""; pendingNote(false);
   renderZoneOverview();
   if (id && view?.byId.has(id)) pick([id]);
   window.scrollTo(0, 0);
