@@ -13,7 +13,7 @@ from tests.engine._gui_cache import (
     gui_load_result_memo as gui_load_result_memo, gui_startup_identity_memo as gui_startup_identity_memo,
 )
 from tests.engine.test_gui_browser import (
-    RUN_ID, _assert_quiet, _assert_text_is_formatted, _open, _save, _serve, browser as browser,
+    RUN_ID, _assert_quiet, _assert_text_is_formatted, _open, _open_raw_folds, _save, _serve, browser as browser,
 )
 from tests.engine.test_gui_compare_browser import _has_lines
 from tests.engine.test_gui_compare_view import _renamed
@@ -35,6 +35,7 @@ def test_real_furniture_result_page_and_plain_control(
         page = watched.page
         page.wait_for_selector("#content", state="visible")
         _has_lines(page)
+        _open_raw_folds(page)
         text = page.locator("body").inner_text()
         for selector in ("#ranking-approximation", "#furniture", "#frequency-furniture-note"):
             assert page.locator(selector).is_visible() == furnished, selector
@@ -131,6 +132,7 @@ def test_furniture_flutter_paragraph_is_printed_before_no_alerts_return(
     with _serve(tmp_path) as url, _open(browser, f"{url}/results/{RUN_ID}") as watched:
         page = watched.page
         page.wait_for_selector("#content", state="visible")
+        _open_raw_folds(page)
         assert page.locator("#alerts > p").all_inner_texts() == [FLUTTER, "沒有警戒"]
         assert not page.locator("#alerts h3").all()
         _assert_text_is_formatted(page)

@@ -159,6 +159,16 @@ def _save(data_dir: Path, result: SchemeResult) -> None:
     save_result(result, data_dir / "results" / f"{RUN_ID}.json")
 
 
+def _open_raw_folds(page: Page) -> None:
+    """結果頁的原始資料（逐筆警戒、逐條反射路徑，#1350）一開始收著：先核兩個都收著，再展開，後面照舊讀裡面的字。"""
+    folds = page.locator("details.raw")
+    assert folds.evaluate_all("nodes => nodes.map((node) => [node.id, node.open])") == [
+        ["alerts-fold", False], ["reflections-fold", False]]
+    for summary in folds.locator(":scope > summary").all():
+        summary.click()
+    assert folds.evaluate_all("nodes => nodes.every((node) => node.open)")
+
+
 def _wait_for_lines(page: Page) -> None:
     # 等到畫布上真的出現曲線顏色；等不到就逾時紅（uPlot 在下一個微任務才畫，不能點完立刻讀）。
     page.wait_for_function(LINES_DRAWN_JS, timeout=10_000)
@@ -758,7 +768,8 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
             assert status.inner_text() == (
                 "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較")
             assert "notice" in (status.get_attribute("class") or "")
-            assert "1" * 12 not in page.locator("header").inner_text()
+            # 舊頁首含兩則提醒；#1350 提醒搬到中間最上面，範圍照舊連提醒一起看。
+            assert "1" * 12 not in "\n".join(page.locator("#page-head, #server-notice, #run-notice").all_inner_texts())
             requested = _check_rerun_starts_once(page, "#fingerprint-rerun", "#fingerprint-rerun-state")
             assert requested == [f"{base}/api/results/{RUN_ID}/rerun"]
             _assert_quiet(watched)
@@ -837,6 +848,7 @@ def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Bro
             # 點了有反應：圖例換成這一支喇叭的線（「喇叭顯示名 → 座位顯示名」）。
             labels = _legend_labels(page)
             assert labels and all(label.startswith(f"{name} → ") for label in labels), (name, labels)
+        _open_raw_folds(page)
         for section in ("#categories", "#alerts", "#reverb", "#reflections", "#summary"):
             assert page.locator(section).inner_text().strip(), section
         # 警戒標題照印伺服器拼好的字串，網頁不自己拼：先逐筆的峰谷與聆聽區，再按牆對合併的顫動。

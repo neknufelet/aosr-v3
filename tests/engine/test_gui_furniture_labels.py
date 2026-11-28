@@ -261,7 +261,7 @@ def test_result_browser_speaker_header_and_leather_material(
         assert header.inner_text() == speaker_setup_text(result.scheme.speaker_setup)
         assert "代表模型，非實際型號" in header.inner_text()
         assert "資料只有 KEF 與 Arendal 兩家公開高音高度" in header.inner_text()
-        page.locator("header").screenshot(path=str(tmp_path / "result-header.png"))
+        page.locator("#page-head").screenshot(path=str(tmp_path / "result-header.png"))
         if furnished:
             assert "皮面；估計，非本件實測；參考的是合成皮" in page.locator("#furniture-list").inner_text()
             page.locator("#furniture").screenshot(path=str(tmp_path / "result-material.png"))

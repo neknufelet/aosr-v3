@@ -1,30 +1,27 @@
-/* 結果頁自己的樣式；共用的在 style.css。 */
-/* 喇叭按鈕與位置對按鈕：目前選的那一顆深色，其他淡色（aria-pressed 由頁面程式標）。 */
-#speaker-buttons button[aria-pressed="false"],#pair-buttons button[aria-pressed="false"]{background:#dfe9ed;color:#15617b}
+/* 結果頁自己的樣式；外框在 app.css、三頁共用的在 report_frame.css（#1350）。 */
+/* 喇叭按鈕與位置對按鈕：目前選的那一顆橘框（aria-pressed 由頁面程式標，樣子在 report_frame.css）。 */
 #pair-buttons{align-items:center;margin-bottom:.8rem}
 #pair-detail h3{margin-top:.4rem}
 /* 1440 寬時「全部位置」、組名、六顆主位對周圍點與周圍點彼此的選單排在同一列：按鈕內距小一點，選單照選項寬。 */
 #pair-buttons button{padding:.5rem .8rem}
 #pair-buttons .pair-group{font-weight:600;margin-left:.4rem}
-#pair-buttons select.chosen{border:2px solid #15617b;background:#e7f1f4;font-weight:600}
-/* 摺疊區（技術細節、窗外路徑、逐帶明細）：摘要行看得出能點。 */
-details{margin:.5rem 0}
-details>summary{cursor:pointer;color:#15617b;font-weight:600;padding:.25rem 0}
+#pair-buttons select.chosen{border:1px solid var(--acc);background:var(--acc-t);font-weight:600}
+/* 摺疊區（技術細節、窗外路徑、逐帶明細）的摘要行樣子在 report_frame.css。 */
 /* 殘響「跟目標比」：不在目標內標紅、在目標內標綠；字是伺服器給的判定。 */
-td[data-verdict="below_range"],td[data-verdict="above_range"]{color:#872c22;font-weight:600}
-td[data-verdict="within_range"]{color:#1a7f37}
+td[data-verdict="below_range"],td[data-verdict="above_range"]{color:var(--bad);font-weight:600}
+td[data-verdict="within_range"]{color:var(--good)}
 /* 各類結果：類別、狀態、代價三欄不折行（「音色平／衡」看不懂），長的注意事項那欄照常折。 */
 #categories td:nth-child(-n+3),#categories th:nth-child(-n+3){white-space:nowrap}
 #categories td:nth-child(5){min-width:10em}
 /* 「鋼板直接貼在棉上」的構造（#1208 第 2 支）：表上方那一塊說明同材料庫頁那一塊（左邊細灰線、「為什麼」點開才有原因），
    沒有藍色小方塊；被標的列「注意事項」最前面一個淡藍底小標籤（同材料庫頁藍底那一色），不折行。 */
-#categories .ref-note,#zone-improvement .ref-note{margin:.3rem 0 .6rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;text-align:left}
+#categories .ref-note,#zone-improvement .ref-note{margin:.3rem 0 .6rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid var(--line-strong);color:var(--soft);text-align:left}
 #categories .ref-note details,#zone-improvement .ref-note details{display:inline;margin:0}
-#categories .ref-note summary,#zone-improvement .ref-note summary{display:inline;cursor:pointer;font-weight:400;color:#17616b;text-decoration:underline;text-underline-offset:3px;margin-left:.5em;padding:0;white-space:nowrap}
+#categories .ref-note summary,#zone-improvement .ref-note summary{display:inline;cursor:pointer;font-weight:400;color:var(--fix);text-decoration:underline;text-underline-offset:3px;margin-left:.5em;padding:0;white-space:nowrap}
 #categories .ref-note summary::after,#zone-improvement .ref-note summary::after{content:" ▸"}
 #categories .ref-note details[open] summary::after,#zone-improvement .ref-note details[open] summary::after{content:" ▾"}
-#categories .ref-note details p,#zone-improvement .ref-note details p{margin:.35rem 0 .1rem;color:#5b6a70;max-width:62em}
-#categories .ref-tag,#zone-improvement .ref-tag{display:inline-block;padding:0 .4em;margin-right:.2em;background:rgba(60,120,210,.16);border:1px solid #9db9e0;border-radius:4px;font-size:.9em;white-space:nowrap}
+#categories .ref-note details p,#zone-improvement .ref-note details p{margin:.35rem 0 .1rem;color:var(--soft);max-width:62em}
+#categories .ref-tag,#zone-improvement .ref-tag{display:inline-block;padding:0 .4em;margin-right:.2em;background:rgba(60,120,210,.16);border:1px solid var(--c1);border-radius:4px;font-size:.9em;white-space:nowrap}
 /* 重算的說明：問題一條一行（伺服器給的訊息用換行分隔），連結跟在句子後面。 */
 #fingerprint-rerun-state{white-space:pre-line}
 #fingerprint-rerun-state a,#rerun-state a{margin-left:.4rem;white-space:nowrap}
@@ -41,27 +38,27 @@ td[data-verdict="within_range"]{color:#1a7f37}
 #measured-walls .table-wrap { overflow-x: auto; }
 /* 分區附表（#1092）：材料那幾欄很長，表在窄畫面只橫向捲；有換材料的區淡底；差那一欄改善綠、變差紅（字是伺服器給的判定）。 */
 #zone-result .table-wrap { overflow-x: auto; }
-#zone-rows tr[data-changed="true"] td { background: #eef6f0; }
+#zone-rows tr[data-changed="true"] td { background: var(--acc-t); }
 #zone-rows td { white-space: pre-line; }
 #zone-rows td:nth-child(-n+4) { white-space: pre; }
 /* 位置與尺寸那一格可以在「、」換行（#1128：1400 px 寬時整張表 1157 px 塞不進 1058 px 的框，最後一欄要橫捲）。 */
 #zone-rows td:nth-child(3) { white-space: pre-line; min-width: 9em; }
 #zone-rows td:nth-child(n+5) { min-width: 14em; }
-#zone-rows .zone-material-detail { margin-top: .25rem; color: #46586a; font-size: .9em; }
+#zone-rows .zone-material-detail { margin-top: .25rem; color: var(--soft); font-size: .9em; }
 #zone-rows .zone-material-detail summary { cursor: pointer; }
 /* 標語同材料頁（#1082 段 2-9）：實測綠、近似橘、模擬藍；出處緊接名字下面；實測表逐列收在自己那一層。 */
 #zone-rows .badge { display: inline-block; padding: 0 .4em; border-radius: .6em; font-size: .85em; white-space: nowrap; }
-#zone-rows .badge.basis-simulated { background: #e3eef7; color: #1d4f7a; }
-#zone-rows .badge.basis-measured { background: #e1f1e6; color: #1f6136; }
-#zone-rows .badge.basis-approximate { background: #fbecd4; color: #7a4a0c; }
-#zone-rows .zone-material-source, #zone-rows .zone-material-conditions { margin: .25rem 0 0; font-size: .9em; color: #2c3e50; }
+#zone-rows .badge.basis-simulated { border: 1px solid var(--c1); color: var(--c1); }
+#zone-rows .badge.basis-measured { border: 1px solid var(--good); color: var(--good); }
+#zone-rows .badge.basis-approximate { border: 1px solid var(--warn); color: var(--warn); }
+#zone-rows .zone-material-source, #zone-rows .zone-material-conditions { margin: .25rem 0 0; font-size: .9em; color: var(--soft); }
 #zone-rows .zone-material-source a { overflow-wrap: anywhere; }
-#zone-rows .zone-measured-table { margin-top: .25rem; color: #46586a; font-size: .9em; }
+#zone-rows .zone-measured-table { margin-top: .25rem; color: var(--soft); font-size: .9em; }
 #zone-rows .zone-measured-table summary { cursor: pointer; }
 #zone-rows .zone-measured-table ol { margin: .25rem 0; padding-left: 2em; white-space: normal; }
-#zone-improvement td[data-verdict="better"] { color: #1a7f37; font-weight: 600; }
-#zone-improvement td[data-verdict="worse"] { color: #872c22; font-weight: 600; }
-#zone-improvement tr.zone-total td { border-top: 2px solid #15617b; font-weight: 600; }
+#zone-improvement td[data-verdict="better"] { color: var(--good); font-weight: 600; }
+#zone-improvement td[data-verdict="worse"] { color: var(--bad); font-weight: 600; }
+#zone-improvement tr.zone-total td { border-top: 2px solid var(--line-strong); font-weight: 600; }
 /* 改善多少那張表：每格不折行（窄畫面「音／色／平／衡」看不懂），放不下就只捲這張表。 */
 #zone-improvement { overflow-x: auto; }
 #zone-improvement th, #zone-improvement td { white-space: nowrap; }

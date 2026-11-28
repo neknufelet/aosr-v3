@@ -51,8 +51,13 @@ function visibleResponses() {
   return selectedPair ? candidates.filter((item) =>
     item.receiver_id === selectedPair.receiver_id || item.receiver_id === selectedPair.reference_id) : candidates;
 }
-// 曲線顏色（只是畫面上分得出哪一條，不帶任何意義）。
-const LINE_COLORS = ["#1b6f8a", "#c0392b", "#27ae60", "#8e44ad", "#d68910", "#2c3e50", "#16a085", "#7f8c8d"];
+// 曲線顏色（只是畫面上分得出哪一條，不帶任何意義），八條線色都在色票（#1350）。
+// 顏色從外框的色票讀（app.css，#1350），深底上分得開；讀不到才用後面的備用色。
+const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+const LINE_COLORS = [["--c1", "#6fa8dc"], ["--c2", "#ef8a2e"], ["--c3", "#8fbf7f"], ["--c4", "#b39ddb"],
+  ["--c5", "#e88fb4"], ["--c6", "#5fc3d6"], ["--c7", "#d4c95a"], ["--c8", "#c0c4c8"]].map(([name, fallback]) => css(name, fallback));
+const AXIS = () => ({stroke: css("--soft", "#a0a7ad"), grid: {stroke: css("--line", "#363b40"), width: 1},
+                      ticks: {stroke: css("--line", "#363b40"), width: 1}});
 function drawChart() {
   const responses = visibleResponses();
   if (plot) plot.destroy();
@@ -66,7 +71,7 @@ function drawChart() {
     // 圖例只列每條線的名字與顏色，不跟著游標印數值（uPlot 預設會多一格英文「Value」和一排「--」）。
     legend: {live: false},
     scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
-    axes: [{label: view.labels.frequency_axis}, {label: view.labels.level_axis}],
+    axes: [{label: view.labels.frequency_axis, ...AXIS()}, {label: view.labels.level_axis, ...AXIS()}],
     series: [{}, ...responses.map((item, index) => ({
       label: `${speakerName(item.role)} → ${pointName(item.receiver_id)}`,
       stroke: LINE_COLORS[index % LINE_COLORS.length], width: 1.5}))]},

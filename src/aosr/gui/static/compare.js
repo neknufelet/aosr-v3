@@ -6,7 +6,11 @@ let currentPair;
 const [aId, bId] = location.pathname.split("/").slice(-2);
 // A、B 兩條線的顏色與線型（只為分得出哪一條）；圖上與匯出圖片的圖例共用這一份。
 // 不讀 uPlot 畫完的 series.stroke：畫完後那一格被換成函式，拿去當顏色會退回黑色。
-const LINE_COLORS = ["#1b6f8a", "#c0392b"];
+// 顏色從外框的色票讀（app.css，#1350），深底上分得開；讀不到才用後面的備用色。
+const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+const LINE_COLORS = [css("--c1", "#6fa8dc"), css("--c2", "#ef8a2e")];
+const AXIS = () => ({stroke: css("--soft", "#a0a7ad"), grid: {stroke: css("--line", "#363b40"), width: 1},
+                      ticks: {stroke: css("--line", "#363b40"), width: 1}});
 const LINE_DASHES = [[], [8, 5]];
 
 function node(name, value) {
@@ -41,7 +45,7 @@ function drawChart(pair) {
     // 圖例記號跟線一樣分實線、虛線，不只靠顏色分 A、B。
     legend: {live: false, markers: {dash: (u, i) => (u.series[i].dash || []).length ? "dashed" : "solid"}},
     scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
-    axes: [{label: view.labels.frequency_axis}, {label: view.labels.level_axis}],
+    axes: [{label: view.labels.frequency_axis, ...AXIS()}, {label: view.labels.level_axis, ...AXIS()}],
     series: [{}, ...lines.map((item, index) => ({
       label: item.legend_text, stroke: LINE_COLORS[index], width: 1.5,
       dash: LINE_DASHES[index], spanGaps: true}))]},
@@ -123,7 +127,8 @@ function downloadPng() {
   const legendRows = legendLines.reduce((count, rows) => count + rows.length, 0);
   const legendHeight = (25 + 22 * legendRows + 10 + 18 * noteLines.length + 12) * scale;
   canvas.height = headerHeight + source.height + legendHeight;
-  context.fillStyle = "white";
+  // 圖片底色跟畫面上的圖底同一色：曲線、刻度與字都是照深底配的，白底上看不清楚（#1350）。
+  context.fillStyle = css("--sunk", "#1b1e21");
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(source, 0, headerHeight);
   context.fillStyle = getComputedStyle($("chart")).color;

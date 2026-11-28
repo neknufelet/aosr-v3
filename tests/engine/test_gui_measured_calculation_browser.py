@@ -37,6 +37,8 @@ def check_mobile_seam_scroll(page: Page) -> None:
     if viewport['width'] > 390:
         return
     heading = page.locator('#measured-walls h2')
+    # 結果頁「各類結果」排到最上面（#1350 第一眼放結論），手機上這一塊不在第一屏：先捲到它，再量表格自己橫捲。
+    page.locator('#measured-walls').scroll_into_view_if_needed()
     before = heading.bounding_box()
     assert before is not None
     wrapper = page.locator('#measured-walls .table-wrap')
