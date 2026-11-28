@@ -21,6 +21,11 @@
 ``ZoneDesign.ranges``（#1199，選填、只給交給搜尋的區）：這一區替某幾種可最佳化材料自己定的可調範圍（材料代號 →
 棉厚下上、空腔下上，:class:`~aosr.gradient.depth_fit.ZoneRange`）。這裡只守形狀；只准收窄、棉厚要是產品厚度、
 收窄後放不放得下，對材料庫核（``zone_limits`` 標紅、開跑計畫照擋）。沒給的區存檔時不寫（舊設計設定逐位不變）。
+
+``ZoneDesign.backing_entry``／``backing_wall``（#1330，選填、只給交給搜尋的區、兩格同有同無）：這一區背後換成材料庫的哪一筆
+固定材料（例如 VPR 鋼板共振吸音，固定不調、只當背牆），程式只調它前面的層；方案那一區放的就是那一筆整塊材料。
+``backing_wall`` 是換上去之前的原牆（換回「原牆」就放回它，沒指原方案時唯一找得回原牆的地方）。
+「最深」照樣從原牆往房間量：搜尋前層的上限＝最深 − 背後那一筆的總深（``zone_limits.front_cap``）。
 """
 from __future__ import annotations
 
@@ -39,6 +44,7 @@ from starlette.routing import Route
 
 from aosr.gradient.depth_fit import ZoneRange
 from aosr.gui.problem_text import checked_scheme
+from aosr.materials.construction_models import MountedOnWall, SurfaceMaterial
 from aosr.physics.report_surfaces import RectangleZone
 from aosr.reporting.scheme import Scheme
 
@@ -71,11 +77,20 @@ class ZoneDesign(BaseModel):
     # 這一區自己的可調範圍（#1199）：可最佳化材料代號 → 範圍；只給交給搜尋的區，准用清單有寫時代號要在清單裡。
     ranges: dict[LibraryId, ZoneRange] | None = Field(
         default=None, min_length=1, exclude_if=lambda value: value is None)
+    # 背後換成材料庫的哪一筆、換之前的原牆（#1330）：只給交給搜尋的區，兩格同有同無。
+    backing_entry: LibraryId | None = Field(default=None, exclude_if=lambda value: value is None)
+    backing_wall: SurfaceMaterial | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _fields_for_mode(self) -> Self:
         if self.mode != "fixed" and "picked_entry" in self.model_fields_set:
             raise ValueError("選的構造只給指定貼一種的區")
+        if (self.backing_entry is None) != (self.backing_wall is None):
+            raise ValueError("背後那一筆與換之前的原牆要一起給")
+        if self.backing_entry is not None and self.mode != "search":
+            raise ValueError(f"背後換材料只給由程式最佳化的區，這一區是「{MODE_WORDS[self.mode]}」")
+        if isinstance(self.backing_wall, MountedOnWall):
+            raise ValueError("換之前的原牆不能是貼在牆上的構造")
         if self.allowed is not None:
             if self.mode != "search":
                 raise ValueError(f"准用清單只給交給搜尋的區，這一區是「{MODE_WORDS[self.mode]}」")

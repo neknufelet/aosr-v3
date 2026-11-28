@@ -34,6 +34,8 @@
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import json
 import math
 import sys
@@ -50,7 +52,7 @@ from starlette.routing import Route
 
 from aosr.config.material_gradient import NONE_TARGET, SCHEME_MATERIAL, MaterialGradientSettings, centimeters, fixed_target, is_fixed_target
 from aosr.geometry.shoebox import Room
-from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, narrowed_family, range_problem, ranged_misfits, target_fit
+from aosr.gradient.depth_fit import TargetFit, ZoneRange, fixed_fit, fixed_material_depth_m, narrowed_family, range_problem, ranged_misfits, target_fit
 from aosr.gui.labels import WALLS as WALL_WORDS
 from aosr.gui.reference_only import plan_refused, reference_only
 from aosr.gui.wall_words import draft_wall_words
@@ -134,8 +136,19 @@ class DepthCap:
 
     value_m: float
     level: DepthLevel
+    # 背後換成材料庫一筆時那一筆的總深（#1330）：``value_m`` 已經扣掉它，是前面那幾層能用的深度；沒換是 0。
+    backing_m: float = 0.0
+
+    def to_json(self) -> dict[str, object]:
+        """分區檢查回給畫面的那一格；背後換過才多一格 ``backing_m``（沒換的逐位同舊版）。"""
+        found: dict[str, object] = {"value_m": self.value_m, "level": self.level, "words": self.words()}
+        if self.backing_m > 0:
+            found["backing_m"] = self.backing_m
+        return found
 
     def words(self) -> str:
+        if self.backing_m > 0:
+            return f"{self.value_m:g} 公尺（{LEVEL_WORDS[self.level]}的上限扣掉背後 {self.backing_m:g} 公尺）"
         return f"{self.value_m:g} 公尺（{LEVEL_WORDS[self.level]}的上限）"
 
 
@@ -164,6 +177,63 @@ def depth_cap(design: DesignSettings | None, wall: str, zone: str) -> DepthCap |
         return None
     value, level = min(given, key=lambda pair: pair[0])
     return DepthCap(value, level)
+
+
+def backing_depth_m(design: DesignSettings | None, wall: str, zone: str, material: object) -> float | None:
+    """這一區背後換成材料庫一筆時（#1330，設計設定有 ``backing_entry``）那一筆的總深；沒換回 None。
+    量的是方案那一區現在的材料（換上去的就是它，搜尋也照它當背材），量法同固定材料（``fixed_material_depth_m``，
+    沒有厚度欄的層計零；量不出來當 0）。"""
+    item = design.zones.get(wall, {}).get(zone) if design is not None else None
+    if item is None or item.mode != "search" or item.backing_entry is None:
+        return None
+    return fixed_material_depth_m(material) or 0.0
+
+
+def minus_backing(total_m: float, backing_m: float) -> float:
+    """最深扣掉背後：照寫下來的十進位相減（0.15－0.1 是 0.05，不是 0.04999…），剛好放得下的前層才不會被浮點尾數擋掉。"""
+    return float(Decimal(repr(total_m)) - Decimal(repr(backing_m)))
+
+
+def backing_too_deep(total_m: float, backing_m: float) -> bool:
+    """背後那一筆把最深吃光（一樣深也算）：前面一層都放不了，引擎也不收零上限。"""
+    return minus_backing(total_m, backing_m) <= EDGE_MERGE_TOL
+
+
+def front_cap(design: DesignSettings | None, wall: str, zone: str, material: object) -> DepthCap | None:
+    """搜尋那幾層實際能用的上限：「最深」從原牆往房間量、含背後換上去的那一筆，所以扣掉它（#1330）；
+    最深比背後那一筆還淺時回 None：前面那幾層不必再判，那一區由 :func:`backing_problems` 那一條紅字擋、只講那一句。
+    沒換背後就是 :func:`depth_cap`。"""
+    cap = depth_cap(design, wall, zone)
+    backing = backing_depth_m(design, wall, zone, material)
+    if cap is None or backing is None or backing <= 0:
+        return cap
+    if backing_too_deep(cap.value_m, backing):
+        return None
+    return DepthCap(minus_backing(cap.value_m, backing), cap.level, backing)
+
+
+def backing_problems(design: DesignSettings | None, wall: str, zone: str, material: object,
+                     label: Callable[[str], str], fixed_in_front: Callable[[], list[str]]) -> list[Problem]:
+    """背後換過的區（#1330）兩條擋：最深被背後那一筆吃光（一樣深也算，前面放不了東西）；程式實際會挑的候選裡有固定成品
+    （引擎選到固定成品會整塊換掉那一面，背後那一筆就不見了，只准可調材料與「不貼」）。``fixed_in_front`` 回實際候選
+    （``effective_candidates``：被勾的可調材料包含的、放不下的已拿掉）裡的固定成品，材料庫讀不到回空的（不判第二條）。"""
+    item = design.zones.get(wall, {}).get(zone) if design is not None else None
+    backing = backing_depth_m(design, wall, zone, material)
+    if item is None or item.backing_entry is None or backing is None:
+        return []
+    name = label(item.backing_entry)
+    found: list[Problem] = []
+    cap = depth_cap(design, wall, zone)
+    if cap is not None and backing_too_deep(cap.value_m, backing):
+        found.append(Problem(code="depth_backing", level="red",
+                             text=f"最深 {cap.value_m:g} 公尺（{LEVEL_WORDS[cap.level]}的上限）沒有比背後的「{name}」{backing:g} 公尺深，"
+                                  "前面放不了東西；把最深加大，或背後換回原牆"))
+    fixed = fixed_in_front()
+    if fixed:
+        found.append(Problem(code="backing_fixed_candidate", level="red",
+                             text=f"背後換成「{name}」的區只能讓程式調可調材料或不貼；清單裡的固定成品（{'、'.join(label(code) for code in fixed)}）"
+                                  "會整塊換掉背後那一筆，先取消勾選"))
+    return found
 
 
 def added_depth(material: SurfaceMaterial) -> float | None:
@@ -549,10 +619,10 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
                 continue
             setting = design.zones.get(wall, {}).get(key) if design else None
             mode = setting.mode if setting else DEFAULT_MODE
-            cap = depth_cap(design, wall, key)
-            if cap is not None and mode != "keep_original":
-                caps.setdefault(wall, {})[key] = {"value_m": cap.value_m, "level": cap.level, "words": cap.words()}
             material = _material(entry.get("material"))
+            cap = front_cap(design, wall, key, material)
+            if cap is not None and mode != "keep_original":
+                caps.setdefault(wall, {})[key] = cap.to_json()
             current = folded if folded is not None else material
             lines = found.setdefault(key, [])
             construction = catalog.construction(room, wall, key, entry, current, setting, lines)
@@ -560,7 +630,8 @@ def zone_limits(document: Mapping[str, object], design_value: object = None,
             if mode == "search":
                 catalog.record_candidates(wall, key, setting, cap, include_candidate_rows)
                 problems, lines_by_group = _search_problems(setting, cap, catalog.required)
-                lines.extend(problems)
+                lines.extend([*backing_problems(design, wall, key, material, catalog.label, lambda: catalog.fixed_in_front(setting, cap)),
+                              *problems])
                 if lines_by_group:
                     caps[wall][key]["targets"] = lines_by_group
             if range_check is not None and mode == "fixed" and material is not None:
@@ -609,6 +680,19 @@ class _ZoneCatalog:
             self.load_error = Problem(code="materials_unreadable", level="red",
                                       text=f"查不了由程式最佳化的區放不放得下清單裡的材料、也認不出指定貼一種的區是不是選了材料庫的材料：{error}")
             return None
+
+    def fixed_in_front(self, setting: ZoneDesign | None, cap: DepthCap | None) -> list[str]:
+        """這一區程式實際會挑的候選裡的固定成品（開跑計畫同一支 ``effective_candidates``）；沒寫清單是全部可調材料與不貼，沒有固定成品。"""
+        targets = self.targets
+        if setting is None or setting.allowed is None or targets is None:
+            return []
+        selection = CandidateSelection(allowed=setting.allowed, ranges=setting.ranges, cap=cap.value_m if cap else None)
+        families = {family.id for family in targets.settings.family}
+        return [code for code in effective_candidates(selection, targets).allowed if code != "none" and code not in families]
+
+    def label(self, identifier: str) -> str:
+        """材料庫那一筆的名字；材料庫讀不進來就寫代號。"""
+        return self.targets.label(identifier) if self.targets is not None else identifier
 
     def required(self) -> DepthTargets | None:
         targets = self.targets
