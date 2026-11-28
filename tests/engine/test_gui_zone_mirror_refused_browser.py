@@ -43,7 +43,7 @@ def _refusal(page: Page, *, opposite: bool = False) -> str:
     else:
         expect(preview).to_contain_text("放不下")
         rect = preview.locator("rect")
-        expect(rect).to_have_css("stroke", "rgb(165, 39, 20)")
+        expect(rect).to_have_css("stroke", "rgb(226, 119, 106)")  # 色票 --bad（#1360 深底）
         expect(rect).not_to_have_css("stroke-dasharray", "none")
     text = page.locator("#elevation-note").inner_text()
     assert text.startswith(PREFIX), text

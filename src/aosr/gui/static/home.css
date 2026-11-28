@@ -11,7 +11,23 @@ body.app>main,body.app>#zone-page{grid-column:2;grid-row:2;min-width:0}
 .roomrow.app-cols,.cutrow.app-cols{grid-template-columns:var(--left) minmax(0,1fr);gap:0;align-items:stretch;border-top:1px solid var(--line)}
 .room-step .app-cols>.app-left{grid-column:1;grid-row:1;position:static;align-self:stretch;height:auto;overflow:visible;border:0;border-right:1px solid var(--line);border-radius:0}
 .room-step .app-cols>.app-center{grid-column:2;grid-row:1;border:0;border-radius:0;background:var(--bg);padding:14px 22px}
-.room-plan>*{max-width:700px}
+.room-plan>*{max-width:600px}  /* 平面圖的字跟著圖寬放大：圖不比舊版寬，字照樣 12～16 像素 */
+/* 共用方案圖（plan.js）的顏色寫在屬性上（考卷照屬性核對），深底上換成色票；跟結果頁、比較頁（report_frame.css）同一套。 */
+.input-main svg [stroke="#334b58"]{stroke:var(--soft)}
+.input-main svg [stroke="#167997"]{stroke:var(--c1)}
+.input-main svg [fill="#167997"]{fill:var(--c1)}
+.input-main svg [stroke="#db6b3a"]{stroke:var(--acc)}
+.input-main svg [fill="#db6b3a"]{fill:var(--acc)}
+.input-main svg [stroke="#697e6a"]{stroke:var(--fix)}
+.input-main svg [fill="#697e6a"]{fill:var(--fix)}
+.input-main svg [stroke="#b01b6a"]{stroke:var(--c4)}
+.input-main svg [stroke="#c62828"]{stroke:var(--bad)}
+.input-main svg [fill="#c62828"],.input-main svg text[fill="#c62828"]{fill:var(--bad)}
+.input-main svg text{fill:var(--ink)}
+/* 立面圖的字：比外框的 .app svg text 具體，下面各條（區名、自動補的區、鏡子、提示）的顏色才算數。 */
+.input-main #elevation .zone text,.input-main #elevation .elevation-marker text,.input-main #elevation .elevation-edge{fill:var(--ink)}
+.input-main #elevation .zone-auto text{fill:var(--soft)}
+.input-main #elevation .zone-preview-hint{fill:var(--ink)}
 @media (max-width:900px){.roomrow.app-cols,.cutrow.app-cols{grid-template-columns:minmax(0,1fr)}.room-step .app-cols>.app-left,.room-step .app-cols>.app-center{grid-column:1;grid-row:auto;border-right:0}}
 /* 從 style.css 搬來、這一頁還在用的幾條（style.css 不再載入）。 */
 .input-main input[type=number]{width:6.5rem}
@@ -132,7 +148,8 @@ table:has(#archived-list) th,#archived-list td:not(:nth-child(2)):not(:nth-child
 /* 結果抽屜每一列的兩個動作（看、封存）、勾好兩筆後的「比較」、算完後的「查看結果頁」長一樣：
    連結外觀做成跟按鈕一樣（訊息叫人「按」它，它就要長得像能按的）。
    顯示方式寫成 inline-block 會蓋掉 hidden，藏著時要另外寫回 none。 */
-a.button-link{display:inline-block;border-radius:6px;background:var(--ink);color:var(--sunk);text-decoration:none}
+/* 深底（#1360）：跟外框的一般按鈕同一個樣子（細框、透明底、13 像素字）。 */
+a.button-link{display:inline-block;border-radius:3px;background:transparent;color:var(--ink);border:1px solid var(--line-strong);font-size:13px;text-decoration:none}
 a.button-link[hidden]{display:none}
 a.button-link,#results-list button,#archived-list button{padding:.4rem .8rem;line-height:1.3}
 /* 方案代號是唯讀的，只顯示現在開著哪一份；外觀要跟能填的格子分得出來。 */

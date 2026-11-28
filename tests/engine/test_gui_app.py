@@ -191,8 +191,8 @@ def test_each_page_links_shared_then_own_stylesheet(tmp_path: Path) -> None:
     with _app(tmp_path) as client:
         pages = {"home": client.get("/"), "result": client.get("/results/" + "b" * 32),
                  "compare": client.get("/compare/a/b")}
-        # 結果頁與比較頁換了新外框（#1350）：先連外框的 app.css、不再連 style.css；方案輸入頁還沒換，照舊先連 style.css。
-        shared = {"home": "style.css", "result": "app.css", "compare": "app.css"}
+        # 結果頁與比較頁（#1350）、方案輸入頁（#1360）換了新外框：先連外框的 app.css、不再連 style.css。
+        shared = {"home": "app.css", "result": "app.css", "compare": "app.css"}
         for page, response in pages.items():
             own = f"{page}.css"
             links = re.findall(r'<link rel="stylesheet" href="/static/(?:vendor/uplot/)?([^"]+)"',

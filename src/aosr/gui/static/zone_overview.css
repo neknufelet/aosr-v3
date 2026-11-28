@@ -134,7 +134,7 @@ body.zone-page-open{background:var(--sunk)}
 #zone-page .zv-foot .zv-sw{width:13px;height:13px;margin-right:8px;vertical-align:-1px;border:1.5px solid var(--soft)}
 #zone-page button.zv-go{margin-left:auto;flex:none;background:var(--search);color:var(--sunk);border:0;border-radius:8px;font:inherit;font-size:18px;
   font-weight:600;padding:10px 26px;cursor:pointer}
-#zone-page button.zv-go:disabled{opacity:1;background:var(--line-strong);color:var(--soft);cursor:default}
+#zone-page button.zv-go:disabled{opacity:1;background:var(--line);color:var(--soft);cursor:default}
 
 /* 選了區之後的面板：固定在右欄最上面，不蓋圖；面板開著時規則與清單卡收成幾行 */
 #zone-page .zv-edit{background:var(--panel);border:2px solid var(--ink);border-radius:10px;padding:11px 14px 12px}
@@ -175,7 +175,7 @@ body.zone-page-open{background:var(--sunk)}
 #zone-page .zv-axis{font-size:11.5px;color:var(--soft);text-align:center;margin-top:-3px}
 #zone-page .zv-editfoot{display:flex;align-items:center;gap:10px;margin-top:9px}
 #zone-page button.zv-main-btn{background:var(--ink);color:var(--sunk);font-size:16px;padding:7px 16px}
-#zone-page button.zv-main-btn:disabled{opacity:1;background:var(--line-strong);border-color:var(--line-strong);color:var(--soft);cursor:default}
+#zone-page button.zv-main-btn:disabled{opacity:1;background:var(--line);border-color:var(--line);color:var(--soft);cursor:default}
 #zone-page .zv-brief{padding:2px 18px 2px}
 #zone-page .zv-brief .zv-rule{padding:7px 0 7px 16px;font-size:13.5px;line-height:1.55}
 #zone-page .zv-brief .zv-rule::before{top:9px;bottom:9px}
@@ -303,9 +303,9 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-foot .zv-area{font-size:12.5px}
 
 /* 「鋼板直接貼在棉上」的構造（#1208）：面板曲線界線以下的淡藍底、圖例那一行與「為什麼」（樣式同材料頁那一份）。 */
-#zone-page .zv-ref-band{fill:rgba(111,179,170,.16)}
+#zone-page .zv-ref-band{fill:rgba(60,120,210,.16)}  /* 參考範圍：跟材料曲線（material-ui.js）同一個藍色淡底，深底上照用 */
 #zone-page .ref-note{margin:.4rem 0 .1rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid var(--line-strong);color:var(--ink);font-size:13px;text-align:left}
-#zone-page .ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(111,179,170,.16);border:1px solid var(--fix)}
+#zone-page .ref-note .ref-sw{display:inline-block;width:1.5em;height:.9em;margin-right:.45em;vertical-align:-.08em;background:rgba(60,120,210,.16);border:1px solid var(--c1)}
 #zone-page .ref-note details{display:inline}
 #zone-page .ref-note summary{display:inline;cursor:pointer;font-weight:400;font-size:inherit;color:var(--acc);text-decoration:underline;text-underline-offset:3px;margin-left:.5em;white-space:nowrap}
 #zone-page .ref-note summary::after{content:" ▸"}
@@ -419,10 +419,11 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-builder .zv-drawer-head[hidden]{display:none}
 #zone-builder iframe{width:100%;flex:1;min-height:0;border:0}
 #zone-page .zv-main{grid-template-columns:minmax(0,1fr) clamp(350px,31vw,440px)}
-/* #1360 新外框：左邊多一條功能列（--rail）、上面多一條頂列（--top）。右欄寬照這一頁實際的寬算（不照整個視窗），
-   898 寬的圖在 1400、1440 寬的視窗裡照樣整張放得下；整頁高度扣掉頂列，結果列不掉出視窗。 */
-body.app #zone-page .zv-main{grid-template-columns:minmax(0,1fr) clamp(350px,calc(100vw - var(--rail) - 950px),440px);gap:16px;padding-inline:18px}
+/* #1360 新外框：左邊多一條功能列（--rail）、上面多一條頂列（--top）。左右留白與欄距收窄，1440 寬時 898 寬的圖整張放得下
+   （1400 寬時圖那一欄自己左右捲一點，右欄寬照舊）；整頁高度扣掉頂列，結果列不掉出視窗，切區時的立面圖也扣掉那一條。 */
+body.app #zone-page .zv-main{gap:14px;padding-inline:14px}
 body.app #zone-page:not([hidden]){height:calc(100dvh - var(--top))}
+body.app #zone-page #elevation svg{max-height:calc(65dvh - var(--top) - 24px)}
 #zone-page .zv-mapwrap{max-width:100%}
 /* 明細滑入就展開，開關要一直留在原來的點擊位置。 */
 #zone-page .zv-row-options > summary{position:absolute;right:3px;top:8px;width:fit-content}
