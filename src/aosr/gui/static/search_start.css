@@ -8,3 +8,6 @@
 #job-steps pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .app-left h3{font-size:13px;margin:16px 0 6px}
 .app-left h4{font-size:12.5px;font-weight:500;color:var(--soft);margin:12px 0 4px}
+/* #1369：選項字很長時下拉選單換到下一行，標籤字不被擠成直排 */
+#previous-row label{flex-wrap:wrap;max-width:100%}
+#previous-pick{max-width:100%}

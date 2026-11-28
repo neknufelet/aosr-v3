@@ -25,6 +25,7 @@ ADOPTED: dict[str, str | tuple[str, ...]] = {  # 已換新外框的頁 → 它�
     "/results/" + "b" * 32: "results",
     "/compare/a/b": "compare",
     "/searches": "searches",
+    "/params": "params",
 }
 
 
