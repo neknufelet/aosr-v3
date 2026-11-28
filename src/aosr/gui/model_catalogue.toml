@@ -230,47 +230,47 @@ mark = "JCA"
 [[reference]]
 id = "miki_1990"
 text = "Miki, Y. (1990). Acoustical properties of porous materials. Modifications of Delany-Bazley models. Journal of the Acoustical Society of Japan (E), 11(1), 19–24."
-doi = "10.1250/ast.11.19"
+doi = "https://doi.org/10.1250/ast.11.19"
 verified = "Crossref 2026-11-28"
 
 [[reference]]
 id = "maa_1998"
 text = "Maa, D.-Y. (1998). Potential of microperforated panel absorber. The Journal of the Acoustical Society of America, 104(5), 2861–2866."
-doi = "10.1121/1.423870"
+doi = "https://doi.org/10.1121/1.423870"
 verified = "Crossref 2026-11-28"
 
 [[reference]]
 id = "ingard_1953"
 text = "Ingard, U. (1953). On the theory and design of acoustic resonators. The Journal of the Acoustical Society of America, 25(6), 1037–1061."
-doi = "10.1121/1.1907235"
+doi = "https://doi.org/10.1121/1.1907235"
 verified = "Crossref 2026-11-28"
 
 [[reference]]
 id = "kristiansen_vigran_1994"
 text = "Kristiansen, U. R., & Vigran, T. E. (1994). On the design of resonant absorbers using a slotted plate. Applied Acoustics, 43(1), 39–48."
-doi = "10.1016/0003-682X(94)90039-6"
+doi = "https://doi.org/10.1016/0003-682X(94)90039-6"
 verified = "Crossref 2026-11-28"
 
 [[reference]]
 id = "delany_bazley_1970"
 text = "Delany, M. E., & Bazley, E. N. (1970). Acoustical properties of fibrous absorbent materials. Applied Acoustics, 3(2), 105–116."
-doi = "10.1016/0003-682X(70)90031-9"
+doi = "https://doi.org/10.1016/0003-682X(70)90031-9"
 verified = "Crossref 2026-11-28"
 
 [[reference]]
 id = "allard_champoux_1992"
 text = "Allard, J. F., & Champoux, Y. (1992). New empirical equations for sound propagation in rigid frame fibrous materials. The Journal of the Acoustical Society of America, 91(6), 3346–3353."
-doi = "10.1121/1.402824"
+doi = "https://doi.org/10.1121/1.402824"
 verified = "Crossref 2026-11-28"
 
 [[reference]]
 id = "johnson_koplik_dashen_1987"
 text = "Johnson, D. L., Koplik, J., & Dashen, R. (1987). Theory of dynamic permeability and tortuosity in fluid-saturated porous media. Journal of Fluid Mechanics, 176, 379–402."
-doi = "10.1017/S0022112087000727"
+doi = "https://doi.org/10.1017/S0022112087000727"
 verified = "Crossref 2026-11-28"
 
 [[reference]]
 id = "champoux_allard_1991"
 text = "Champoux, Y., & Allard, J.-F. (1991). Dynamic tortuosity and bulk modulus in air-saturated porous media. Journal of Applied Physics, 70(4), 1975–1979."
-doi = "10.1063/1.349482"
+doi = "https://doi.org/10.1063/1.349482"
 verified = "Crossref 2026-11-28"

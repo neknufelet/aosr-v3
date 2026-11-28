@@ -81,7 +81,7 @@ class Reference(_Frozen):
 
     id: str = Field(pattern=r"^[a-z0-9_]+$")
     text: str = Field(min_length=1)
-    doi: str = Field(pattern=r"^10\.[0-9]{4,}/\S+$")
+    doi: str = Field(pattern=r"^https://doi\.org/10\.[0-9]{4,}/\S+$")
     verified: str = Field(min_length=1)
 
 
@@ -209,7 +209,7 @@ def _komatsu_range(ranges: KomatsuRanges) -> list[dict[str, object]]:
 
 
 def _reference_row(reference: Reference) -> dict[str, str]:
-    return {"id": reference.id, "text": reference.text, "doi": "https://doi.org/" + reference.doi, "verified": reference.verified}
+    return {"id": reference.id, "text": reference.text, "doi": reference.doi, "verified": reference.verified}
 
 
 def catalogue_listing(path: str | Path, ranges_path: str | Path) -> dict[str, list[dict[str, object]]]:
@@ -240,7 +240,7 @@ def catalogue_listing(path: str | Path, ranges_path: str | Path) -> dict[str, li
                 "year": cite.year if cite.year is not None else NOT_LISTED,
                 "reference": provenance.reference if provenance else verified.text if verified else
                 " ".join(part for part in (cite.title, cite.venue) if part) or NOT_LISTED,
-                "doi": provenance.doi if provenance else "https://doi.org/" + verified.doi if verified else cite.doi or NOT_LISTED,
+                "doi": provenance.doi if provenance else verified.doi if verified else cite.doi or NOT_LISTED,
                 "verified": verified.verified if verified else None,
                 "note": cite.note,
                 "at": cite.at,

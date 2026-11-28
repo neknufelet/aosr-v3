@@ -177,16 +177,16 @@ def test_bad_catalogue_refuses_to_load(tmp_path: Path, model: str) -> None:
         load_model_catalogue(_bad_sample(tmp_path, model))
 
 
-# 主對話 11-28 用 Crossref 核過的外部書目（工作區 verified-references.md）：代號 → DOI。考卷不連網，只核結構與字串。
+# 主對話 11-28 用 Crossref 核過的外部書目（工作區 verified-references.md）：代號 → DOI 網址。考卷不連網，只核結構與字串。
 VERIFIED_DOIS = {
-    "miki_1990": "10.1250/ast.11.19",
-    "maa_1998": "10.1121/1.423870",
-    "ingard_1953": "10.1121/1.1907235",
-    "kristiansen_vigran_1994": "10.1016/0003-682X(94)90039-6",
-    "delany_bazley_1970": "10.1016/0003-682X(70)90031-9",
-    "allard_champoux_1992": "10.1121/1.402824",
-    "johnson_koplik_dashen_1987": "10.1017/S0022112087000727",
-    "champoux_allard_1991": "10.1063/1.349482",
+    "miki_1990": "https://doi.org/10.1250/ast.11.19",
+    "maa_1998": "https://doi.org/10.1121/1.423870",
+    "ingard_1953": "https://doi.org/10.1121/1.1907235",
+    "kristiansen_vigran_1994": "https://doi.org/10.1016/0003-682X(94)90039-6",
+    "delany_bazley_1970": "https://doi.org/10.1016/0003-682X(70)90031-9",
+    "allard_champoux_1992": "https://doi.org/10.1121/1.402824",
+    "johnson_koplik_dashen_1987": "https://doi.org/10.1017/S0022112087000727",
+    "champoux_allard_1991": "https://doi.org/10.1063/1.349482",
 }
 
 
@@ -218,10 +218,10 @@ def test_api_shows_references_with_their_caveats(tmp_path: Path) -> None:
     with TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
         body = client.get("/api/params").json()
     models = {model["id"]: model for model in body["models"]}
-    assert models["porous_miki"]["citation"]["doi"] == "https://doi.org/" + VERIFIED_DOIS["miki_1990"]
+    assert models["porous_miki"]["citation"]["doi"] == VERIFIED_DOIS["miki_1990"]
     assert "未核對" in models["porous_miki"]["citation"]["note"]
     related = models["micro_perforated"]["related"]
-    assert related["note"] == RELATED_NOTE and related["items"][0]["doi"].endswith(VERIFIED_DOIS["maa_1998"])
+    assert related["note"] == RELATED_NOTE and related["items"][0]["doi"] == VERIFIED_DOIS["maa_1998"]
     assert [item["id"] for item in body["unimplemented"]] == ["jca"]
     script = (STATIC / "params.js").read_text(encoding="utf-8")
     assert "body.unimplemented" in script and "related" in script and "background" in script
