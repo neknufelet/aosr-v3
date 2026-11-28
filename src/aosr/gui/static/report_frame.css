@@ -1,0 +1,31 @@
+/* 結果頁、比較頁、搜尋紀錄頁共用（#1350 換新外框）：左欄是這一份是什麼，中間是內容；舊 style.css 的區塊樣式在深底上重寫。 */
+.app-left #page-head h1{font-size:18px;line-height:1.35;overflow-wrap:anywhere}
+.app-left #page-head p{overflow-wrap:anywhere}
+.app-left #page-head a{display:inline-block;margin:0 .8rem .2rem 0}
+/* 中間每一塊：細線分隔、寬表只捲那一塊（舊外框 section 就是 overflow-x:auto，整頁不橫捲）。 */
+.app-center>section,.app-center>#content>section,.app-center>#content>details>section{overflow-x:auto;padding:0 0 18px;margin:0 0 18px;border-bottom:1px solid var(--line)}
+.app-center h2:first-child{margin-top:4px}
+.app-center svg{width:100%;height:auto}
+.app-center article{border-top:1px solid var(--line);padding:.6rem 0}
+.app-center th{background:var(--sunk)}
+.app-center td,.app-center th{vertical-align:top}
+.app details{margin:.5rem 0}
+.app details>summary{color:var(--soft);font-weight:500}
+.app details>summary:hover{color:var(--ink)}
+/* 二選一、多選一的按鈕（aria-pressed 由頁面程式標）：選到的那一顆橘框淡底。 */
+.app button[aria-pressed="true"]{border-color:var(--acc);background:var(--acc-t);color:var(--ink)}
+.app button[aria-pressed="false"]{color:var(--soft)}
+/* 共用方案圖（plan.js）在淺底配的顏色寫在屬性上（考卷照屬性核對），這裡在深底上換成色票；輸入頁沒載這一份，照舊。 */
+.app svg [stroke="#334b58"]{stroke:var(--soft)}
+.app svg [stroke="#167997"]{stroke:var(--c1)}
+.app svg [fill="#167997"]{fill:var(--c1)}
+.app svg [stroke="#db6b3a"]{stroke:var(--acc)}
+.app svg [fill="#db6b3a"]{fill:var(--acc)}
+.app svg [stroke="#697e6a"]{stroke:var(--fix)}
+.app svg [fill="#697e6a"]{fill:var(--fix)}
+.app svg [stroke="#b01b6a"]{stroke:var(--c4)}
+.app svg [stroke="#c62828"]{stroke:var(--bad)}
+.app svg [fill="#c62828"],.app svg text[fill="#c62828"]{fill:var(--bad)}
+.app svg text{fill:var(--ink)}
+/* 重算失敗時一條問題一行（伺服器給的訊息用換行分隔；舊外框寫在 style.css）。 */
+#rerun-state{white-space:pre-line}

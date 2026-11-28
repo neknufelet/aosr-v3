@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import cast
 
@@ -259,12 +260,21 @@ def test_equal_totals_verdict_is_not_green(
 
 
 def test_csv_links_look_like_the_png_button() -> None:
-    """兩個 CSV 下載連結跟旁邊的 PNG 按鈕同一個樣子，不是底線藍字夾在按鈕旁邊。"""
-    css = (Path(__file__).resolve().parents[2] / "src" / "aosr" / "gui" / "static" / "compare.css").read_text(
-        encoding="utf-8")
+    """兩個 CSV 下載連結跟旁邊的 PNG 按鈕同一個樣子，不是底線字夾在按鈕旁邊。
+
+    #1350 換新外框：按鈕改成 app.css 的細框透明底（舊版是 style.css 的藍底白字），連結的框、底、字色、字級、內距逐項照按鈕那一條比。"""
+    static = Path(__file__).resolve().parents[2] / "src" / "aosr" / "gui" / "static"
+    css = (static / "compare.css").read_text(encoding="utf-8")
     rule = css[css.index("#compare-exports a{"):]
     rule = rule[:rule.index("}")]
-    assert "text-decoration:none" in rule and "background:#15617b" in rule and "color:white" in rule
+    shared = (static / "app.css").read_text(encoding="utf-8")
+    button = shared[shared.index(".app button{"):]
+    button = button[:button.index("}")]
+    assert "text-decoration:none" in rule
+    for prop in ("font-size", "color", "background", "border", "border-radius", "padding"):
+        value = re.search(rf"[{{;]{prop}:([^;}}]+)", button)
+        assert value, prop
+        assert f"{prop}:{value.group(1)}" in rule, prop
 
 
 # 老闆 2026-10-19 原話逐字（#558 第 ② 塊第 3 題之二）；考卷自己抄一份，不從程式讀。

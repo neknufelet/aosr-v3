@@ -1,4 +1,4 @@
-/* 比較頁自己的樣式；共用的在 style.css。 */
+/* 比較頁自己的樣式；外框在 app.css、三頁共用的在 report_frame.css（#1350）。 */
 #rerun-holder{display:flex;gap:.5rem;flex-wrap:wrap}
 #rerun-holder:not(:empty){margin-top:.75rem}
 .compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -13,15 +13,15 @@
 #compare-summary p{margin:.45rem 0}
 /* 兩份總代價上下排、框一樣寬（摘要欄只有半頁寬，左右並排放不下）。 */
 #totals{display:grid;grid-template-columns:minmax(0,max-content);gap:.5rem;margin:.6rem 0}
-#totals p{margin:0;padding:.45rem .7rem;border:1px solid #d5e0e4;border-radius:8px;background:#f8fbfc}
+#totals p{margin:0;padding:.45rem .7rem;border:1px solid var(--line-strong);border-radius:3px;background:var(--sunk)}
 /* 比較好的那一份（伺服器判）：總代價框與分項表那一格加重、綠框，不只靠顏色。 */
-#totals p.better{border-color:#1a7f37;border-width:2px;font-weight:700}
+#totals p.better{border-color:var(--good);border-width:2px;font-weight:700}
 /* 判出哪一份比較好才用粗體綠字；「相同、分不出」是一般字，不像在報好消息。 */
-#table-verdict.decided{font-weight:700;color:#1a7f37}
+#table-verdict.decided{font-weight:700;color:var(--good)}
 /* 複核警戒、還不是最終推薦：緊接在判勝負那句下面，左邊一條琥珀色提醒線。 */
-#table-review{border-left:3px solid #b7791f;padding-left:.6rem}
-#table-calibration{color:#4b5d67;font-size:.92rem}
-#categories td.better{font-weight:700;color:#1a7f37}
+#table-review{border-left:3px solid var(--warn);padding-left:.6rem}
+#table-calibration{color:var(--soft);font-size:.92rem}
+#categories td.better{font-weight:700;color:var(--good)}
 /* 「改了哪裡」的 A、B 值不折行：單位被從中間折斷（公／尺）看不懂；項目名那一欄照常折。 */
 #changes td:nth-child(n+2){white-space:nowrap}
 /* 上下排（窄畫面）時項目名那一欄至少留 8 個字寬：A、B 不折行會把項目名擠成一字一行；放不下就在那一塊裡左右捲。
@@ -35,31 +35,30 @@
 .switch-row{display:flex;align-items:flex-start;gap:.75rem;margin:.45rem 0}
 .switch-label{flex:0 0 2.5em;font-weight:600;padding-top:.45rem}
 .switch-row button{padding:.45rem .9rem}
-/* 沒有選到的按鈕淡色；選到的沿用共用的深色按鈕。 */
-#channel-buttons button[aria-pressed="false"],#position-buttons button[aria-pressed="false"]{background:#dfe9ed;color:#15617b}
+/* 選到與沒選到的按鈕樣子在 report_frame.css（選到的橘框淡底）。 */
 #chart{margin-top:.6rem}
 #compare-exports{align-items:center}
-/* 頁首：技術細節（計算指紋、程式提交代號）摺起來；摘要行看得出能點（跟結果頁同一個樣子）。 */
+/* 頁首：技術細節（計算指紋、程式提交代號）摺起來；摘要行樣子在 report_frame.css（跟結果頁同一個樣子）。 */
 #identity p{margin:.35rem 0}
-details>summary{cursor:pointer;color:#15617b;font-weight:600;padding:.25rem 0}
-#identity-codes{color:#4b5d67;font-size:.92rem}
+#identity-codes{color:var(--soft);font-size:.92rem}
 /* 拒收頁、重算失敗、讀不到時的技術細節（原句、雜湊、瀏覽器錯誤）：小一號灰字，長串的碼在格子裡折行。 */
-details.technical p{color:#4b5d67;font-size:.92rem;margin:.3rem 0;overflow-wrap:anywhere}
+details.technical p{color:var(--soft);font-size:.92rem;margin:.3rem 0;overflow-wrap:anywhere}
 /* 位置並排的圖上記號說明：一個記號一行，前面的小圖跟平面圖上畫的記號同一個樣子（顏色、虛線、圓圈）；
    共用樣式把 svg 撐滿整格寬，這裡的小圖要改回固定小尺寸。 */
 #plan-key{list-style:none;padding:0;margin:.8rem 0}
 #plan-key li{display:flex;align-items:flex-start;gap:.5rem;margin:.3rem 0;line-height:1.5}
 #plan-key li[hidden]{display:none}
 #plan-key svg{flex:0 0 auto;width:28px;height:22px;border:0;background:none;margin-top:.05rem}
-/* 兩個 CSV 下載連結跟旁邊的 PNG 按鈕同一個樣子（底線藍字夾在按鈕旁邊像另一種東西）。 */
-#compare-exports a{display:inline-block;padding:.65rem 1rem;border-radius:6px;background:#15617b;color:white;text-decoration:none}
+/* 兩個 CSV 下載連結跟旁邊的 PNG 按鈕同一個樣子（細框、同字色同內距；底線橘字夾在按鈕旁邊像另一種東西）。 */
+#compare-exports a{display:inline-block;font-size:13px;padding:5px 14px;border:1px solid var(--line-strong);border-radius:3px;background:transparent;color:var(--ink);text-decoration:none}
+#compare-exports a:hover{border-color:var(--soft)}
 
 /* 材料逐層摘要可折行；手機把有材料列的整張表上下排，欄頭藏起來、每一列自己標 A／B。 */
 #changes tr.material-change td{white-space:normal;min-width:0;max-width:24em;line-height:1.6}
 @media(max-width:599px){
   #changes table:has(.material-change){display:block}
   #changes table:has(.material-change) tr:has(th){display:none}
-  #changes table:has(.material-change) tr{display:block;border-bottom:1px solid #d5e0e4}
+  #changes table:has(.material-change) tr{display:block;border-bottom:1px solid var(--line)}
   #changes table:has(.material-change) td{display:block;border:0;max-width:none;white-space:normal}
   #changes table:has(.material-change) td:first-child{font-weight:700}
   #changes table:has(.material-change) td[data-side]::before{content:attr(data-side) "：";font-weight:700}

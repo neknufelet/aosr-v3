@@ -2,7 +2,11 @@
 // 數值、分區、超線標記和基準線都由伺服器給；這裡只轉成畫面座標。
 (() => {
   const $ = (id) => document.getElementById(id);
-  const colors = ["#1b6f8a", "#c0392b", "#8e44ad", "#b36b00"];
+  // 顏色從外框的色票讀（app.css，#1350），深底上分得開；讀不到才用後面的備用色。
+  const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  const colors = [css("--c1", "#6fa8dc"), css("--c2", "#ef8a2e"), css("--c4", "#b39ddb"), css("--c3", "#8fbf7f")];
+  const AXIS = () => ({stroke: css("--soft", "#a0a7ad"), grid: {stroke: css("--line", "#363b40"), width: 1},
+                      ticks: {stroke: css("--line", "#363b40"), width: 1}});
   const KEYS = ["frequency", "rfz", "plan"], TIMEOUT_MS = 60000;
   let plots = {frequency: [], rfz: []}, selected = null, versions = null, shown = "", loading = "", requestNumber = 0;
   function clearChart(key) {
@@ -20,8 +24,8 @@
   }
   function clearCharts() { KEYS.forEach(clearChart); }
   function axes(x, y) {
-    return [{label: x, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))},
-      {label: y, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))}];
+    return [{label: x, ...AXIS(), values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))},
+      {label: y, ...AXIS(), values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))}];
   }
   const STANDARD_FREQUENCIES = [1, 10, 100, 1000, 10000].flatMap((scale) => [1, 2, 3, 4, 5, 6, 7, 8, 9].map((lead) => lead * scale));
   function frequencyAxes(frequencies) {
@@ -63,16 +67,16 @@
         const levels = new Map();
         data.zones.forEach((zone, i) => levels.set(zone.threshold_db, [...(levels.get(zone.threshold_db) || []), i]));
         levels.forEach((indexes, level) => {
-          ctx.strokeStyle = indexes.length > 1 ? "#6b7780" : colors[indexes[0]]; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
+          ctx.strokeStyle = indexes.length > 1 ? css("--faint", "#6b7278") : colors[indexes[0]]; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
           const y = u.valToPos(level, "y", true);
           ctx.beginPath(); ctx.moveTo(box.left, y); ctx.lineTo(box.left + box.width, y); ctx.stroke();
         });
         const windowX = u.valToPos(data.window_ms, "x", true);
-        ctx.strokeStyle = "#344b58"; ctx.beginPath(); ctx.moveTo(windowX, box.top); ctx.lineTo(windowX, box.top + box.height); ctx.stroke();
+        ctx.strokeStyle = css("--soft", "#a0a7ad"); ctx.beginPath(); ctx.moveTo(windowX, box.top); ctx.lineTo(windowX, box.top + box.height); ctx.stroke();
         ctx.setLineDash([]);
         points.forEach((p) => {
           const color = colors[data.zones.findIndex((z) => z.key === p.zone)];
-          ctx.strokeStyle = color; ctx.fillStyle = p.over_limit ? "white" : color;
+          ctx.strokeStyle = color; ctx.fillStyle = p.over_limit ? css("--sunk", "#1b1e21") : color;
           ctx.beginPath(); ctx.arc(u.valToPos(p.delay_ms, "x", true), u.valToPos(p.level_db, "y", true), p.over_limit ? 6 : 4, 0, Math.PI * 2);
           ctx.fill(); ctx.stroke();
         }); ctx.restore();

@@ -256,14 +256,14 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             assert page.locator("#version-text").inner_text() == data.version_text == "兩份相同"
             technical = page.locator("#identity-technical")
             assert technical.evaluate("el => el.open") is False
-            assert not re.search(r"[0-9a-f]{7,}", page.locator("header").inner_text())
+            assert not re.search(r"[0-9a-f]{7,}", page.locator("#page-head").inner_text())
             codes = technical.text_content() or ""
             assert all(code in codes for code in (data.a.fingerprint_text, data.b.fingerprint_text,
                                                   data.a.engine_text, data.b.engine_text))
             # 碼的名字跟結果頁、方案輸入頁同一套：物理身分前 12 碼、程式提交代號。
             assert f"物理身分前 12 碼 {data.a.fingerprint_text}、程式提交代號 {data.a.engine_text}" in codes
             technical.locator("summary").click()
-            assert data.a.fingerprint_text in page.locator("header").inner_text()
+            assert data.a.fingerprint_text in page.locator("#page-head").inner_text()
             # 回去的連結跟其他頁同一套字：輸入頁叫方案輸入頁。
             assert page.get_by_role("link", name="回方案輸入頁").get_attribute("href") == "/"
             assert [row.locator("td").all_inner_texts() for row in page.locator("#changes tr").all()[1:]] == [

@@ -191,18 +191,22 @@ def test_each_page_links_shared_then_own_stylesheet(tmp_path: Path) -> None:
     with _app(tmp_path) as client:
         pages = {"home": client.get("/"), "result": client.get("/results/" + "b" * 32),
                  "compare": client.get("/compare/a/b")}
+        # 結果頁與比較頁換了新外框（#1350）：先連外框的 app.css、不再連 style.css；方案輸入頁還沒換，照舊先連 style.css。
+        shared = {"home": "style.css", "result": "app.css", "compare": "app.css"}
         for page, response in pages.items():
             own = f"{page}.css"
             links = re.findall(r'<link rel="stylesheet" href="/static/(?:vendor/uplot/)?([^"]+)"',
                                response.text)
-            assert links.index("style.css") < links.index(own)
+            assert links.index(shared[page]) < links.index(own)
+            if shared[page] == "app.css":
+                assert links[0] == "app.css" and "style.css" not in links
             served = client.get(f"/static/{own}")
             assert served.status_code == 200 and served.text.startswith("/*")
         assert client.get(f"/static/{'other' + '.css'}").status_code == 404
-    shared = (STATIC / "style.css").read_text(encoding="utf-8")
+    style = (STATIC / "style.css").read_text(encoding="utf-8")
     # 成功用 .ok（綠、一般粗細），警示與錯誤仍用 .notice。
-    assert re.search(r"\.ok\{color:#[0-9a-f]{6};font-weight:400\}", shared)
-    assert ".notice{" in shared
+    assert re.search(r"\.ok\{color:#[0-9a-f]{6};font-weight:400\}", style)
+    assert ".notice{" in style
 
 
 def test_plan_includes_every_speaker_and_receiver(tmp_path: Path) -> None:
