@@ -223,3 +223,21 @@ def test_own_rigid_construction_as_backing_reads_as_a_normal_search_zone(tmp_pat
         _click_zone(page, "/".join(ZONE))
         expect(page.locator("#zone-panel-backing-pick")).to_have_value("lab_rigid")
         _shot(page, "backing-own-panel.png")
+
+
+def test_map_names_the_backing_until_switched_back(tmp_path: Path, browser: Browser) -> None:
+    """套用背後 VPR 之後，圖上那一區寫「背後 VPR」、滑過去的說明也有；換回原牆那一行就拿掉（#1338）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _vpr_applied(page)
+        zone = page.locator(f"#zone-map [data-wall='{ZONE[0]}'][data-zone='{ZONE[1]}']")
+        expect(zone.locator(".zv-backing-label")).to_have_text("背後 VPR")
+        expect(zone.locator("title")).to_contain_text("由程式最佳化，背後 VPR")
+        _shot(page, "backing-map.png")
+        _click_zone(page, "/".join(ZONE))
+        page.locator("#zone-panel-backing-pick").select_option("")
+        _apply(page)
+        expect(zone.locator(".zv-backing-label")).to_have_count(0)
+        expect(zone.locator("title")).not_to_contain_text("背後")
+        assert base
