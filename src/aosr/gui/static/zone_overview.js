@@ -216,7 +216,7 @@ function roomyZone(width, height) { return width >= 76 && height >= 96; }
 // 配對記號的中心（drawWall 同面一對拉線用；每次重畫重記）。
 const glyphAt = new Map();
 // 夠大的由程式最佳化區上面幾行字怎麼排：「由程式最佳化」平常在中間偏上；區窄（左上角號碼圈會壓到整句）就挪到號碼圈底下；
-// 背後換過再多一行。記號與那一句跟著往下挪（shift）；放不下背後那一行就不寫（滑過去的說明照樣有），連挪都放不下就照原位。
+// 背後換過再多一行。記號與那一句跟著往下挪（shift）；放不下背後那一行就不寫（滑過去的說明照樣有）。
 function searchLayout(item, x, y, width, height) {
   const cy = y + height / 2, mark = pairing?.marks.get(item.id);
   const fits = (top, extra) => {
@@ -227,7 +227,8 @@ function searchLayout(item, x, y, width, height) {
   const top = wide ? cy - 22 : Math.max(cy - 22, y + 44);
   const behind = item.shown === "search" ? mapBacking(item) : "";
   if (behind) { const laid = fits(top, 16); if (laid) return {...laid, behind}; }
-  return {...(fits(top, 0) ?? {top: cy - 22, shift: 0}), behind: ""};
+  // 連「由程式最佳化」都排不開：寬的照原位；窄的不寫那一句（底色已經看得出，滑過去的說明照樣有），免得壓到號碼圈。
+  return {...(fits(top, 0) ?? {top: wide ? cy - 22 : null, shift: 0}), behind: ""};
 }
 // 一區的配對記號掛到圖上那一區：成對的掛圖形與「和○牆○一對」，沒配成的掛「沒配成一對」。回這一區有沒有掛。
 // shift：夠大的區上面多寫了幾行（見 searchLayout），記號與那一句整組往下挪這麼多。
@@ -353,7 +354,8 @@ function zoneShape(item, x, y, width, height) {
   } else if (roomyZone(width, height) && (pairing?.marks.has(item.id) || (item.shown === "search" && mapBacking(item)))) {
     // 夠大的由程式最佳化區有配對記號或換過背後：號碼挪左上角、中間寫「由程式最佳化」，背後換過的底下再寫「背後 ○○」。
     const lay = searchLayout(item, x, y, width, height);
-    group.append(...ring, badge(x + 16, y + 16, item.label.number, false), svg("text", {class: "zv-search-label", x: cx, y: lay.top}, ZONE_MODE_WORDS.search));
+    group.append(...ring, badge(x + 16, y + 16, item.label.number, false));
+    if (lay.top !== null) group.append(svg("text", {class: "zv-search-label", x: cx, y: lay.top}, ZONE_MODE_WORDS.search));
     if (lay.behind) group.append(svg("text", {class: "zv-backing-label", x: cx, y: lay.top + 16}, fitWords(lay.behind, width - 8, 12)));
     shift = lay.shift;
   } else group.append(...ring, badge(cx, cy, item.label.number, small));

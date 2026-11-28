@@ -305,10 +305,10 @@ DRAW = """([wall, key, width, height, mark]) => {
     return found; }"""
 
 
-def _apart(boxes: list[dict[str, float]]) -> None:
+def _apart(boxes: list[dict[str, float]], behind: bool = True) -> None:
     """第一個是那一區的底，其餘部位都要在底裡面、而且兩兩不疊（「沒配成一對」黑條本來就墊在那一句底下，不互比）。"""
     fill, parts = boxes[0], boxes[1:]
-    assert any(part["name"] == "zv-backing-label" for part in parts), parts
+    assert any(part["name"] == "zv-backing-label" for part in parts) is behind, parts
     for part in parts:
         assert fill["x"] - 0.5 <= part["x"] and part["r"] <= fill["r"] + 0.5 and fill["y"] - 0.5 <= part["y"] and part["b"] <= fill["b"] + 0.5, (part, fill)
     apart = [part for part in parts if part["name"] != "zv-pair-words zv-missed-words"]
@@ -319,11 +319,13 @@ def _apart(boxes: list[dict[str, float]]) -> None:
 
 
 def test_backing_line_never_sits_on_the_badge_or_pair_marks(tmp_path: Path, browser: Browser) -> None:
-    """窄區（80 × 100，號碼圈會壓到整句）、成對（六角形記號）、沒配成（黑條）、沒有記號：背後那一行與號碼圈、做法字、記號都不疊（#1338 審查）。"""
+    """窄區（80 × 100，號碼圈會壓到整句）、窄又有記號（放不下背後那一行）、成對（六角形記號）、沒配成（黑條）、沒有記號：背後那一行與號碼圈、做法字、記號都不疊（#1338 審查）。"""
     _prepare(tmp_path)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
         _vpr_applied(page)
-        for width, height, mark in [(80, 100, None), (80, 140, "pair"), (190, 140, "pair"), (190, 140, "missed"), (120, 140, None)]:
-            _apart(cast(list[dict[str, float]], page.evaluate(DRAW, [ZONE[0], ZONE[1], width, height, mark])))
+        cases = [(80, 100, None, True), (80, 140, "pair", True), (190, 140, "pair", True), (190, 140, "missed", True), (120, 140, None, True),
+                 (80, 100, "pair", False), (80, 100, "missed", False)]  # 最後兩種放不下背後那一行：不寫，也不壓字
+        for width, height, mark, behind in cases:
+            _apart(cast(list[dict[str, float]], page.evaluate(DRAW, [ZONE[0], ZONE[1], width, height, mark])), behind)
         assert base
