@@ -256,6 +256,7 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-map .zv-pair-mark,#zone-page .zv-sym-icon .zv-pair-mark{fill:var(--ink);stroke:#fff;stroke-width:1.2}
 #zone-page .zv-map .zv-pair-words{font-size:12px;text-anchor:middle;fill:var(--ink);font-weight:600}
 #zone-page .zv-map .zv-search-label{font-size:13px;text-anchor:middle;fill:var(--ink);font-weight:600}
+#zone-page .zv-map .zv-backing-label{font-size:12px;text-anchor:middle;fill:var(--ink)}
 #zone-page .zv-map .zv-hide{display:none}
 #zone-page .zv-map .zv-missed-bg{fill:var(--ink);stroke:none}
 #zone-page .zv-map .zv-missed-dot{fill:var(--ink);stroke:#fff;stroke-width:1}

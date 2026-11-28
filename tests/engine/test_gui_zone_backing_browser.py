@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
-from playwright.sync_api import Browser, Page, expect
+from playwright.sync_api import Browser, Locator, Page, expect
 
 from aosr.materials.library import builtin_entries, fixed_surface
 import json
+import re
 
 from tests.engine._construction_cases import construction
 from tests.engine._construction_preset_answers import FITTED_VPR_IDS
@@ -25,6 +26,16 @@ from tests.engine.test_gui_zone_overview_tasks_browser import (
 )
 
 VPR, = FITTED_VPR_IDS
+
+
+class Box(TypedDict):
+    """圖上一個部位的框（getBBox 換成左上右下）與它的 class。"""
+    name: str
+    x: float
+    y: float
+    r: float
+    b: float
+
 ZONE = ("yL", "z1")  # 自編房間裡貼在原牆上的一區：換回原牆要拆得回它記的原牆
 SHOTS = Path(os.environ.get("AOSR_BACKING_SHOTS", "")) if os.environ.get("AOSR_BACKING_SHOTS") else None
 
@@ -223,3 +234,108 @@ def test_own_rigid_construction_as_backing_reads_as_a_normal_search_zone(tmp_pat
         _click_zone(page, "/".join(ZONE))
         expect(page.locator("#zone-panel-backing-pick")).to_have_value("lab_rigid")
         _shot(page, "backing-own-panel.png")
+
+
+def test_map_names_the_backing_until_switched_back(tmp_path: Path, browser: Browser) -> None:
+    """套用背後 VPR 之後，圖上那一區寫「背後 VPR」、滑過去的說明也有；換回原牆那一行就拿掉（#1338）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _vpr_applied(page)
+        zone = page.locator(f"#zone-map [data-wall='{ZONE[0]}'][data-zone='{ZONE[1]}']")
+        expect(zone.locator(".zv-backing-label")).to_have_text("背後 VPR")
+        expect(zone.locator("title")).to_contain_text("由程式最佳化，背後 VPR")
+        _laid_apart(zone)
+        _shot(page, "backing-map.png")
+        _click_zone(page, "/".join(ZONE))
+        page.locator("#zone-panel-backing-pick").select_option("")
+        _apply(page)
+        expect(zone.locator(".zv-backing-label")).to_have_count(0)
+        expect(zone.locator("title")).not_to_contain_text("背後")
+        assert base
+
+
+def _laid_apart(zone: Locator) -> None:
+    """那一區上的號碼圈、做法字、背後那一行、配對記號互不重疊，而且都在那一區裡面（#1338 審查：只核字會漏掉壓字與越界）。"""
+    boxes = cast(list[Box], zone.evaluate("""group => {
+        const box = node => { const b = node.getBBox(); return {name: node.getAttribute('class') || node.tagName, x: b.x, y: b.y, r: b.x + b.width, b: b.y + b.height}; };
+        const parts = [...group.querySelectorAll('.zv-badge, .zv-search-label, .zv-backing-label, .zv-pair-mark, .zv-missed-bg, .zv-pair-words:not(.zv-hide)')];
+        return [box(group.querySelector('.zv-fill')), ...parts.map(box)]; }"""))
+    _apart(boxes)
+
+
+def test_long_backing_name_is_cut_inside_the_zone(tmp_path: Path, browser: Browser) -> None:
+    """自組剛背構造短名是一長串大寫英文：圖上那一行截短加「…」、整行留在那一區裡面。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        own = construction(id="lab_wide", label="WWWWWWWWWWWWWWWWWWWW 自編剛背")
+        assert page.request.put(f"{base}/api/materials/lab_wide", data=own).ok
+        _open_search_panel(page)
+        page.locator("#zone-panel-backing-pick").select_option("lab_wide")
+        page.locator("#zone-panel-depth").fill("25")
+        expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
+        _apply(page)
+        zone = page.locator(f"#zone-map [data-wall='{ZONE[0]}'][data-zone='{ZONE[1]}']")
+        expect(zone.locator(".zv-backing-label")).to_have_text(re.compile(r"^背後 W+…$"))
+        _laid_apart(zone)
+
+
+def test_ceiling_with_a_backing_names_it_on_the_plan(tmp_path: Path, browser: Browser) -> None:
+    """天花那一塊（自編房間裡最大的那塊）由程式最佳化、背後換成一筆：天花圖上那一塊也寫「背後 ○○」（#1338 審查：地板、天花另一支畫法）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.set_viewport_size({"width": 1440, "height": 900})
+        _open_overview(page)
+        _click_zone(page, "ceiling/auto1")
+        page.locator("#zone-panel-mode-search").check()
+        pick = page.locator("#zone-panel-backing-pick")
+        expect(pick).to_be_visible()
+        pick.select_option(VPR)
+        page.locator("#zone-panel-depth").fill("60")
+        expect(page.locator("#zone-panel-form")).to_have_attribute("data-candidates", "checked")
+        _apply(page)
+        zone = page.locator("#zone-map [data-wall='ceiling'][data-zone='auto1']")
+        expect(zone.locator(".zv-backing-label")).to_have_text("背後 VPR")
+        expect(zone.locator("title")).to_contain_text("背後 VPR")
+        assert base
+
+
+# 頁面給考卷的畫一區口（window.zoneShapeFor），用指定的大小與配對記號重畫背後換成 VPR 的那一區、量各部位的框（重現審查那幾種排法）。
+DRAW = """([wall, key, width, height, mark]) => {
+    const item = {wall, key, id: `${wall}/${key}`, label: {number: 1, numberText: '①', name: '一區'}, zone: {material: {}, area: 'rectangle'},
+                  method: 'search', shown: 'search'};
+    const group = window.zoneShapeFor(item, width, height, mark);
+    const map = document.getElementById('zone-map'); (map.tagName.toLowerCase() === 'svg' ? map : map.querySelector('svg')).append(group);
+    const box = node => { const b = node.getBBox(); return {name: node.getAttribute('class') || node.tagName, x: b.x, y: b.y, r: b.x + b.width, b: b.y + b.height}; };
+    const parts = [...group.querySelectorAll('.zv-badge, .zv-search-label, .zv-backing-label, .zv-pair-mark, .zv-missed-bg, .zv-pair-words:not(.zv-hide)')];
+    const found = [box(group.querySelector('.zv-fill')), ...parts.map(box)];
+    group.remove();
+    return found; }"""
+
+
+def _apart(boxes: list[Box], behind: bool = True) -> None:
+    """第一個是那一區的底，其餘部位都要在底裡面、而且兩兩不疊（「沒配成一對」黑條本來就墊在那一句底下，不互比）。"""
+    fill, parts = boxes[0], boxes[1:]
+    assert any(part["name"] == "zv-backing-label" for part in parts) is behind, parts
+    for part in parts:
+        assert fill["x"] - 0.5 <= part["x"] and part["r"] <= fill["r"] + 0.5 and fill["y"] - 0.5 <= part["y"] and part["b"] <= fill["b"] + 0.5, (part, fill)
+    apart = [part for part in parts if part["name"] != "zv-pair-words zv-missed-words"]
+    for index, first in enumerate(apart):
+        for second in apart[index + 1:]:
+            overlap = min(first["r"], second["r"]) - max(first["x"], second["x"]) > 0.5 and min(first["b"], second["b"]) - max(first["y"], second["y"]) > 0.5
+            assert not overlap, (first, second)
+
+
+def test_backing_line_never_sits_on_the_badge_or_pair_marks(tmp_path: Path, browser: Browser) -> None:
+    """窄區（80 × 100，號碼圈會壓到整句）、窄又有記號（放不下背後那一行）、成對（六角形記號）、沒配成（黑條）、沒有記號：背後那一行與號碼圈、做法字、記號都不疊（#1338 審查）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _vpr_applied(page)
+        cases = [(80, 100, None, True), (80, 140, "pair", True), (190, 140, "pair", True), (190, 140, "missed", True), (120, 140, None, True),
+                 (80, 100, "pair", False), (80, 100, "missed", False)]  # 最後兩種放不下背後那一行：不寫，也不壓字
+        for width, height, mark, behind in cases:
+            _apart(cast(list[Box], page.evaluate(DRAW, [ZONE[0], ZONE[1], width, height, mark])), behind)
+        assert base

@@ -110,6 +110,13 @@ window.zonePairMarks = () => {
   return found.state === "paired" ? found.marks : new Map();
 };
 window.zonePartnerWords = item => partnerWords(item);
+// 考卷用：照指定大小與配對記號（"pair" 成對、"missed" 沒配成、null 沒有）畫一區，量字與記號排得開不開（#1338）。不改現在的配對。
+window.zoneShapeFor = (item, width, height, mark) => {
+  const saved = pairing;
+  const partner = {...item, wall: item.wall === "y0" ? "yL" : "y0", id: `mirror/${item.id}`};
+  pairing = mark ? {marks: new Map([[item.id, mark === "missed" ? {missed: true} : {partner, shape: "hexagon"}]])} : null;
+  try { return zoneShape(item, 0, 0, width, height); } finally { pairing = saved; }
+};
 // 交給推法的那幾區：四面牆照前、後、左、右，每面照號碼，扣掉門窗。
 function ruleZones(faces, roles) { return WALL_ORDER.flatMap(role => faces[roles[role]].filter(item => !item.opening)); }
 // 六面全部由程式最佳化的區（清單卡管的）：四面牆照前後左右，再來天花、地板。
@@ -152,7 +159,16 @@ function hoverWords(item) {
   if (mode === "unknown") return `${zoneWhereText(item)}：${uncertainWords(item.construction)}`;
   // 這一區的材料是「鋼板直接貼在棉上」的構造（#1208）：滑過去的說明接那一句（圖上寫不下字的區也看得到）。
   const reference = zoneReferenceOnly(item.zone.material, item.wall, item.key) ? `；${zoneReference.sentence}` : "";
-  return `${zoneWhereText(item)}：${mode === "fixed" ? `${ZONE_MODE_WORDS.fixed}：${pastedWords(item)}` : ZONE_MODE_WORDS[mode]}${reference}`;
+  const behind = mode === "search" && mapBacking(item) ? `，${mapBacking(item)}` : "";
+  return `${zoneWhereText(item)}：${mode === "fixed" ? `${ZONE_MODE_WORDS.fixed}：${pastedWords(item)}` : ZONE_MODE_WORDS[mode]}${behind}${reference}`;
+}
+// 由程式最佳化而背後換成材料庫一筆的區（#1330）：圖上寫「背後 ○○」（短名，同右欄那一格）；沒換背後回 ""。
+// 那一筆從材料庫刪掉了就寫代號，不寫成原牆。
+function mapBacking(item) {
+  const id = zoneSetting(item.wall, item.key).backing_entry;
+  if (!id) return "";
+  const entry = libraryEntry(id);
+  return `背後 ${entry ? backingName(entry) : id}`;
 }
 
 /* ───── 左右對稱：伺服器算好的配對整理成畫面要的樣子（不在這裡算誰跟誰一對） ───── */
@@ -197,11 +213,29 @@ function glyphIcon(shape) {
 function partnerWords(item) { return item.key === "whole_wall" ? `和${wallNames[item.wall]}整面一對` : `和${wallNames[item.wall]}${item.label.numberText}一對`; }
 // 夠大的區：號碼挪到左上角、中間放記號與一句話；小的區只在號碼旁放記號（那一句照樣在，只是不顯示）。
 function roomyZone(width, height) { return width >= 76 && height >= 96; }
+// 配對記號的中心（drawWall 同面一對拉線用；每次重畫重記）。
+const glyphAt = new Map();
+// 夠大的由程式最佳化區上面幾行字怎麼排：「由程式最佳化」平常在中間偏上；區窄（左上角號碼圈會壓到整句）就挪到號碼圈底下；
+// 背後換過再多一行。記號與那一句跟著往下挪（shift）；放不下背後那一行就不寫（滑過去的說明照樣有）。
+function searchLayout(item, x, y, width, height) {
+  const cy = y + height / 2, mark = pairing?.marks.get(item.id);
+  const fits = (top, extra) => {
+    const shift = top - (cy - 22) + extra, bottom = !mark ? top + extra + 4 : mark.missed ? cy + 26 + shift : cy + 40 + shift;
+    return bottom <= y + height - 2 ? {top, shift} : null;
+  };
+  const wide = measuredWidth(ZONE_MODE_WORDS.search, 13) / 2 <= width / 2 - 30;
+  const top = wide ? cy - 22 : Math.max(cy - 22, y + 44);
+  const behind = item.shown === "search" ? mapBacking(item) : "";
+  if (behind) { const laid = fits(top, 16); if (laid) return {...laid, behind}; }
+  // 連「由程式最佳化」都排不開：寬的照原位；窄的不寫那一句（底色已經看得出，滑過去的說明照樣有），免得壓到號碼圈。
+  return {...(fits(top, 0) ?? {top: wide ? cy - 22 : null, shift: 0}), behind: ""};
+}
 // 一區的配對記號掛到圖上那一區：成對的掛圖形與「和○牆○一對」，沒配成的掛「沒配成一對」。回這一區有沒有掛。
-function pairDecor(item, group, x, y, width, height) {
+// shift：夠大的區上面多寫了幾行（見 searchLayout），記號與那一句整組往下挪這麼多。
+function pairDecor(item, group, x, y, width, height, shift = 0) {
   const mark = pairing?.marks.get(item.id);
   if (!mark) return false;
-  const cx = x + width / 2, cy = y + height / 2, roomy = roomyZone(width, height);
+  const roomy = roomyZone(width, height), cx = x + width / 2, cy = y + height / 2 + (roomy ? shift : 0);
   if (mark.missed) {
     group.setAttribute("data-missed", "true");
     // 放得下一條字的區（夠大的在中間偏下、窄的在號碼底下）掛整條「沒配成一對」；再小的只掛一個小記號。
@@ -213,6 +247,7 @@ function pairDecor(item, group, x, y, width, height) {
   }
   group.setAttribute("data-pair", mark.partner.id);
   group.setAttribute("data-shape", mark.shape);
+  glyphAt.set(item.id, cy + 6);
   if (roomy) group.append(pairGlyph(mark.shape, cx, cy + 6, 11), svg("text", {class: "zv-pair-words", x: cx, y: cy + 36}, partnerWords(mark.partner)));
   else group.append(pairGlyph(mark.shape, cx, Math.min(cy + 19, y + height - 7), 6), svg("text", {class: "zv-pair-words zv-hide", x: cx, y: cy}, partnerWords(mark.partner)));
   return true;
@@ -221,6 +256,22 @@ function pairDecor(item, group, x, y, width, height) {
 /* ───── 左邊：圖 ───── */
 // 字大約多寬（px）：全形一個字高、半形半個多一點；只拿來決定圖上的字放不放得下。
 function textWidth(text, size) { return [...text].reduce((sum, char) => sum + (char.charCodeAt(0) > 0x2e7f ? 1 : 0.58), 0) * size; }
+// 放不下就從尾巴砍、補「…」（滑過去的說明照樣有整句）。
+// 量字用頁面實際的字型（畫布 measureText）；量不到才用 textWidth 估。
+let wordRuler = null;
+function measuredWidth(text, size) {
+  try {
+    wordRuler ??= document.createElement("canvas").getContext("2d");
+    wordRuler.font = `${size}px ${getComputedStyle(document.getElementById("zone-page") ?? document.body).fontFamily}`;
+    return wordRuler.measureText(text).width;
+  } catch { return textWidth(text, size); }
+}
+function fitWords(text, room, size) {
+  if (measuredWidth(text, size) <= room) return text;
+  const chars = [...text];
+  while (chars.length > 1 && measuredWidth(chars.join("") + "…", size) > room) chars.pop();
+  return chars.join("") + "…";
+}
 // 指定貼的那一塊上面寫材料名：照括號與「＋」斷成幾行，第一行大字（放不下就小一號），後面幾行從頭照順序放到放不下為止；
 // 第一行都放不下就不寫（滑過去的說明照樣有整個名字）。只寫在另外指定的區上：跟著規則的那一大片不重複寫同一個名字。
 function fixedLabel(item, x, y, width, height) {
@@ -294,15 +345,21 @@ function zoneShape(item, x, y, width, height) {
   const cx = x + width / 2, cy = y + height / 2, small = Math.min(width, height) < 22;
   // 選到的那一圈白框先畫、號碼與字後畫（#1199）：窄條區的號碼圈比區還寬，白框後畫會把號碼蓋掉。
   const ring = selected.includes(item.id) ? [selectedRing({x, y, width, height})] : [];
+  let shift = 0;
   if (item.shown === "opening") {
     group.append(svg("rect", {class: "zv-hatch", x, y, width, height}), ...ring, svg("rect", {class: "zv-tagbg", x: cx - 29, y: cy - 15, width: 58, height: 30, rx: 3}),
       badge(cx - 13, cy, item.label.number, false), svg("text", {class: "zv-open-label", x: cx + 12, y: cy + 6}, item.special));
   } else if (item.shown === "fixed" && width >= 44 && height >= 44) {
     group.append(...ring, badge(x + 16, y + 16, item.label.number, false), fixedLabel(item, x, y, width, height));
-  } else if (pairing?.marks.has(item.id) && roomyZone(width, height)) {
-    group.append(...ring, badge(x + 16, y + 16, item.label.number, false), svg("text", {class: "zv-search-label", x: cx, y: cy - 22}, ZONE_MODE_WORDS.search));
+  } else if (roomyZone(width, height) && (pairing?.marks.has(item.id) || (item.shown === "search" && mapBacking(item)))) {
+    // 夠大的由程式最佳化區有配對記號或換過背後：號碼挪左上角、中間寫「由程式最佳化」，背後換過的底下再寫「背後 ○○」。
+    const lay = searchLayout(item, x, y, width, height);
+    group.append(...ring, badge(x + 16, y + 16, item.label.number, false));
+    if (lay.top !== null) group.append(svg("text", {class: "zv-search-label", x: cx, y: lay.top}, ZONE_MODE_WORDS.search));
+    if (lay.behind) group.append(svg("text", {class: "zv-backing-label", x: cx, y: lay.top + 16}, fitWords(lay.behind, width - 8, 12)));
+    shift = lay.shift;
   } else group.append(...ring, badge(cx, cy, item.label.number, small));
-  pairDecor(item, group, x, y, width, height);
+  pairDecor(item, group, x, y, width, height, shift);
   if (item.apart) group.append(apartFrame({x, y, width, height}));
   return group;
 }
@@ -347,7 +404,7 @@ function drawWall(map, role, wall, items, ox, oy, scale, miniSize) {
   for (const pair of pairing?.pairs ?? []) {
     if (pair.first.wall !== wall || pair.second.wall !== wall) continue;
     const spots = [pair.first, pair.second].map(item => { const [a0, a1, b0, b1] = item.box;
-      return {x: ox + (a0 + a1) / 2 * scale, y: oy + (height - (b0 + b1) / 2) * scale + 6, roomy: roomyZone((a1 - a0) * scale, (b1 - b0) * scale)}; })
+      return {x: ox + (a0 + a1) / 2 * scale, y: glyphAt.get(item.id) ?? oy + (height - (b0 + b1) / 2) * scale + 6, roomy: roomyZone((a1 - a0) * scale, (b1 - b0) * scale)}; })
       .sort((left, right) => left.x - right.x);
     if (spots.every(spot => spot.roomy)) face.append(svg("line", {class: "zv-pair-link", x1: spots[0].x + 14, y1: spots[0].y, x2: spots[1].x - 14, y2: spots[1].y}));
   }
@@ -398,6 +455,11 @@ function drawTile(map, wall, items, plan, roles, room, faces, heading, note) {
         svg("text", {class: "zv-tiny", x: rect.x + rect.width / 2, y: rect.y + rect.height - 6, "text-anchor": "middle"}, "地毯"));
     }
     if (selected.includes(item.id)) group.append(selectedRing(rect));
+    // 地板、天花沒有號碼與做法字，背後換過的在上緣寫「背後 ○○」（放得下才寫，滑過去的說明照樣有）。
+    const behind = item.shown === "search" ? mapBacking(item) : "";
+    if (behind && rect.width >= 60 && rect.height >= 40) {
+      group.append(svg("text", {class: "zv-backing-label", x: rect.x + rect.width / 2, y: rect.y + 18}, fitWords(behind, rect.width - 8, 12)));
+    }
     pairDecor(item, group, rect.x, rect.y, rect.width, rect.height);
     face.append(group);
   }
@@ -1181,7 +1243,11 @@ function backingDepth(item) {
   return layers.reduce((sum, layer) => sum + (typeof layer.thickness_m === "number" ? layer.thickness_m : 0), 0);
 }
 // 背後那一筆在標籤、剖面條裡的短名：名字第一段（「VPR 鋼板 1 mm＋…」叫 VPR）；完整名字在下拉裡。
-function backingName(entry) { return entry.label.split(/[ ＋（]/)[0] || entry.label; }
+// 背後那一筆的短名：名字的第一個詞（例如「VPR」）；第一個詞只是數字（「0.8 mm 圓孔面板」）就取到「＋」或「（」之前。
+function backingName(entry) {
+  const word = entry.label.split(/[ ＋（]/)[0];
+  return (word && !/^[\d.]+$/.test(word) ? word : entry.label.split(/[＋（]/)[0].trim()) || entry.label;
+}
 function backingRow(items, walls) {
   const box = el("div", "zv-backing"); box.id = "zone-panel-backing";
   const chosen = panelBacking(items), entry = chosen ? libraryEntry(chosen) : null;
@@ -2572,6 +2638,7 @@ function pageHead() {
 // 整頁先在旁邊組好，組得出來才一次換上去：組到一半丟例外（程式的錯）時畫面留在上一次的樣子、最上面加一句，
 // 沒有上一次的樣子就只放標題與「回房間方案輸入」。例外照樣丟給瀏覽器的錯誤紀錄（不吞掉）。
 function renderZoneOverview() {
+  glyphAt.clear();
   const page = $("zone-page");
   if (!page) return;
   page.hidden = !overviewOpen;
