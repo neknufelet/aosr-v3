@@ -310,7 +310,7 @@ def test_send_to_search_appears_only_with_a_search_zone_saves_then_opens_the_sea
         expect(page.locator("#zone-to-search")).to_be_disabled()
         expect(page.locator("#zone-to-search-note")).to_contain_text("這間房貼什麼")
         choose_mode(page, "x0", "whole_wall", "search")
-        expect(page.locator("#zone-to-search-note")).to_contain_text("交出黃色的 1 區")
+        expect(page.locator("#zone-to-search-note")).to_contain_text("交出橘色的 1 區")
         page.locator("#elevation-panel").screenshot(path=str(tmp_path / "to-search.png"))
         # 改回不交給程式（舊做法表選「指定貼一種」不換材料；小框指定貼一種要選一筆，改選「不貼，保留原樣」，一樣沒有交給程式的區）。
         choose_mode(page, "x0", "whole_wall", "keep_original")
@@ -523,7 +523,7 @@ def test_with_no_wall_picked_the_footer_button_follows_the_limits_summary(tmp_pa
             page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration")
             limits_all_clear(page)
             expect(page.locator("#zone-to-search")).to_be_enabled()
-            expect(page.locator("#zone-to-search-note")).to_have_text("交出黃色的 1 區；下一頁按「開始搜尋」才開始算")
+            expect(page.locator("#zone-to-search-note")).to_have_text("交出橘色的 1 區；下一頁按「開始搜尋」才開始算")
             assert watched.page_errors == [] and watched.console_errors == []
 
 
@@ -547,7 +547,7 @@ def test_a_footer_reply_is_dropped_once_a_later_verdict_comes_back(tmp_path: Pat
         recheck(page)
         page.wait_for_function("zoneLimitsShown === zoneLimitsGeneration && zoneLimits.status === 'checked'")
         limits_all_clear(page)
-        expect(note).to_have_text("交出黃色的 1 區；下一頁按「開始搜尋」才開始算")
+        expect(note).to_have_text("交出橘色的 1 區；下一頁按「開始搜尋」才開始算")
         assert watched.page_errors == []
 
 
@@ -579,7 +579,7 @@ def test_a_footer_reply_written_after_the_save_survives_the_verdict_that_save_as
 
 
 SAVE_FAILED = "每一區的做法沒存成，搜尋頁會讀到舊的做法：先處理好訊息列寫的問題再按一次"
-HANDED = "交出黃色的 1 區；下一頁按「開始搜尋」才開始算"
+HANDED = "交出橘色的 1 區；下一頁按「開始搜尋」才開始算"
 
 
 def test_a_save_failure_reply_outlives_the_relabel_after_unlock_and_goes_once_saved(tmp_path: Path, browser: Browser) -> None:

@@ -1,5 +1,10 @@
 /* 共用方案圖面：文字與點資料都由伺服器提供。 */
 (() => {
+// 顏色從外框的色票讀（app.css，深底上分得開）；還沒換外框的頁讀不到，用後面的備用色（原本的顏色）。
+const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+const tone = () => ({room: css("--soft", "#334b58"), zoom: css("--fix", "#167997"), speaker: css("--c2", "#db6b3a"),
+  receiver: css("--fix", "#167997"), furniture: css("--c3", "#697e6a"), blocked: css("--bad", "#c62828"),
+  changed: css("--c5", "#b01b6a")});
 function svgNode(name, attrs) {
   const node = document.createElementNS("http://www.w3.org/2000/svg", name);
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
@@ -28,6 +33,7 @@ function separateLabels(labels, text, circles, ownCircle, step) {
   labels.push(text);
 }
 function drawObjects(svg, plan, vertical, x, y, unit, changedKeys, detailTarget) {
+  const color = tone();
   for (const item of [...(plan.furniture || []), ...(plan.cabinets || [])]) {
     const cabinet = item.kind === "cabinet";
     const cloud = item.kind === "ceiling_cloud";
@@ -37,9 +43,9 @@ function drawObjects(svg, plan, vertical, x, y, unit, changedKeys, detailTarget)
     const title = svgNode("title", {}); title.textContent = item.detail_text; group.append(title);
     group.append(svgNode("polygon", {
       points: (vertical ? item.side_polygon : item.polygon).map(([u, v]) => `${x(u)},${y(v)}`).join(" "),
-      fill: cloud || table ? "none" : cabinet ? "#db6b3a" : "#697e6a", "fill-opacity": "0.22",
+      fill: cloud || table ? "none" : cabinet ? color.speaker : color.furniture, "fill-opacity": "0.22",
       "pointer-events": "all",
-      stroke: item.blocked ? "#c62828" : changed ? "#b01b6a" : cabinet ? "#db6b3a" : "#697e6a",
+      stroke: item.blocked ? color.blocked : changed ? color.changed : cabinet ? color.speaker : color.furniture,
       "stroke-width": (item.blocked || changed ? 2.5 : 1.5) * unit,
       ...(cloud ? {"stroke-dasharray": `${5 * unit} ${4 * unit}`} : {}),
       class: [changed ? "changed-furniture" : "", item.blocked ? "blocked-furniture" : ""].join(" ")}));
@@ -60,6 +66,7 @@ function drawingRange(range, plan, vertical, markers, outside) {
 }
 function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detailTarget, scaleRoom, changedKeys, plan) {
   svg.replaceChildren();
+  const color = tone();
   const outside = new Set(plan.outside_keys || []);
   const frame = zoomed ? range : drawingRange(range, plan, vertical, markers, outside);
   const width = frame.u[1] - frame.u[0];
@@ -82,23 +89,23 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
   const y = (v) => boxHeight - 40 - (v - frame.v[0]) * scale;
   svg.append(svgNode("rect", {x: x(range.u[0]), y: y(range.v[1]),
     width: (range.u[1] - range.u[0]) * scale, height: (range.v[1] - range.v[0]) * scale,
-    fill: "none", stroke: "#334b58", "stroke-width": unit}));
+    fill: "none", stroke: color.room, "stroke-width": unit, class: "room-outline"}));
   if (!zoomed) svg.append(svgNode("rect", {x: x(zoomRange.u[0]), y: y(zoomRange.v[1]),
     width: (zoomRange.u[1] - zoomRange.u[0]) * scale,
     height: (zoomRange.v[1] - zoomRange.v[0]) * scale,
-    fill: "none", stroke: "#167997", "stroke-width": unit, "stroke-dasharray": `${5 * unit} ${4 * unit}`}));
+    fill: "none", stroke: color.zoom, "stroke-width": unit, "stroke-dasharray": `${5 * unit} ${4 * unit}`}));
   if (!zoomed) drawObjects(svg, plan, vertical, x, y, unit, changedKeys, detailTarget);
   if (!zoomed) for (const speaker of speakers) {
     if (speaker.aim) svg.append(svgNode("line", {
       x1: x(speaker.point.x), y1: y(speaker.point[vertical ? "z" : "y"]),
       x2: x(speaker.aim.x), y2: y(speaker.aim[vertical ? "z" : "y"]),
-      stroke: "#db6b3a", "stroke-width": unit}));
+      stroke: color.speaker, "stroke-width": unit}));
   }
   if (!zoomed) for (const path of plan.blocked_paths || []) {
     const axis = vertical ? 2 : 1;
     svg.append(svgNode("path", {
       d: `M ${x(path.start_m[0])} ${y(path.start_m[axis])} L ${x(path.end_m[0])} ${y(path.end_m[axis])}`,
-      fill: "none", stroke: "#c62828", "stroke-width": 2.5 * unit,
+      fill: "none", stroke: color.blocked, "stroke-width": 2.5 * unit,
       class: "blocked-direct", "data-speaker": path.speaker_id, "data-receiver": path.receiver_id}));
   }
   const labels = [];
@@ -113,15 +120,15 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
     const group = svgNode("g", {"data-keys": item.keys.join(" "), tabindex: 0, ...(away ? {class: "outside-room"} : {})});
     const title = svgNode("title", {}); title.textContent = detail; group.append(title);
     const circle = svgNode("circle", {cx: x(item.u), cy: y(item.v), r: 5 * unit,
-      fill: away ? "#c62828" : item.kind === "receiver" ? "#167997" : "#db6b3a"});
+      fill: away ? color.blocked : item.kind === "receiver" ? color.receiver : color.speaker});
     const changed = item.keys.filter((key) => changedKeys.has(key));
     if (changed.length) group.append(svgNode("circle", {cx: x(item.u), cy: y(item.v),
-      r: 9 * unit, fill: "none", stroke: "#b01b6a", "stroke-width": 2 * unit,
+      r: 9 * unit, fill: "none", stroke: color.changed, "stroke-width": 2 * unit,
       class: "changed-ring", "data-keys": changed.join(" ")}));
     group.append(circle);
     if (item.caption) {
       const caption = svgNode("text", {x: x(item.u) + 8 * unit, y: y(item.v) - 8 * unit,
-        "font-size": 16 * unit, ...(away ? {fill: "#c62828"} : {})});
+        "font-size": 16 * unit, ...(away ? {fill: color.blocked, style: `fill:${color.blocked}`} : {})});
       caption.textContent = item.caption;
       group.append(caption);
       captions.push([caption, circle]);
