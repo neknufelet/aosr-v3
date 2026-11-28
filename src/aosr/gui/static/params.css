@@ -1,38 +1,34 @@
-/* 「所有參數」頁（#1343）：色票照設計系統外框的暗色那一組；外框合併前先用這一份小檔，不碰 style.css。 */
-:root{--bg:#1f2226;--panel:#262a2e;--sunk:#1b1e21;--line:#363b40;--ink:#e3e5e6;--soft:#959ca2;--faint:#5f666c;
---acc:#ef8a2e;--bad:#e2776a;--sans:Lato,"Noto Sans TC",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,monospace;color-scheme:dark}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font:14px/1.5 var(--sans);color:var(--ink);background:var(--bg)}
-main{max-width:1180px;margin:0 auto;padding:24px 16px 48px}
-a{color:var(--acc)}
-h1{font-size:20px;font-weight:600;margin-bottom:4px}
-.say{color:var(--soft)}
-.faint{color:var(--faint);font-size:12.5px;margin-top:2px}
-#message:empty{display:none}
-#message.bad{color:var(--bad)}
-section{margin-top:26px}
-h2{font:500 12px var(--sans);color:var(--soft);letter-spacing:.12em;padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
-h2 a{font-size:12px;letter-spacing:0}
-.wrap{overflow-x:auto}
-table{width:100%;min-width:960px;border-collapse:collapse;font-size:13px;table-layout:fixed}
-.c-name{width:10em}.c-value{width:9em}.c-unit{width:6em}.c-range{width:11em}.c-key{width:15.5em}.c-from{width:14em}
-th{color:var(--soft);font-weight:500;text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
-tr:hover td{background:var(--panel)}
-td.key,td.from{font-family:var(--mono);font-size:12px;color:var(--soft)}
-td.value{font-family:var(--mono);color:var(--acc);white-space:nowrap}
-td.value.none{font-family:var(--sans);color:var(--ink)}
-td.blurb{color:var(--soft)}
-td.key,td.from{overflow-wrap:anywhere}
-details.models{margin-top:30px;border-top:1px solid var(--line);padding-top:10px}
-details.models>summary{cursor:pointer;font:500 13px var(--sans);color:var(--soft);letter-spacing:.12em}
-article.model{padding:12px 0;border-bottom:1px solid var(--line)}
-article.model h3{font-size:14px;font-weight:600;margin-bottom:2px}
-ul.mparams{list-style:none;margin:6px 0;font-family:var(--mono);font-size:12px;color:var(--ink)}
-p.mline{font-size:13px;margin-top:3px}
-.mlabel{color:var(--soft);margin-right:8px}
-.mat{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-left:4px}
-div.mrefs{margin-top:6px;font-size:12.5px}
-div.mrefs ul{list-style:none;margin-top:2px}
-div.mrefs li{color:var(--ink);overflow-wrap:anywhere}
-h3.msub{font:500 13px var(--sans);color:var(--soft);margin-top:20px;letter-spacing:.08em}
+/* 「所有參數」頁（#1343）：色票與外框用 app.css（#1369 套上外框）；這份只管這一頁的表格與模型清單。 */
+.params-page{max-width:1180px;width:100%;margin:0 auto;padding:24px 16px 48px;min-width:0}
+:where(.params-page h1,.params-page h2,.params-page h3,.params-page p,.params-page ul){margin:0;padding:0}
+.params-page h1{font-size:20px;font-weight:600;margin-bottom:4px}
+.params-page .say{color:var(--soft)}
+.params-page .faint{color:var(--faint);font-size:12.5px;margin-top:2px}
+.params-page #message:empty{display:none}
+.params-page #message.bad{color:var(--bad)}
+.params-page section{margin-top:26px}
+.params-page h2{font:500 12px var(--sans);color:var(--soft);letter-spacing:.12em;padding-bottom:6px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
+.params-page h2 a{font-size:12px;letter-spacing:0}
+.params-page .wrap{overflow-x:auto}
+.params-page table{width:100%;min-width:960px;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.params-page .c-name{width:10em}.c-value{width:9em}.c-unit{width:6em}.c-range{width:11em}.c-key{width:15.5em}.c-from{width:14em}
+.params-page th{color:var(--soft);font-weight:500;text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.params-page td{padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.params-page tr:hover td{background:var(--panel)}
+.params-page td.key,.params-page td.from{font-family:var(--mono);font-size:12px;color:var(--soft)}
+.params-page td.value{font-family:var(--mono);color:var(--acc);white-space:nowrap}
+.params-page td.value.none{font-family:var(--sans);color:var(--ink)}
+.params-page td.blurb{color:var(--soft)}
+.params-page td.key,.params-page td.from{overflow-wrap:anywhere}
+.params-page details.models{margin-top:30px;border-top:1px solid var(--line);padding-top:10px}
+.params-page details.models>summary{cursor:pointer;font:500 13px var(--sans);color:var(--soft);letter-spacing:.12em}
+.params-page article.model{padding:12px 0;border-bottom:1px solid var(--line)}
+.params-page article.model h3{font-size:14px;font-weight:600;margin-bottom:2px}
+.params-page ul.mparams{list-style:none;margin:6px 0;font-family:var(--mono);font-size:12px;color:var(--ink)}
+.params-page p.mline{font-size:13px;margin-top:3px}
+.params-page .mlabel{color:var(--soft);margin-right:8px}
+.params-page .mat{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-left:4px}
+.params-page div.mrefs{margin-top:6px;font-size:12.5px}
+.params-page div.mrefs ul{list-style:none;margin-top:2px}
+.params-page div.mrefs li{color:var(--ink);overflow-wrap:anywhere}
+.params-page h3.msub{font:500 13px var(--sans);color:var(--soft);margin-top:20px;letter-spacing:.08em}
