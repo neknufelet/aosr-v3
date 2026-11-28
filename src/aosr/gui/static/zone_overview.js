@@ -110,6 +110,13 @@ window.zonePairMarks = () => {
   return found.state === "paired" ? found.marks : new Map();
 };
 window.zonePartnerWords = item => partnerWords(item);
+// 考卷用：照指定大小與配對記號（"pair" 成對、"missed" 沒配成、null 沒有）畫一區，量字與記號排得開不開（#1338）。不改現在的配對。
+window.zoneShapeFor = (item, width, height, mark) => {
+  const saved = pairing;
+  const partner = {...item, wall: item.wall === "y0" ? "yL" : "y0", id: `mirror/${item.id}`};
+  pairing = mark ? {marks: new Map([[item.id, mark === "missed" ? {missed: true} : {partner, shape: "hexagon"}]])} : null;
+  try { return zoneShape(item, 0, 0, width, height); } finally { pairing = saved; }
+};
 // 交給推法的那幾區：四面牆照前、後、左、右，每面照號碼，扣掉門窗。
 function ruleZones(faces, roles) { return WALL_ORDER.flatMap(role => faces[roles[role]].filter(item => !item.opening)); }
 // 六面全部由程式最佳化的區（清單卡管的）：四面牆照前後左右，再來天花、地板。

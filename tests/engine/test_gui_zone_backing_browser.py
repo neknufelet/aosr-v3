@@ -251,16 +251,7 @@ def _laid_apart(zone: Locator) -> None:
         const box = node => { const b = node.getBBox(); return {name: node.getAttribute('class') || node.tagName, x: b.x, y: b.y, r: b.x + b.width, b: b.y + b.height}; };
         const parts = [...group.querySelectorAll('.zv-badge, .zv-search-label, .zv-backing-label, .zv-pair-mark, .zv-missed-bg, .zv-pair-words:not(.zv-hide)')];
         return [box(group.querySelector('.zv-fill')), ...parts.map(box)]; }"""))
-    fill, parts = boxes[0], boxes[1:]
-    assert any(part["name"] == "zv-backing-label" for part in parts), parts
-    for part in parts:
-        assert fill["x"] - 0.5 <= part["x"] and part["r"] <= fill["r"] + 0.5 and fill["y"] - 0.5 <= part["y"] and part["b"] <= fill["b"] + 0.5, (part, fill)
-    # 「沒配成一對」黑條本來就墊在那一句底下：兩個算同一件，不互比。
-    apart = [part for part in parts if part["name"] not in ("zv-pair-words zv-missed-words",)]
-    for index, first in enumerate(apart):
-        for second in apart[index + 1:]:
-            overlap = min(first["r"], second["r"]) - max(first["x"], second["x"]) > 0.5 and min(first["b"], second["b"]) - max(first["y"], second["y"]) > 0.5
-            assert not overlap, (first, second)
+    _apart(boxes)
 
 
 def test_long_backing_name_is_cut_inside_the_zone(tmp_path: Path, browser: Browser) -> None:
@@ -298,4 +289,41 @@ def test_ceiling_with_a_backing_names_it_on_the_plan(tmp_path: Path, browser: Br
         zone = page.locator("#zone-map [data-wall='ceiling'][data-zone='auto1']")
         expect(zone.locator(".zv-backing-label")).to_have_text("背後 VPR")
         expect(zone.locator("title")).to_contain_text("背後 VPR")
+        assert base
+
+
+# 頁面給考卷的畫一區口（window.zoneShapeFor），用指定的大小與配對記號重畫背後換成 VPR 的那一區、量各部位的框（重現審查那幾種排法）。
+DRAW = """([wall, key, width, height, mark]) => {
+    const item = {wall, key, id: `${wall}/${key}`, label: {number: 1, numberText: '①', name: '一區'}, zone: {material: {}, area: 'rectangle'},
+                  method: 'search', shown: 'search'};
+    const group = window.zoneShapeFor(item, width, height, mark);
+    const map = document.getElementById('zone-map'); (map.tagName.toLowerCase() === 'svg' ? map : map.querySelector('svg')).append(group);
+    const box = node => { const b = node.getBBox(); return {name: node.getAttribute('class') || node.tagName, x: b.x, y: b.y, r: b.x + b.width, b: b.y + b.height}; };
+    const parts = [...group.querySelectorAll('.zv-badge, .zv-search-label, .zv-backing-label, .zv-pair-mark, .zv-missed-bg, .zv-pair-words:not(.zv-hide)')];
+    const found = [box(group.querySelector('.zv-fill')), ...parts.map(box)];
+    group.remove();
+    return found; }"""
+
+
+def _apart(boxes: list[dict[str, float]]) -> None:
+    """第一個是那一區的底，其餘部位都要在底裡面、而且兩兩不疊（「沒配成一對」黑條本來就墊在那一句底下，不互比）。"""
+    fill, parts = boxes[0], boxes[1:]
+    assert any(part["name"] == "zv-backing-label" for part in parts), parts
+    for part in parts:
+        assert fill["x"] - 0.5 <= part["x"] and part["r"] <= fill["r"] + 0.5 and fill["y"] - 0.5 <= part["y"] and part["b"] <= fill["b"] + 0.5, (part, fill)
+    apart = [part for part in parts if part["name"] != "zv-pair-words zv-missed-words"]
+    for index, first in enumerate(apart):
+        for second in apart[index + 1:]:
+            overlap = min(first["r"], second["r"]) - max(first["x"], second["x"]) > 0.5 and min(first["b"], second["b"]) - max(first["y"], second["y"]) > 0.5
+            assert not overlap, (first, second)
+
+
+def test_backing_line_never_sits_on_the_badge_or_pair_marks(tmp_path: Path, browser: Browser) -> None:
+    """窄區（80 × 100，號碼圈會壓到整句）、成對（六角形記號）、沒配成（黑條）、沒有記號：背後那一行與號碼圈、做法字、記號都不疊（#1338 審查）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _vpr_applied(page)
+        for width, height, mark in [(80, 100, None), (80, 140, "pair"), (190, 140, "pair"), (190, 140, "missed"), (120, 140, None)]:
+            _apart(cast(list[dict[str, float]], page.evaluate(DRAW, [ZONE[0], ZONE[1], width, height, mark])))
         assert base
