@@ -336,6 +336,21 @@ def test_pytest_child_does_not_inherit_extra_options() -> None:
     assert child == {"KEPT": "1", "PYTHONDONTWRITEBYTECODE": "1"}
 
 
+def test_command_line_run_uses_few_workers_unless_told(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """抓不給工人數就照機器核數開滿：機器忙時開子行程的考卷會逾時、收據假紅，所以不給就開 4 個，給了照給的。"""
+    seen: list[int | None] = []
+
+    def fake_run(root: Path, *, jobs: int | None) -> int:
+        seen.append(jobs)
+        return CLEAN
+
+    monkeypatch.setattr(subject, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(subject, "run", fake_run)
+    assert subject.main([]) == CLEAN
+    assert subject.main(["--jobs", "2"]) == CLEAN
+    assert seen == [4, 2]
+
+
 def test_command_line_gate_and_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """抓命令列接錯：gate 把指令與目錄原樣交下去、有理由回 1；清單空的回 2 不回 0。"""
     monkeypatch.chdir(tmp_path)

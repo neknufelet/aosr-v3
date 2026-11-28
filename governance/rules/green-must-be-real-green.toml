@@ -160,7 +160,8 @@ prefix = "tests."
 # 2054→2063：#1077 立卡 child-process-tests-forward-cpu-pins——後設回合 7 題、綠樹 2 題；單行程 collect-only 逐檔加總實收 2063，未跑全套。
 # 2063→2082：#1076 拆樹打包那條路 19 題（全新 repo 還原含控制組、髒樹照擋三種、打包驗證核頭失敗三種、PR 開著、PR 查不到、不在派工資料夾兩種、沒掛分支、零顆不打包、沒旗標提示三種與髒樹不提示兩種、命令列接線）；治理籃單行程 collect-only 逐檔加總實收 2082，未跑全套。
 # 2082→2189：#1359 推之前跑釘值考卷並留收據、push 那一行缺收據就擋 64 題；單行程 collect-only 逐檔加總實收 2189，未跑全套。
-collected_floor = 2189
+# 2189→2190：#1367 釘值考卷不給工人數時預設開 4 個（機器忙時開滿會假紅）1 題；單行程 collect-only 逐檔加總實收 2190，未跑全套。
+collected_floor = 2190
 
 [[junit.bucket]]
 prefix = "tests.engine."
