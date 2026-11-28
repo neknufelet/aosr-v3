@@ -11,7 +11,12 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import STATIC, GuiSettings, create_app
 
-ADOPTED = {  # 已換新外框的頁 → 它的腳本前綴
+# 方案輸入頁（#1360）的腳本檔名不共用一個前綴（而且 app*.js 會掃到外框自己的 app_shell.js），照 index.html 列整份。
+INPUT_PAGE_SCRIPTS = ("plan.js", "measured.js", "walls.js", "zone_names.js", "elevation.js", "zone_modes.js", "zone_limits.js",
+                      "check_state.js", "zone_rules.js", "material-kind.js", "zone_overview.js", "wall_section.js",
+                      "room_facts.js", "home.js", "app.js")
+ADOPTED: dict[str, str | tuple[str, ...]] = {  # 已換新外框的頁 → 它的腳本前綴（或整份腳本檔名）
+    "/": INPUT_PAGE_SCRIPTS,
     "/room-model": "room_model",
     "/gradient": "gradient",
     "/search-start": "search_start",
@@ -53,11 +58,16 @@ def test_adopted_pages_use_the_new_frame_and_keep_every_script_id(tmp_path: Path
             links = re.findall(r'<link rel="stylesheet" href="/static/([^"]+)"', html)
             assert links[0] == "app.css" and "style.css" not in links
             scripts = re.findall(r'<script src="/static/([^"]+)"', html)
-            assert "app_shell.js" in scripts and '<body class="app">' in html
+            # body 上可以還有別的屬性（方案輸入頁的 data-input-start 是開頁那道門），class 要是 app。
+            assert "app_shell.js" in scripts and re.search(r'<body class="app"[ >]', html), path
             ids = set(re.findall(r'id="([^"]+)"', html))
-            for script in STATIC.glob(f"{prefix}*.js"):
+            files = [STATIC / name for name in prefix] if isinstance(prefix, tuple) else sorted(STATIC.glob(f"{prefix}*.js"))
+            # 列整份的頁：一支腳本取的節點可能是同一頁另一支腳本生的，「是不是腳本自己生的」照整頁的腳本一起判。
+            page_code = "\n".join(script.read_text(encoding="utf-8") for script in files)
+            for script in files:
                 code = script.read_text(encoding="utf-8")
                 wanted = set(re.findall(r'(?:\$|\bbyId)\("([\w-]+)"\)', code))
+                code = page_code if isinstance(prefix, tuple) else code
                 wanted -= set(re.findall(r'if \((?:\$|byId)\("([\w-]+)"\)\)', code))  # 先問在不在的是腳本自己生的節點
                 # 字串在取元素以外的地方也出現（例如 toggle("x", …)、.id = "x"）：那是腳本自己生的節點
                 wanted = {name for name in wanted

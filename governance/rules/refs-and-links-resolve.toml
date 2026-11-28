@@ -125,13 +125,13 @@ reason = "刻意不進版控的產出物：pytest 每一跑自己產的 junit �
 path = "governance/receipts/shard/junit.xml"
 reason = "分片正式考卷的執行期產物，抄寫員在結束當下綁定雜湊，收尾只認包裡這一份；不進版控；切換或取消分片時 verify 不再引它，這一筆就會紅、要連卡一起改。"
 [by_design.cited_in]
-".github/workflows/verify.yml" = 10
+".github/workflows/verify.yml" = 12
 
 [[by_design]]
 path = "governance/receipts/shard/pytest.args"
 reason = "分片清點當下產生的考卷參數檔，執行期由清點工具新建，收尾重算逐位元組核對；不進版控；切換或取消分片時 verify 不再引它，這一筆就會紅、要連卡一起改。"
 [by_design.cited_in]
-".github/workflows/verify.yml" = 5
+".github/workflows/verify.yml" = 6
 
 
 # ── 只活在必紅樣本迷你樹裡的宣告檔（那幾支檢查明訂真的 git 工作樹根出現它就回 2） ──

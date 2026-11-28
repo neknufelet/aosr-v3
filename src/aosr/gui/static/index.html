@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>房間方案輸入</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/home.css">
   <link rel="stylesheet" href="/static/zone_overview.css">
+  <script src="/static/app_shell.js" defer></script>
   <script src="/static/plan.js" defer></script>
   <script src="/static/measured.js" defer></script>
   <script src="/static/walls.js" defer></script>
@@ -23,10 +24,10 @@
   <script src="/static/home.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
-<body data-input-start="loading">
-  <main>
+<body class="app" data-input-start="loading">
+  <main class="input-main">
     <header id="input-bars">
-      <nav aria-label="網站導覽" class="input-nav"><a href="#input-bars" aria-current="page">方案輸入</a>
+      <nav aria-label="這一頁" class="input-nav"><a href="#input-bars" aria-current="page">方案輸入</a>
         <a href="#zone-page" id="nav-zones">這間房貼什麼</a><a href="/materials">材料庫</a>
         <a href="/search-start">找喇叭和座位的位置</a><a href="/gradient">程式最佳化（挑材料）</a></nav>
       <div class="bar-row">
@@ -74,8 +75,8 @@
     <section id="scheme-section" class="room-step" aria-labelledby="room-step-title">
       <h2 id="room-step-title"><span class="step-no" aria-hidden="true">1</span><span class="step-title">房間和擺位</span></h2>
       <p id="scheme-archive-notice" class="notice" aria-live="polite" hidden></p>
-      <div class="roomrow">
-        <div class="card room-plan">
+      <div class="roomrow app-cols">
+        <div class="card room-plan app-center">
           <div class="viewrow"><span id="plan-views-title">看哪一張圖</span><span class="seg" id="plan-views" role="group" aria-labelledby="plan-views-title">
             <button type="button" id="view-plan-xy" data-view="plan-xy" aria-pressed="true">平面</button><button type="button" id="view-plan-xz" data-view="plan-xz" aria-pressed="false">側面</button><button type="button" id="view-zoom-xy" data-view="zoom-xy" aria-pressed="false">聆聽區平面放大</button><button type="button" id="view-zoom-xz" data-view="zoom-xz" aria-pressed="false">聆聽區側面放大</button></span></div>
           <div class="plan-frame" id="plan-frame" data-view="plan-xy">
@@ -88,7 +89,7 @@
           </div>
           <p id="plan-detail" aria-live="polite"></p>
         </div>
-        <div id="input-setup" class="card facts" role="group" aria-label="這間房現在">
+        <div id="input-setup" class="card facts app-left" role="group" aria-label="這間房現在">
           <div id="room-result" class="last" data-state="never"><span class="k" id="room-result-title">還沒算過</span><span id="room-result-text"></span><a id="room-result-link" hidden>看結果 ▸</a></div>
           <div class="fact" id="fact-room"><span class="k">房間</span>
             <div class="v"><span id="fact-room-text"></span><small id="fact-depth-text"></small></div>
@@ -151,8 +152,8 @@
       <h2 id="wall-step-title"><span class="step-no" aria-hidden="true">2</span><span class="step-title">牆上切區</span>
         <span class="say">在牆上拖框切一區</span></h2>
       <div id="elevation-panel">
-        <div class="cutrow">
-          <div class="card elev">
+        <div class="cutrow app-cols">
+          <div class="card elev app-center">
             <div class="walls-row">
               <div id="elevation-walls" role="group" aria-label="看哪一面"></div>
               <div id="elevation-symmetry" role="group" aria-labelledby="elevation-symmetry-title">
@@ -176,7 +177,7 @@
             <p id="elevation-note" aria-live="polite"></p><div id="elevation-selected"></div>
             <p class="legend" id="elevation-legend"><span><i class="sw zone-mode-search"></i>由程式最佳化</span><span><i class="sw zone-mode-fixed"></i>指定貼一種</span><span><i class="sw zone-mode-keep_original"></i>保留原樣</span><span>實線：畫的框；虛線：自動補的區</span><span><i class="sw-mirror"></i>點劃線：鏡子</span></p>
           </div>
-          <div class="card side" id="elevation-list">
+          <div class="card side app-left" id="elevation-list">
             <h3 id="elevation-list-title"></h3>
             <div id="elevation-list-notes"></div>
             <div id="elevation-list-zones"></div>

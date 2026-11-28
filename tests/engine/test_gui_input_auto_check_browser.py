@@ -245,7 +245,9 @@ def test_a_plan_problem_turns_the_top_bar_red_and_jumps_to_the_plan(tmp_path: Pa
         expect(page.locator("#messages")).to_contain_text("座標超出房間")
         expect(page.locator("#messages")).to_be_visible()
         page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
-        expect(page.locator(".room-plan")).not_to_be_in_viewport()
+        # 先確定平面圖已經捲出畫面（#1360 新外框兩段並排、頁變短，捲到底時平面圖卡底下那一列長寬高格子還露在頂條後面一點，
+        # 所以看圖本身）；跳過去之後圖要回到畫面裡。
+        expect(page.locator("#plan-xy")).not_to_be_in_viewport()
         go.click()
         expect(page.locator("#plan-xy")).to_be_in_viewport()
         _commit(page, "#speaker-left-x", "1.2")

@@ -486,9 +486,10 @@ def test_toggle_only_edits_design_and_shows_both_states(tmp_path: Path, browser:
             _settled(page)
             expect(pressed).to_have_attribute("aria-pressed", "true")
             expect(released).to_have_attribute("aria-pressed", "false")
-            expect(pressed).to_have_css("color", "rgb(255, 255, 255)")
-            expect(released).to_have_css("background-color", "rgb(255, 255, 255)")
-            expect(pressed).to_have_css("background-color", "rgb(11, 58, 74)")
+            # 深底（#1360）：按下的那顆亮底深字（--ink 底、--sunk 字），沒按的是面板色（--panel）。
+            expect(pressed).to_have_css("color", "rgb(27, 30, 33)")
+            expect(released).to_have_css("background-color", "rgb(38, 42, 46)")
+            expect(pressed).to_have_css("background-color", "rgb(227, 229, 230)")
         assert not page.evaluate("runEdited")
         page.locator("#zone-page-open").click()
         expect(page.locator("#zone-page-unsaved")).to_be_visible()

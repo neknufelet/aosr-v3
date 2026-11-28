@@ -112,12 +112,14 @@ async function canLeaveForm() {
 }
 function bindBars() {
   $("nav-zones").onclick = event => { event.preventDefault(); window.openZoneOverview(); };
-  document.querySelector(".input-nav").addEventListener("click", event => {
+  const guardLeave = event => {
     const link = event.target.closest("a");
     if (!link || link.hash || !formHasEdits() || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     action(async () => { if (await canLeaveForm()) location.assign(link.href); });
-  });
+  };
+  // 外框的頂列與左功能列（app_shell.js 先載、先長出來）跟頁內那一排一樣：有沒存的改動先問。
+  for (const nav of document.querySelectorAll(".input-nav, .app-rail, .app-top")) nav.addEventListener("click", guardLeave);
   $("scheme-menu-button").onclick = toggleMenu;
   $("scheme-menu-button").disabled = false;
   $("scheme-menu-button").onkeydown = event => {

@@ -46,7 +46,7 @@ prepare_run = "uv run python -m governance.status.record_step --name prepare --o
 finalizer_jobs = { verify = { preparation_job = "timing-history", preparation_run = "uv run python -m governance.status.record_step --name timing_history --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_history", preparation_output = "${{ needs.timing-history.outputs.snapshot }}", registry = "governance/verify-shards.toml", job_if = "${{ always() }}", step_if = "${{ always() }}", verdict_env_name = "AOSR_FINALIZER_NEEDS", verdict_env_value = "${{ toJSON(needs) }}", verdict_run = "uv run python -m governance.status.record_step --name green_must_be_real_green --out-dir governance/receipts/steps -- uv run python -m governance.checks.green_must_be_real_green --scan-root ." } }
 
 # 必要檢查的 PR 事件與禁用過濾器；job 名依 required-status-checks.txt 核對。
-required_pull_request_events = { timing-history = ["opened", "synchronize", "reopened"], shard-a = ["opened", "synchronize", "reopened"], shard-b = ["opened", "synchronize", "reopened"], verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"], shard-c = ["opened", "synchronize", "reopened"], shard-d = ["opened", "synchronize", "reopened"], shard-e = ["opened", "synchronize", "reopened"] }
+required_pull_request_events = { timing-history = ["opened", "synchronize", "reopened"], shard-a = ["opened", "synchronize", "reopened"], shard-b = ["opened", "synchronize", "reopened"], verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"], shard-c = ["opened", "synchronize", "reopened"], shard-d = ["opened", "synchronize", "reopened"], shard-e = ["opened", "synchronize", "reopened"], shard-f = ["opened", "synchronize", "reopened"] }
 forbidden_pull_request_filters = ["paths", "paths-ignore", "branches", "branches-ignore"]
 # job 的 timeout-minutes 上限（分鐘）。缺席等於沒有上限、可以無聲卡死；
 # 上限開太寬等於沒有上限。今天的數字用實跑時間定，不是想像的：
@@ -315,6 +315,10 @@ push_max_attempts = 5
 "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
 
 [settings.allowed_required_step_ifs.shard-e]
+"儲存瀏覽器安裝包快取（僅未命中）" = "steps.apt_archives_cache.outputs.cache-hit != 'true'"
+"上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
+
+[settings.allowed_required_step_ifs.shard-f]
 "儲存瀏覽器安裝包快取（僅未命中）" = "steps.apt_archives_cache.outputs.cache-hit != 'true'"
 "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
 

@@ -655,8 +655,9 @@ def test_disabled_apply_uses_the_main_button_colours(tmp_path: Path, browser: Br
         page.locator("#zone-whole-yL").click()
         apply = page.locator("#zone-panel-apply")
         expect(apply).to_be_disabled()
-        expect(apply).to_have_css("background-color", "rgb(143, 155, 156)")
-        expect(apply).to_have_css("color", "rgb(255, 255, 255)")
+        # 深底（#1360）：停用的主要鈕是實心的細線色底（--line）配次要字色（--soft），不靠半透明變淡。
+        expect(apply).to_have_css("background-color", "rgb(54, 59, 64)")
+        expect(apply).to_have_css("color", "rgb(160, 167, 173)")
 
 
 def test_picker_partial_candidate_is_added_only_to_the_remaining_zone(tmp_path: Path, browser: Browser) -> None:
