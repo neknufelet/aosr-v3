@@ -3,19 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>開始擺位搜尋</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <title>喇叭座位（擺位搜尋）</title>
+  <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/gradient.css">
   <link rel="stylesheet" href="/static/search_start.css">
+  <script src="/static/app_shell.js" defer></script>
   <script src="/static/search_start.js" defer></script>
 </head>
-<body><main>
-  <header><h1>開始擺位搜尋（第一、二階段）</h1>
-    <p><a href="/">回方案輸入頁</a>　<a href="/searches">搜尋進度清單</a>　<a href="/gradient">第三階段搜尋（牆面材料）</a></p>
-    <p>從一份方案出發，設定喇叭與座位可以擺的範圍、硬限制、預算，按「開始搜尋」。搜尋與細算要好幾小時，整台機器同時只跑一件；
-      第二階段做完可以把細算第一名放進結果清單、打開結果頁（第一階段的入選還不能放進結果清單，看進度頁的入選清單）。</p>
-    <p id="connection" aria-live="polite">正在讀取…</p>
-  </header>
+<body class="app">
+<div class="app-cols">
+  <aside class="app-left">
+    <p class="page-links"><a href="/">回方案輸入頁</a>　<a href="/searches">搜尋進度清單</a></p>
+    <div data-top-tools><p id="connection" aria-live="polite">正在讀取…</p></div>
+    <details class="about"><summary>這一頁做什麼</summary>
+      <p>從一份方案出發，設定喇叭與座位可以擺的範圍、硬限制、預算，按「開始搜尋」。搜尋與細算要好幾小時，整台機器同時只跑一件；
+        第二階段做完可以把細算第一名放進結果清單、打開結果頁（第一階段的入選還不能放進結果清單，看進度頁的入選清單）。</p></details>
 
   <section id="scheme-block">
     <h2>1. 選方案</h2>
@@ -120,12 +122,14 @@
     <p id="form-message" aria-live="polite"></p>
   </section>
 
+  </aside>
+  <main class="app-center">
   <section id="preview-block" hidden>
     <h2>3. 預覽</h2>
     <ul id="preview-list"></ul>
     <details><summary>交給搜尋命令列的設定（JSON）</summary><pre id="preview-json"></pre></details>
     <p id="busy-line" class="notice" hidden></p>
-    <p><button id="start" type="button">開始搜尋</button></p>
+    <p><button id="start" type="button" class="primary">開始搜尋</button></p>
     <p id="start-message" aria-live="polite"></p>
   </section>
 
@@ -151,5 +155,7 @@
     <p id="job-message" aria-live="polite"></p>
     <details><summary>每一步的輸出最後幾行</summary><div id="job-steps"></div></details>
   </section>
-</main></body>
+  </main>
+</div>
+</body>
 </html>

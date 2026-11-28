@@ -1,8 +1,10 @@
-/* 開始擺位搜尋頁（#700）：共用第三階段頁的選項格；兩格一對的範圍排成一行。 */
-.pair{display:flex;align-items:center;gap:.3rem}
+/* 喇叭座位頁（開始擺位搜尋，#700；#1287 換新外框）：共用挑材料頁的選項格；兩格一對的範圍排成一行。 */
+.pair{display:flex;align-items:center;gap:.3rem;color:var(--faint)}
 .pair input{width:6.5rem;min-width:0}
 .box-row{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.2rem 0}
 .box-row input{width:5.5rem}
-.box-row span{color:#46586a;font-size:.9rem}
+.box-row span{color:var(--soft);font-size:12.5px}
 #facts-list,#preview-list{margin:.3rem 0;padding-left:1.2rem}
 #job-steps pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.app-left h3{font-size:13px;margin:16px 0 6px}
+.app-left h4{font-size:12.5px;font-weight:500;color:var(--soft);margin:12px 0 4px}

@@ -1,31 +1,44 @@
-/* 第三階段搜尋頁（#1082 段 1-6b）。共用樣式把 label 設成橫排；這一頁選項欄名長，改直排。 */
-main [hidden]{display:none!important}
-.option-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.4rem 1rem}
-.option-grid label{flex-direction:column;align-items:stretch;margin:.3rem 0}
+/* 挑材料頁（第三階段搜尋，#1082 段 1-6b；#1287 換新外框）：左欄選方案與開跑選項，中間預覽、替身、開跑與搜尋清單。
+   顏色全用 app.css 的色票。喇叭座位頁（search_start）也連這一份。 */
+.app [hidden]{display:none!important}
+.app-cols{--left:400px}
+[data-top-tools]{display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--soft)}
+[data-top-tools] p{margin:0}
+.app-left .page-links{margin:0 0 6px;font-size:13px}
+.app-left .about{margin:0 0 10px}
+.app-left .about p{color:var(--soft);font-size:12.5px}
+.app-left section{margin:0 0 16px}
+.app-center section{margin:0 0 26px}
+.app-center h2{margin-top:0;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.app h2{font-size:15px}
+/* 選項欄名長，改直排 */
+.option-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.2rem 1rem}
+.option-grid label{flex-direction:column;align-items:stretch;gap:3px;margin:.3rem 0;color:var(--soft);font-size:12.5px}
+.option-grid input,.option-grid select{color:var(--ink)}
 .option-grid input[type=number]{width:auto}
-.hint{color:#53636b;font-size:.92rem;margin:.2rem 0 .5rem}
-button.danger{background:#9b2c22}
-button.quiet{background:white;color:#15617b;box-shadow:inset 0 0 0 1px #15617b}
-#job-list button{padding:.3rem .7rem}
-#job-list tr.selected td{background:#e6f1f5}
-#plan-arguments,#build-log,#job-steps pre{color:#17212a;font-size:.85rem}
+.hint{color:var(--soft);font-size:12.5px;margin:.2rem 0 .5rem}
+button.danger{color:var(--bad);border-color:var(--bad)}
+button.quiet{color:var(--soft)}
+#job-list button{padding:3px 10px}
+#job-list tr.selected td{background:var(--acc-t)}
+#plan-arguments,#build-log,#job-steps pre{color:var(--soft);font-size:12px;font-family:var(--mono);background:var(--sunk);border:1px solid var(--line);padding:8px}
 #job-failures ul,#job-notes ul{margin:.3rem 0;padding-left:1.2rem}
 #job-failures li{white-space:pre-wrap;overflow-wrap:anywhere}
-#depth-table input{width:7rem}
-.mode-search{font-weight:600;color:#15617b}
-@media (max-width:640px){main{padding:.75rem}header,section{padding:.9rem}}
-.path{overflow-wrap:anywhere;font-family:ui-monospace,monospace;font-size:.82rem}
-/* 深度上限逐組（#1082 段 2-4）：放得下的灰字，放不下的橘字（這一組這一跑不換過去）。 */
+#depth-table input{width:6.5rem}
+.mode-search{font-weight:600;color:var(--acc)}
+.path{overflow-wrap:anywhere;font-family:var(--mono);font-size:12px}
+/* 深度上限逐組（#1082 段 2-4）：放得下的次要字，放不下的警告色（這一組這一跑不換過去）。 */
 #plan-table td.depth-cell p{margin:.1rem 0}
-#plan-table td.depth-cell .note{color:#46586a}
-#plan-table td.depth-cell .limit-warn{color:#9a5b00}
+#plan-table td.depth-cell .note{color:var(--soft)}
+#plan-table td.depth-cell .limit-warn{color:var(--warn)}
 #job-depths .depth-cell p{margin:.1rem 0}
-#job-depths .note{color:#46586a}
-#job-depths .limit-warn{color:#9a5b00}
-/* 方案裡有「鋼板直接貼在棉上」的構造時的說明（#1208 第 3 支）：樣子同結果頁「各類結果」那一塊——左邊細灰線、「為什麼」可展開。 */
-.ref-note{margin:.3rem 0 .6rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid #b9c7cc;color:#33434b;text-align:left;list-style:none}
+#job-depths .note{color:var(--soft)}
+#job-depths .limit-warn{color:var(--warn)}
+/* 方案裡有「鋼板直接貼在棉上」的構造時的說明（#1208 第 3 支）：左邊細線、「為什麼」可展開。 */
+.ref-note{margin:.3rem 0 .6rem;padding:.3rem .6rem;line-height:1.5;border-left:3px solid var(--line-strong);color:var(--ink);text-align:left;list-style:none}
 .ref-note details{display:inline;margin:0}
-.ref-note summary{display:inline;cursor:pointer;font-weight:400;color:#17616b;text-decoration:underline;text-underline-offset:3px;margin-left:.5em;padding:0;white-space:nowrap}
+.ref-note summary{display:inline;cursor:pointer;font-weight:400;color:var(--fix);text-decoration:underline;text-underline-offset:3px;margin-left:.5em;padding:0;white-space:nowrap}
 .ref-note summary::after{content:" ▸"}
 .ref-note details[open] summary::after{content:" ▾"}
-.ref-note details p{margin:.35rem 0 .1rem;color:#5b6a70;max-width:62em}
+.ref-note details p{margin:.35rem 0 .1rem;color:var(--soft);max-width:62em}
+#depth-table td:first-child,#depth-table th:first-child{white-space:nowrap}
