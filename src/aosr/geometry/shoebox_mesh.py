@@ -23,6 +23,8 @@ GMSH_TETRAHEDRON_4_TYPE = 4
 MeshRectangle: TypeAlias = tuple[str, tuple[float, float], tuple[float, float]]
 WallPartitions: TypeAlias = Mapping[Wall, Sequence[MeshRectangle]]
 _FragmentPatch: TypeAlias = tuple[Wall, MeshRectangle, tuple[int, ...]]
+# 不同牆的分界差到這麼近，網格工具會把兩點合成一點（#1354）；先在這裡合成同一個值。
+_COINCIDENT_EDGE_M = 1e-6
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,49 @@ def _checked_partitions(room: Room, partitions: WallPartitions) -> None:
                              for _, (a, b), (c, d) in rectangles)
                 if owners != 1:
                     raise ValueError("分區必須蓋滿整面且互不重疊")
+
+
+def _merged_near_edges(room: Room, partitions: WallPartitions) -> WallPartitions:
+    """同一軸上差不到 ``_COINCIDENT_EDGE_M`` 的分界合成一個值（#1354）。
+
+    例如地板切在 x=1.9、後牆切在 x=1.8999999999999986：兩點在牆角邊上會被網格工具合成同一點，
+    釘座標時兩個閉區間互斥。只改真的撞在一起的那幾個值，其他座標一位不變；
+    合成後若某一區寬度變零就拒絕，不默默吃掉那一區。
+    """
+    values: list[set[float]] = [{0.0, room.length(axis)} for axis in range(3)]
+    for wall, rectangles in partitions.items():
+        axes = [axis for axis in range(3) if axis != wall.axis()]
+        for _, u, v in rectangles:
+            values[axes[0]].update(u)
+            values[axes[1]].update(v)
+    replace: list[dict[float, float]] = []
+    for axis, found in enumerate(values):
+        mapping: dict[float, float] = {}
+        ordered = sorted(found)
+        start = 0
+        for index in range(1, len(ordered) + 1):
+            if index < len(ordered) and ordered[index] - ordered[index - 1] < _COINCIDENT_EDGE_M:
+                continue
+            group = ordered[start:index]
+            if len(group) > 1:
+                ends = [x for x in group if x in (0.0, room.length(axis))]
+                keep = ends[0] if ends else min(group, key=lambda x: (abs(x - round(x, 9)), x))
+                mapping.update({x: keep for x in group})
+            start = index
+        replace.append(mapping)
+    if not any(replace):
+        return partitions
+    merged: dict[Wall, list[MeshRectangle]] = {}
+    for wall, rectangles in partitions.items():
+        a, b = (replace[axis] for axis in range(3) if axis != wall.axis())
+        merged[wall] = []
+        for name, (u0, u1), (v0, v1) in rectangles:
+            u = (a.get(u0, u0), a.get(u1, u1))
+            v = (b.get(v0, v0), b.get(v1, v1))
+            if not (u[0] < u[1] and v[0] < v[1]):
+                raise ValueError(f"分區邊界太近：{wall.value} 的 {name} 合成後寬度為零")
+            merged[wall].append((name, u, v))
+    return merged
 
 
 def _fragment_wall_rectangles(room: Room, partitions: WallPartitions) -> list[_FragmentPatch]:
@@ -234,6 +279,7 @@ def generate_shoebox_mesh(
     )
     if partitions:
         _checked_partitions(room, partitions)
+        partitions = _merged_near_edges(room, partitions)
     gmsh.initialize(readConfigFiles=False)
     try:
         gmsh.option.setNumber("General.Terminal", 0.0)

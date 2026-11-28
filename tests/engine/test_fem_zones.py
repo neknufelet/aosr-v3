@@ -276,3 +276,40 @@ def test_nonbinary_rectangle_edges_have_exact_closed_vertex_membership() -> None
             assert np.all((v0 <= vertices[:, :, axes[1]]) & (vertices[:, :, axes[1]] <= v1))
     # 修正幾何的共用節點後，仍必須是一張沒有裂縫的四面體／邊界網格。
     fem.assemble_p2_operators(mesh)
+
+
+def test_zone_edges_off_by_rounding_on_neighbouring_walls_still_mesh() -> None:
+    """#1354：地板切在 x=1.9、後牆切在 x=1.8999999999999986，兩點在牆角那條邊被網格合成同一點。
+
+    改前這裡拋「分區曲面的共用節點具有互斥座標範圍」；改後兩個值合成 1.9，網格照建、分區照標。
+    """
+    room = Room(6.6, 4.3, 2.8)
+    off = 6.6 - 4.7  # 1.8999999999999986，算出來的分界常見這種尾數
+    assert off != 1.9 and abs(off - 1.9) < 1e-12
+    partitions: dict[Wall, list[MeshRectangle]] = {
+        Wall.FLOOR: [("a", (0.0, 1.9), (0.0, 4.3)), ("b", (1.9, 6.6), (0.0, 4.3))],
+        Wall.YL: [("c", (0.0, off), (0.0, 2.8)), ("d", (off, 6.6), (0.0, 2.8))],
+    }
+    mesh = generate_shoebox_mesh(room, max_frequency_hz=80.0, elements_per_wavelength=5,
+                                 sound_speed_m_s=343.0, random_seed=1, partitions=partitions)
+    assert mesh.boundary_zone_ids is not None
+    floor = mesh.boundary_wall_indices == Wall.all().index(Wall.FLOOR)
+    back = mesh.boundary_wall_indices == Wall.all().index(Wall.YL)
+    assert set(mesh.boundary_zone_ids[floor]) == {"a", "b"}
+    assert set(mesh.boundary_zone_ids[back]) == {"c", "d"}
+    corner = (np.abs(mesh.nodes[:, 1] - 4.3) < 1e-12) & (np.abs(mesh.nodes[:, 2]) < 1e-12) \
+        & (np.abs(mesh.nodes[:, 0] - 1.9) < 1e-9)
+    assert corner.sum() == 1
+    assert mesh.nodes[corner, 0][0] == 1.9
+
+
+def test_zone_edges_that_collapse_a_zone_to_nothing_are_refused() -> None:
+    """合成之後若某一區寬度變零，直接拒絕，不默默吃掉那一區。"""
+    room = Room(6.6, 4.3, 2.8)
+    partitions: dict[Wall, list[MeshRectangle]] = {
+        Wall.FLOOR: [("a", (0.0, 1.9), (0.0, 4.3)), ("s", (1.9, 1.9 + 1e-9), (0.0, 4.3)),
+                     ("b", (1.9 + 1e-9, 6.6), (0.0, 4.3))],
+    }
+    with pytest.raises(ValueError, match="分區邊界太近"):
+        generate_shoebox_mesh(room, max_frequency_hz=80.0, elements_per_wavelength=5,
+                              sound_speed_m_s=343.0, random_seed=1, partitions=partitions)
