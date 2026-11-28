@@ -21,7 +21,7 @@ td[data-verdict="within_range"]{color:var(--good)}
 #categories .ref-note summary::after,#zone-improvement .ref-note summary::after{content:" ▸"}
 #categories .ref-note details[open] summary::after,#zone-improvement .ref-note details[open] summary::after{content:" ▾"}
 #categories .ref-note details p,#zone-improvement .ref-note details p{margin:.35rem 0 .1rem;color:var(--soft);max-width:62em}
-#categories .ref-tag,#zone-improvement .ref-tag{display:inline-block;padding:0 .4em;margin-right:.2em;background:var(--sunk);border:1px solid var(--c1);color:var(--c1);border-radius:4px;font-size:.9em;white-space:nowrap}
+#categories .ref-tag,#zone-improvement .ref-tag{display:inline-block;padding:0 .4em;margin-right:.2em;background:rgba(60,120,210,.16);border:1px solid var(--c1);border-radius:4px;font-size:.9em;white-space:nowrap}
 /* 重算的說明：問題一條一行（伺服器給的訊息用換行分隔），連結跟在句子後面。 */
 #fingerprint-rerun-state{white-space:pre-line}
 #fingerprint-rerun-state a,#rerun-state a{margin-left:.4rem;white-space:nowrap}

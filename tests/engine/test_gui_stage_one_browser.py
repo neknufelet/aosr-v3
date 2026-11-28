@@ -33,8 +33,12 @@ def chart_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SearchStore:
     return store
 
 
+# 兩條線的顏色照頁面色票（app.css 的 --c1、--c2，#1350 換新外框後 search_best.js 從這兩格讀），不在考卷抄色碼。
 TWO_CURVE_COLORS = """() => {
-  const colors = [[27,111,138], [192,57,43]], found = colors.map(() => false);
+  const token = (name) => { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16)); };
+  const colors = [token('--c1'), token('--c2')], found = colors.map(() => false);
+  if (colors.flat().some(Number.isNaN)) return false;
   for (const canvas of document.querySelectorAll('#best-frequency-chart canvas')) {
     const pixels = canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
     for (let i=0;i<pixels.length;i+=4) {

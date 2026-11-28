@@ -20,13 +20,13 @@
 <div class="app-cols">
   <aside class="app-left">
     <header id="page-head"><h1 id="page-title">房間計算結果</h1><p><a id="back-to-input" href="/">回方案輸入頁</a><a id="next-materials" hidden>這一間挑材料：每一面牆貼什麼</a></p>
-      <p id="server-notice" class="notice" hidden></p><p id="run-notice" class="notice" hidden></p>
       <p id="identity"></p><p id="room-line"></p><p id="speaker-setup" hidden></p>
       <p id="fingerprint-status" aria-live="polite"></p>
       <details id="header-details" hidden><summary>技術細節（計算時間、版本碼）</summary><p id="timings"></p><p id="header-technical"></p></details>
       <button id="fingerprint-rerun" hidden>用現在的程式重算</button><p id="fingerprint-rerun-state"></p></header>
   </aside>
   <main class="app-center">
+    <p id="server-notice" class="notice" hidden></p><p id="run-notice" class="notice" hidden></p>
     <p id="loading">正在讀取並核對結果（讀回時用存下的資料重評一次，確認分數沒被改過）…</p>
     <section id="rejection" hidden><h2 id="rejection-title">結果讀取失敗</h2><p id="reject-reason"></p>
       <details id="reject-detail" hidden><summary>技術細節</summary><p id="reject-technical"></p></details>
