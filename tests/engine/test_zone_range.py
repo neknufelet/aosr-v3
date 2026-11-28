@@ -35,7 +35,9 @@ MAIN = {"plan": "5ad63e325f1be6ebe6e2667ff0aae32fcdd0f5e566363606787b82d79a6490a
         "designs": "5e1e59739d1601558b2d67efc73e45180e1ec00039deb2fb1c6b453261a4d3c2",
         "ledger": "baaf346edde5911d0b575359266304d780aed23729712464d7f60b8e4c6df079",
         # #1323：labels 多了 12 筆文獻硬面的名字；#1330：再多擬合 VPR 一筆名字（拿掉它重算等於 727dec6c…，其餘逐位元組不變）
-        "preview": "caee5adb61bfcc0be76d229a3e86a2314f09a69827169d4cb74a1102fcb2b2c5",
+        # #1348：控制組方案的低頻軸由空的變成正式擺位搜尋軸（網頁搜尋讀到空的會補上），替身格子代號跟著換；
+        # 逐欄比對改動前主線（caee5adb…）只差 surrogate.slot 那一格的格子代號，其餘逐位元組不變
+        "preview": "d31203140d802eaa1bbba0ed1ee7d784ed7a3b1f12df239eb3b8ee0ab7e901ad",
         "limits": "634c0333b9cdda95b933e4c21ffc2ecbd07e6f047b8265a2f5fa48ee0d008aa8"}
 
 

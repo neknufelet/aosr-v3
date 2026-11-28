@@ -95,7 +95,12 @@ def _scheme_document(kind: str) -> dict[str, object]:
         zones["x0"] = [{"area": "rectangle", "id": "all", "u_m": [0.0, 4.0], "v_m": [0.0, 3.0],
                         "material": deepcopy(zones["x0"][0]["material"])}]
         document = document | {"scene": scene}
-    return document
+    # 網頁的搜尋讀方案時，沒有低頻軸就補正式擺位搜尋軸（#1348）；夾具直接寫上，格子跟網頁算的同一格。
+    scene = cast(dict[str, object], deepcopy(document["scene"]))
+    scene.setdefault("low_frequency_axis", LowFrequencyAxis.SEARCH_48.value)
+    if scene["low_frequency_axis"] is None:
+        scene["low_frequency_axis"] = LowFrequencyAxis.SEARCH_48.value
+    return document | {"scene": scene}
 
 
 def _scheme(kind: str = "zoned") -> Scheme:
