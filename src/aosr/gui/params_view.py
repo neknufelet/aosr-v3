@@ -13,16 +13,18 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
-from aosr.config.advanced_params import AdvancedParams, Value, load_advanced_params, resolved_default
-from aosr.config.paths import CONFIG_DIR, config_path
+from aosr.config.paths import CONFIG_DIR
+from aosr.gui.advanced_params import AdvancedParams, Value, load_advanced_params, resolved_default
 
 REGISTRY_FILE: Final = "advanced_params.toml"
+# 清單跟本套件放一起（不進 aosr/config：那會動到計算指紋）；source 指的引擎設定檔照舊在 CONFIG_DIR。
+REGISTRY: Final = Path(__file__).resolve().parent / REGISTRY_FILE
 PAGE: Final = Path(__file__).resolve().parent / "static" / "params.html"
 
 
 @cache
 def advanced_params() -> AdvancedParams:
-    return load_advanced_params(config_path(REGISTRY_FILE))
+    return load_advanced_params(REGISTRY)
 
 
 def advanced_default(key: str) -> Value | None:

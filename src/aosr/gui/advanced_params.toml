@@ -1,4 +1,5 @@
 # 網頁上「進階」類參數的一份清單（#1343，老闆 11-28「進階數據要有一份清單，順便兼設定檔」）。
+# 住 gui 底下、不放 aosr/config/data：清單只有網頁在讀，放進 config 會改計算指紋（calc-v1），讓所有舊結果被標成要重算。
 #
 # 一條參數一節 [[param]]：key（代號）、name（中文名）、unit（單位，空字串＝沒有單位）、kind（數字型別或選項）、
 # 範圍（min／max，min_open／max_open 為 true 表示不含那一端；或 choices 可選值；或 range_note 一句話）、

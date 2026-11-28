@@ -14,13 +14,13 @@ import pytest
 from pydantic import ValidationError
 from starlette.testclient import TestClient
 
-from aosr.config.advanced_params import AdvancedParams, load_advanced_params, resolved_default
 from aosr.config.fem_reduced import load_reduced_model_settings
 from aosr.config.material_gradient import load_material_gradient_settings
 from aosr.config.paths import CONFIG_DIR, config_path
+from aosr.gui.advanced_params import AdvancedParams, load_advanced_params, resolved_default
 from aosr.gui.app import STATIC_NAMES, GuiSettings, create_app
 from aosr.gui.gradient_plan import GradientRequest
-from aosr.gui.params_view import REGISTRY_FILE, params_listing
+from aosr.gui.params_view import REGISTRY, REGISTRY_FILE, params_listing
 from aosr.gui.zone_edit import MIN_SIDE_M, SNAP_M, zone_cut_defaults
 
 STATIC = Path(__file__).resolve().parents[2] / "src" / "aosr" / "gui" / "static"
@@ -28,11 +28,16 @@ PAGE_FILES = {"input": "index.html", "search_start": "search_start.html", "gradi
 
 
 def _registry() -> AdvancedParams:
-    return load_advanced_params(config_path(REGISTRY_FILE))
+    return load_advanced_params(REGISTRY)
 
 
 def _default(key: str) -> object:
     return resolved_default(_registry().by_key(key), CONFIG_DIR)
+
+
+def test_registry_stays_out_of_the_calculation_fingerprint() -> None:
+    """清單只有網頁讀：住 gui 底下（計算指紋扣掉 gui），搬進 aosr/config 會讓所有舊結果被標成要重算。"""
+    assert REGISTRY.parent.name == "gui" and REGISTRY.parent.parent.name == "aosr"
 
 
 def test_every_param_names_a_field_that_exists_on_its_page() -> None:
@@ -69,7 +74,7 @@ def test_sourced_defaults_equal_the_engine_settings_and_keep_their_type() -> Non
 
 
 def test_sourced_params_keep_no_number_of_their_own() -> None:
-    with config_path(REGISTRY_FILE).open("rb") as handle:
+    with REGISTRY.open("rb") as handle:
         raw = tomllib.load(handle)
     sourced = [param for param in raw["param"] if "source" in param]
     assert {param["key"] for param in sourced} >= {"gradient.max_steps", "surrogate.max_full_solves", "surrogate.stop_residual"}

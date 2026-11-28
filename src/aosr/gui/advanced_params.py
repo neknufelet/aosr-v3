@@ -1,7 +1,8 @@
 """網頁進階參數清單的唯讀載入（#1343）：一條參數的中文名、預設、單位、範圍、說明與所屬頁面。
 
-路徑必給（``docs/decisions/config-loaders-keep-path-required.md``）；正式檔是 ``config_path("advanced_params.toml")``。
-預設值只住一處：寫 ``default`` 的這份就是家；寫 ``source`` 的家在同目錄另一份引擎設定檔，``resolved_default``
+清單只有網頁在讀，所以住 gui 底下、跟這一支放一起（``advanced_params.toml``）：放進 ``aosr/config`` 會進計算指紋，
+改一個網頁預設就讓所有舊結果被標成要重算。路徑必給（同 ``docs/decisions/config-loaders-keep-path-required.md``）。
+預設值只住一處：寫 ``default`` 的這份就是家；寫 ``source`` 的家在引擎設定目錄另一份設定檔，``resolved_default``
 讀的時候現抓、這裡不抄數字；兩者都沒有的是「沒有固定值」，``default_note`` 寫白話。
 """
 from __future__ import annotations
@@ -29,7 +30,7 @@ class Page(_Frozen):
 
 
 class Source(_Frozen):
-    """預設值的家：同目錄哪一份設定檔、哪一格（點分路徑，整數段是陣列第幾個）。"""
+    """預設值的家：引擎設定目錄（``aosr/config/data``）哪一份設定檔、哪一格（點分路徑，整數段是陣列第幾個）。"""
 
     file: str = Field(pattern=r"^[a-z_]+\.toml$")
     key: str = Field(pattern=r"^[a-z_0-9]+(\.[a-z_0-9]+)*$")
