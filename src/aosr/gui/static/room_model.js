@@ -2,7 +2,9 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const TICKS_HZ = [20, 30, 40, 50, 60, 80, 100, 150, 200, 300];
-  const COLORS = ["#2a6fdb", "#e07b39", "#5fb36b", "#9b59b6"];
+  // 顏色從外框的色票讀（app.css），深底上分得開；讀不到才用後面的備用色。
+  const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  const COLORS = [css("--c1", "#6fa8dc"), css("--c2", "#ef8a2e"), css("--c3", "#8fbf7f"), css("--c4", "#b39ddb")];
   let model = null, timer = null, plot = null, activeRun = null, upload = 0;
 
   async function call(url, body) {
@@ -60,6 +62,9 @@
     $("state").textContent = data.ok ? "" : "沒過檢查，不能算";
   }
 
+  const AXIS = () => ({stroke: css("--soft", "#a0a7ad"), grid: {stroke: css("--line", "#363b40"), width: 1},
+                      ticks: {stroke: css("--line", "#363b40"), width: 1}});
+
   function draw(result) {
     $("result").hidden = false;
     if (plot) plot.destroy();
@@ -67,8 +72,8 @@
     plot = new uPlot({width: target.clientWidth || 900, height: 380, legend: {live: false},
       scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
       axes: [{label: "頻率（Hz）", splits: (u) => TICKS_HZ.filter((f) => f >= u.scales.x.min && f <= u.scales.x.max),
-              filter: (u, splits) => splits},
-             {label: "聲壓級（dB）"}],
+              filter: (u, splits) => splits, ...AXIS()},
+             {label: "聲壓級（dB）", ...AXIS()}],
       series: [{}, ...result.curves.map((curve, i) => ({label: curve.label, stroke: COLORS[i % COLORS.length], width: 1.5}))]},
       [result.frequencies_hz, ...result.curves.map((curve) => curve.spl_db)], target);
     $("modes").textContent = "模態（Hz）：" + result.modes_hz.map((f) => f.toFixed(1)).join("、");
@@ -115,6 +120,7 @@
     } catch (error) {
       if (mine !== upload) return;
       $("model").hidden = true;
+      $("preview").replaceChildren();  // 模型圖在中間欄、不在 #model 裡，讀檔失敗要自己清掉舊圖
       $("state").textContent = error.message;
     }
   });

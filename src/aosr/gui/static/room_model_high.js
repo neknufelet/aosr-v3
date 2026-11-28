@@ -2,8 +2,11 @@
 // 全部用 canvas 與內嵌 SVG 畫，不載入外部程式庫。模型代號與「檢查過沒」從 #model 的 data-id／data-ok 讀（room_model.js 寫的）。
 (() => {
   const $ = (id) => document.getElementById(id);
-  const ORDER_COLORS = {1: "#1f7a6d", 2: "#3f7fb4", 3: "#8a7bb8"};
-  const BLOCK = "#c23a3a", ROOM = "#15617b", SEAT = "#17212a", SPEAKER = "#e07b39";
+  // 顏色從外框的色票讀（app.css），深底上分得開；讀不到才用後面的備用色。
+  const css = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  const ORDER_COLORS = {1: css("--fix", "#6fb3aa"), 2: css("--c1", "#6fa8dc"), 3: css("--c4", "#b39ddb")};
+  const BLOCK = css("--bad", "#e2776a"), ROOM = css("--c1", "#6fa8dc"), SEAT = css("--ink", "#e3e5e6"), SPEAKER = css("--acc", "#ef8a2e");
+  const GRID = css("--line", "#363b40");
   const NS = "http://www.w3.org/2000/svg";
   const show = {1: true, 2: true, 3: false, blocked: true};
   let result = null, speaker = 0, timer = null, active = null, yaw = -0.9, pitch = 0.55, drag = null, generation = 0;
@@ -110,11 +113,11 @@
     const X = (v) => m.l + (tx(v) - tx(xRange[0])) / (tx(xRange[1]) - tx(xRange[0])) * (W - m.l - m.r);
     const Y = (v) => m.t + (yRange[1] - v) / (yRange[1] - yRange[0]) * (H - m.t - m.b);
     for (const v of yTicks) {
-      el(svg, "line", {x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: "#e1e9ec"});
+      el(svg, "line", {x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: GRID});
       el(svg, "text", {x: m.l - 8, y: Y(v) + 4, "text-anchor": "end"}, v);
     }
     for (const [v, label] of xTicks) {
-      el(svg, "line", {x1: X(v), x2: X(v), y1: m.t, y2: H - m.b, stroke: "#e1e9ec", "stroke-dasharray": "2 4"});
+      el(svg, "line", {x1: X(v), x2: X(v), y1: m.t, y2: H - m.b, stroke: GRID, "stroke-dasharray": "2 4"});
       el(svg, "text", {x: X(v), y: H - m.b + 18, "text-anchor": "middle"}, label);
     }
     el(svg, "text", {x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle"}, xLabel);
@@ -154,7 +157,7 @@
   }
   function drawEnergy() {
     const svg = $("high-energy"), energy = result.speakers[speaker].energy_db, hz = result.frequencies_hz;
-    const series = [["total", "總和", ROOM], ["early", "直達＋早期", "#e07b39"], ["late", "晚期", "#8a7bb8"]];
+    const series = [["total", "總和", ROOM], ["early", "直達＋早期", SPEAKER], ["late", "晚期", ORDER_COLORS[3]]];
     const values = series.flatMap(([key]) => energy[key]);
     const [lo, hi] = range(values), dbStep = nice(Math.max(hi - lo, 5), 6);
     const low = Math.floor(lo / dbStep) * dbStep, high = Math.max(Math.ceil(hi / dbStep) * dbStep, low + dbStep);
