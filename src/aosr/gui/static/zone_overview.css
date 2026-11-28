@@ -419,9 +419,11 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-builder .zv-drawer-head[hidden]{display:none}
 #zone-builder iframe{width:100%;flex:1;min-height:0;border:0}
 #zone-page .zv-main{grid-template-columns:minmax(0,1fr) clamp(350px,31vw,440px)}
-/* #1360 新外框：左邊多一條功能列（--rail）、上面多一條頂列（--top）。左右留白與欄距收窄，1440 寬時 898 寬的圖整張放得下
-   （1400 寬時圖那一欄自己左右捲一點，右欄寬照舊）；整頁高度扣掉頂列，結果列不掉出視窗，切區時的立面圖也扣掉那一條。 */
-body.app #zone-page .zv-main{gap:14px;padding-inline:14px}
+/* #1360 新外框：這一頁是整頁模式（有自己的「回房間方案輸入」），打開時收掉左功能列、只留頂列，
+   898 寬的圖與右欄照原本的寬排得下；整頁高度扣掉頂列，結果列不掉出視窗，切區時的立面圖也扣掉那一條。 */
+body.app.zone-page-open{grid-template-columns:minmax(0,1fr);background:var(--bg)}
+body.app.zone-page-open>.app-rail{display:none}
+body.app.zone-page-open>#zone-page{grid-column:1}
 body.app #zone-page:not([hidden]){height:calc(100dvh - var(--top))}
 body.app #zone-page #elevation svg{max-height:calc(65dvh - var(--top) - 24px)}
 #zone-page .zv-mapwrap{max-width:100%}
