@@ -24,7 +24,7 @@ from aosr.gui.result_view import (FlutterGroupView, PairView, ResultView, _flutt
 from aosr.reporting.result import SchemeResult
 from aosr.scoring.contract import QualityCategory
 from aosr.scoring.review_alert import FlutterReviewAlert
-from tests.engine.test_gui_browser import (RUN_ID, _assert_quiet, _assert_text_is_formatted,
+from tests.engine.test_gui_browser import (RUN_ID, _assert_quiet, _assert_text_is_formatted, _open_raw_folds,
                                            _check_rerun_starts_once, _legend_labels, _open, _save, _serve,
                                            _wait_for_lines, browser)
 from tests.engine.test_construction_report_notes import note as construction_note
@@ -103,6 +103,7 @@ def test_flutter_and_outside_window_paths_start_folded(tmp_path: Path, browser: 
                                          viewport_width=WIDTH) as watched:
         page = watched.page
         page.locator("#content").wait_for(state="visible")
+        _open_raw_folds(page)
         blocks = page.locator("#alerts article.flutter")
         # 一對牆一筆：標題照伺服器合好的，逐帶明細一開始收著。
         assert blocks.locator("h3").all_inner_texts() == [group.heading_text for group in FLUTTER]

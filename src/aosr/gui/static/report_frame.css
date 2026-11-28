@@ -29,3 +29,7 @@
 .app svg text{fill:var(--ink)}
 /* 重算失敗時一條問題一行（伺服器給的訊息用換行分隔；舊外框寫在 style.css）。 */
 #rerun-state{white-space:pre-line}
+/* 原始資料（逐筆警戒、逐條反射路徑）一開始收著，第一眼只看結論；摘要行像小標。 */
+.app details.raw{border-bottom:1px solid var(--line);margin:0 0 18px;padding-bottom:6px}
+.app details.raw>summary{font-size:14px;color:var(--ink);font-weight:600;padding:4px 0 8px}
+.app details.raw>section{border-bottom:0;margin-bottom:0}
