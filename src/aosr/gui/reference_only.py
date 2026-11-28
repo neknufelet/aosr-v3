@@ -94,9 +94,10 @@ def sentence() -> str:
     return f"VPR（鋼板共振吸音）{_KIND}：{_band()} Hz 以下的數字只能參考。"
 
 
-def search_why() -> str:
+def search_why(where: str = "在上面「背後」選它") -> str:
     # #1340：分區頁「由程式最佳化」有「背後」那一格（#1330），這類構造可以在那裡選成固定背牆；先講那一條路。
-    return f"{_KIND} {_band()} Hz 以下的數字只能參考，程式不調它；要當固定背牆，在上面「背後」選它；要整塊貼，把這一區改成「指定貼一種」。"
+    # listed_why 也出現在清單卡，那時右欄可能還沒選區、「背後」不在畫面上，所以先講「選了這一區」。
+    return f"{_KIND} {_band()} Hz 以下的數字只能參考，程式不調它；要當固定背牆，{where}；要整塊貼，把這一區改成「指定貼一種」。"
 
 
 def plan_refused(zone: str, name: str) -> str:
@@ -119,7 +120,7 @@ def words() -> dict[str, object]:
         "why_only": f"{_WHY}。",
         "kind_words": f"；這一筆 {band} Hz 以下的數字只能參考，所以「由程式最佳化」不會挑，要用就在分區頁「指定貼一種」。",
         "search_why": search_why(),
-        "listed_why": f"這一區的清單裡本來有它，程式不會挑。{search_why()}",
+        "listed_why": f"這一區的清單裡本來有它，程式不會挑。{search_why('選了這一區，在右欄「背後」選它')}",
     }
 
 

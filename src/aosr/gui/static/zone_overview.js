@@ -2530,6 +2530,8 @@ function hasPendingDraft() {
   const items = chosenItems();
   if (items.some(item => zoneMethodMode(item.method) !== draft.mode)) return true;
   if (draft.mode === "keep_original") return false;
+  // 背後（#1330）跟存的不一樣才算沒套用：改成 VPR 又改回原牆＝沒改（#1340 審查）。
+  if (draft.mode === "search" && draft.backing !== undefined && items.some(item => (zoneSetting(item.wall, item.key).backing_entry ?? "") !== draft.backing)) return true;
   if (draftDepth(items) !== undefined) return true;
   if (draft.mode === "fixed") return Boolean(draft.materialId && items.some(item =>
     libraryLabel(item.zone.material, item.wall, item.key)?.id !== draft.materialId));
@@ -2616,7 +2618,7 @@ function saidWords() { return [keptSaid, pageSaid === keptSaid ? "" : pageSaid].
 
 function closeOverview() {
   // 右欄有自己點過、還沒套用的改動（#1340：選了背後沒按套用就回輸入頁，存檔裡什麼都沒有）：先講一句、不關。
-  if (selected.length && draftTouched && $("zone-panel-apply") && !$("zone-panel-apply").disabled) {
+  if (hasPendingDraft() && $("zone-panel-apply") && !$("zone-panel-apply").disabled) {
     zoneNote("右欄還有沒套用的改動：先按「套用到」那一顆，或按「取消」放掉，再回房間方案輸入", "notice");
     $("zone-panel-apply").focus();
     return;

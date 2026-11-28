@@ -349,11 +349,31 @@ def test_leaving_with_an_unapplied_backing_says_so_and_stays(tmp_path: Path, bro
         page = watched.page
         _open_search_panel(page)
         page.locator("#zone-panel-backing-pick").select_option(VPR)
+        expect(page.locator("#zone-page-search")).to_have_text("套用並拿去搜尋")
         page.locator("#zone-details summary").click()
         page.locator("#zone-page-close").click()
         expect(page.locator("#zone-page")).to_be_visible()
         expect(page.locator("#zone-page")).to_contain_text("右欄還有沒套用的改動")
         page.get_by_role("button", name="取消", exact=True).click()
+        page.locator("#zone-page-close").click()
+        expect(page.locator("#zone-map")).to_be_hidden()
+        assert base
+
+
+def test_backing_changed_back_to_the_wall_is_not_unapplied(tmp_path: Path, browser: Browser) -> None:
+    """背後改成 VPR 又改回原牆＝跟存的一樣：回房間方案輸入照常走、不擋（#1340 審查）。"""
+    _prepare(tmp_path)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _open_search_panel(page)
+        page.locator("#zone-panel-apply").click()  # 先把「由程式最佳化」套用，這一區存的就是背後原牆
+        expect(page.locator("#zone-page-search")).to_have_text("拿去搜尋")
+        _click_zone(page, "/".join(ZONE))  # 套用後選取清掉了，再點回這一區
+        pick = page.locator("#zone-panel-backing-pick")
+        pick.select_option(VPR)
+        expect(page.locator("#zone-page-search")).to_have_text("套用並拿去搜尋")
+        pick.select_option("")
+        expect(page.locator("#zone-page-search")).to_have_text("拿去搜尋")
         page.locator("#zone-page-close").click()
         expect(page.locator("#zone-map")).to_be_hidden()
         assert base
