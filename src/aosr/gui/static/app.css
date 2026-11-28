@@ -1,0 +1,101 @@
+/* 全站新外框（#1342）：深灰底、細線、橘色只給「程式會調」與主要按鈕。
+   一頁把 style.css 的連結換成這一份、body 加 class="app" 才算加入；還沒換的頁照舊用 style.css。
+   外觀來源：roomtreatment.diy 的骨架（左功能列、左欄設定、中間畫面、右欄屬性）＋CHORAS 的克制配色；示範圖老闆 11-28 看過。 */
+:root{
+  --bg:#1f2226;        /* 頁面與中間畫面 */
+  --panel:#262a2e;     /* 左右欄 */
+  --sunk:#1b1e21;      /* 頂列、功能列、輸入框、圖底 */
+  --line:#363b40;      /* 細分隔線 */
+  --line-strong:#4b5157;
+  --ink:#e3e5e6;       /* 主要字 */
+  --soft:#a0a7ad;      /* 次要字（在 panel 上對比 > 4.5） */
+  --faint:#6b7278;     /* 只給裝飾線與刻度，不寫說明句 */
+  --acc:#ef8a2e;       /* 由程式最佳化、主要動作 */
+  --acc-t:rgba(239,138,46,.16);
+  --fix:#6fb3aa;       /* 指定、連結以外的第二意思 */
+  --good:#8fbf7f; --warn:#d9a45a; --bad:#e2776a;
+  --c1:#6fa8dc; --c2:#ef8a2e; --c3:#8fbf7f; --c4:#b39ddb;   /* 圖表線 */
+  --sans:system-ui,-apple-system,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  --rail:56px; --left:340px; --right:300px; --top:44px;
+  color-scheme:dark;
+}
+body.app{margin:0;font:14px/1.5 var(--sans);color:var(--ink);min-height:100vh;
+  background:linear-gradient(90deg,var(--sunk) var(--rail),var(--bg) var(--rail));  /* 功能列那一條底色一路到頁尾 */
+  display:grid;grid-template:var(--top) 1fr/var(--rail) 1fr}
+.app *{box-sizing:border-box}
+.app [hidden]{display:none!important}  /* 下面幾個元件設了 display，會蓋掉 hidden；腳本靠 hidden 切換區塊 */
+.app a{color:var(--acc)}
+.app .mono,.app .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* 頂列與左功能列：app_shell.js 產生，每一頁一樣 */
+.app-top{grid-column:1/-1;position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:16px;
+  padding-right:14px;border-bottom:1px solid var(--line);background:var(--sunk)}
+.app-top .brand{width:var(--rail);text-align:center;font-weight:700;font-size:13px;letter-spacing:.12em;color:var(--acc);text-decoration:none}
+.app-top .title{font-size:14px;font-weight:600}
+.app-top .sp{flex:1}
+.app-rail{position:sticky;top:var(--top);align-self:start;height:calc(100vh - var(--top));overflow:auto;
+  border-right:1px solid var(--line);background:var(--sunk);display:flex;flex-direction:column;padding-top:6px}
+.app-rail a{color:var(--soft);font-size:11px;line-height:1.25;text-align:center;text-decoration:none;padding:9px 2px;
+  display:flex;flex-direction:column;align-items:center;gap:3px;border-left:2px solid transparent}
+.app-rail a i{font-style:normal;font-size:16px;line-height:1}
+.app-rail a:hover{color:var(--ink)}
+.app-rail a[aria-current]{color:var(--ink);border-left-color:var(--acc);background:var(--bg)}
+
+/* 內容欄：左（設定）／中（畫面）／右（屬性）；頁面自己挑要幾欄 */
+.app-cols{display:grid;grid-template-columns:var(--left) minmax(0,1fr);min-width:0}
+.app-cols.with-right{grid-template-columns:var(--left) minmax(0,1fr) var(--right)}
+.app-left,.app-right{background:var(--panel);padding:14px 16px;min-width:0;
+  position:sticky;top:var(--top);align-self:start;height:calc(100vh - var(--top));overflow:auto}  /* 中間捲動時兩側欄不跟著走 */
+.app-left{border-right:1px solid var(--line)}.app-right{border-left:1px solid var(--line)}
+.app-center{padding:18px 22px;min-width:0}
+@media (max-width:900px){body.app{grid-template-columns:1fr;background:var(--bg)}.app-left,.app-right{position:static;height:auto}.app-rail{display:none}
+  .app-cols,.app-cols.with-right{grid-template-columns:1fr}.app-left,.app-right{border:0;border-bottom:1px solid var(--line)}}
+@media (max-width:900px){.app-top .brand{width:auto;padding:0 12px}}
+
+/* 小標：細線分隔、字距拉開 */
+.app h6,.app .label{font-size:11.5px;font-weight:500;color:var(--soft);letter-spacing:.14em;margin:6px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.app h1{font-size:20px;margin:0 0 10px}.app h2{font-size:16px;margin:18px 0 10px}.app h3{font-size:14px;margin:16px 0 8px}
+.app h3 small,.app h2 small{font-weight:400;color:var(--soft);margin-left:.4rem}
+.app section{margin:0 0 18px}
+.app p{margin:6px 0}
+
+/* 表單 */
+.app input,.app select,.app textarea{font:inherit;font-size:13px;color:var(--ink);background:var(--sunk);border:1px solid var(--line-strong);border-radius:3px;padding:4px 7px}
+.app input[type=file]{padding:4px;max-width:100%}
+.app input:disabled,.app select:disabled{color:var(--faint);background:var(--panel)}
+.app input[type=checkbox],.app input[type=radio]{accent-color:var(--acc)}
+.app label{display:inline-flex;align-items:center;gap:.4rem;margin:.3rem .75rem .3rem 0}
+.app .fields{display:flex;flex-wrap:wrap}
+
+/* 按鈕：一般是細框；主要動作是橘底 */
+.app button{font:inherit;font-size:13px;color:var(--ink);background:transparent;border:1px solid var(--line-strong);border-radius:3px;padding:5px 14px;cursor:pointer}
+.app button:hover:not(:disabled){border-color:var(--soft)}
+.app button.primary{background:var(--acc);border-color:var(--acc);color:#1b1e21;font-weight:700}
+.app button:disabled{color:var(--faint);border-color:var(--line);background:transparent;cursor:not-allowed}
+.app .actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+
+/* 表格：細線、表頭小字 */
+.app table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}
+.app th{text-align:left;font-size:11.5px;font-weight:500;color:var(--soft);letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--line)}
+.app td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.app .row{padding:.35rem 0;border-bottom:1px solid var(--line)}
+
+/* 狀態字：同一個意思同一個樣子 */
+.app .notice{color:var(--bad);font-weight:500}
+.app .ok{color:var(--good);font-weight:400}
+.app pre{white-space:pre-wrap;color:var(--bad)}
+.app .hint{color:var(--soft);font-size:12.5px}
+.app ul.problems{margin:6px 0;padding-left:1.1rem;color:var(--bad);font-size:13px}
+
+/* 圖：深底細框 */
+.app svg,.app canvas{background:var(--sunk);border:1px solid var(--line);border-radius:2px}
+.app svg text{fill:var(--soft)}
+.app figure{margin:0}
+.app .drawings{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem}
+.app details>summary{cursor:pointer;color:var(--soft);font-size:13px;padding:6px 0}
+.app :focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+
+/* uPlot 圖表在深底上 */
+.app .uplot{font-family:var(--sans);color:var(--soft)}
+.app .u-legend{color:var(--ink);font-size:12.5px}

@@ -93,7 +93,7 @@ STATIC_NAMES = {"material-tuning.js", "app.js", "home.js", "room_facts.js", "wal
                 "style.css", "home.css", "result.css", "compare.css",
                 "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js",
                 "material-ui.js", "material-designer.js", "material-designer.css", "material-cutaway.js", "material-kind.js", "material-list.js", "material-elements.js", "materials.js", "materials.css", "zone_result.js", "gradient.js", "gradient.css", "search_start.js", "search_start.css",
-                "room_model.js", "room_model.css", "room_model_high.js", "room_model_high.css"}
+                "room_model.js", "room_model.css", "room_model_high.js", "room_model_high.css", "app.css", "app_shell.js"}
 
 
 def repo_root() -> Path:
