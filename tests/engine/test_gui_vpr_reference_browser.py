@@ -221,6 +221,10 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
         expect(row).to_be_disabled()
         expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_count(0)
         expect(row.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["search_why"]))
+        # 名稱那一格不被那一句壓窄（#1340：勾選列照非勾選列的格子放，名稱擠成一字一行）：名稱寬過 150 像素、跟那一句左緣對齊。
+        name = cast(dict[str, float], row.locator(".zv-material-text").evaluate("n => n.getBoundingClientRect().toJSON()"))
+        why = cast(dict[str, float], row.locator(".zv-covered-why").evaluate("n => n.getBoundingClientRect().toJSON()"))
+        assert name["width"] > 150 and abs(name["left"] - why["left"]) < 1, (name, why)
         plain = page.locator(f"#zone-panel-pick-{PLAIN_ID}")
         expect(plain).to_be_enabled()
         expect(plain.locator(".zv-covered-why")).to_have_count(0)

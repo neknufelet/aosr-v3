@@ -469,6 +469,8 @@ html.zone-page-open{scroll-padding-bottom:112px}
 #zone-page .zv-material[role=checkbox]:is([aria-checked=true],[aria-checked=mixed]) strong{font-weight:700}
 #zone-page .zv-material[role=checkbox] .zv-spark{width:48px}
 #zone-page .zv-material[role=checkbox] .zv-description{max-width:8em;font-variant-numeric:tabular-nums}
+/* 勾選列只有四格（16px｜名稱｜厚度｜曲線）：「只能參考」那一句從名稱那一格排到底；照非勾選列放第 3 格會把厚度撐大、名稱壓成一字一行（#1340）。 */
+#zone-page .zv-material[role=checkbox] .zv-covered-why{grid-column:2/-1}
 #zone-page .zv-filter-tools{display:flex;gap:8px;margin:6px 0}
 #zone-page .zv-filter-tools input{flex:1;min-width:0}
 #zone-page .zv-only-candidates{flex:none;background:white;color:#244f5c;border:1px solid #849da5;border-radius:6px;padding:4px 9px;font:inherit;font-size:14px}
