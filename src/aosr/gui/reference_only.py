@@ -95,7 +95,8 @@ def sentence() -> str:
 
 
 def search_why() -> str:
-    return f"{_KIND} {_band()} Hz 以下的數字只能參考，所以不進程式最佳化；要用，把這一區改成「指定貼一種」。"
+    # #1340：分區頁「由程式最佳化」有「背後」那一格（#1330），這類構造可以在那裡選成固定背牆；先講那一條路。
+    return f"{_KIND} {_band()} Hz 以下的數字只能參考，程式不調它；要當固定背牆，在上面「背後」選它；要整塊貼，把這一區改成「指定貼一種」。"
 
 
 def plan_refused(zone: str, name: str) -> str:

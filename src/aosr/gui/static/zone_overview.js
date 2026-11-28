@@ -2615,6 +2615,12 @@ function noteLines() {
 function saidWords() { return [keptSaid, pageSaid === keptSaid ? "" : pageSaid].filter(Boolean).join("；"); }
 
 function closeOverview() {
+  // 右欄有自己點過、還沒套用的改動（#1340：選了背後沒按套用就回輸入頁，存檔裡什麼都沒有）：先講一句、不關。
+  if (selected.length && draftTouched && $("zone-panel-apply") && !$("zone-panel-apply").disabled) {
+    zoneNote("右欄還有沒套用的改動：先按「套用到」那一顆，或按「取消」放掉，再回房間方案輸入", "notice");
+    $("zone-panel-apply").focus();
+    return;
+  }
   if (cutting) restoreElevation();
   overviewOpen = false;
   familyOpen.clear();
