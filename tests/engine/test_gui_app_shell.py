@@ -11,7 +11,8 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import STATIC, GuiSettings, create_app
 
-ADOPTED = {"/room-model": "room_model", "/gradient": "gradient", "/search-start": "search_start"}  # 已換新外框的頁 → 它的腳本前綴
+ADOPTED = {"/room-model": "room_model", "/gradient": "gradient", "/search-start": "search_start",
+           "/materials": "materials", "/materials/designer": "material-designer"}  # 已換新外框的頁 → 它的腳本前綴
 
 
 def _app(tmp_path: Path) -> TestClient:
@@ -50,6 +51,9 @@ def test_adopted_pages_use_the_new_frame_and_keep_every_script_id(tmp_path: Path
                 code = script.read_text(encoding="utf-8")
                 wanted = set(re.findall(r'(?:\$|\bbyId)\("([\w-]+)"\)', code))
                 wanted -= set(re.findall(r'if \((?:\$|byId)\("([\w-]+)"\)\)', code))  # 先問在不在的是腳本自己生的節點
+                # 字串在取元素以外的地方也出現（例如 toggle("x", …)、.id = "x"）：那是腳本自己生的節點
+                wanted = {name for name in wanted
+                          if code.count(f'"{name}"') == len(re.findall(rf'(?:\$|\bbyId)\("{re.escape(name)}"\)', code))}
                 assert wanted <= ids, (script.name, wanted - ids)
 
 

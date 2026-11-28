@@ -17,14 +17,17 @@ from tests.engine.test_gui_browser import RAW_VALUES, _open, browser as browser
 
 # 等伺服器算完的斷言上限：冷行程第一次算一種新構造要編譯，幾個工人同時跑或雲端機器上會超過預設的 5 秒。
 COMPUTED_MS = 60_000
-# 數畫布上的像素：曲線色（#15617b，不透明）、外推的橘底、補值的灰底（兩種底色都是半透明，只看色相與透明度）。
+# 數畫布上的像素：曲線色（不透明）、外推的橘底、補值的灰底（兩種底色都是半透明，只看色相與透明度）。
+# 曲線色 #1351 起從外框色票 --fix 讀（深底上看得清楚），考卷照頁面當下的色票比，不寫死色號。
 PIXELS_JS = """(canvas) => {
   const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+  const hex = getComputedStyle(document.body).getPropertyValue("--fix").trim();
+  const [R0, G0, B0] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
   const near = (r, g, b, R, G, B) => Math.abs(r - R) < 25 && Math.abs(g - G) < 25 && Math.abs(b - B) < 25;
   const counts = {line: 0, extrapolation: 0, model_fill: 0};
   for (let i = 0; i < data.length; i += 4) {
     const [r, g, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]];
-    if (a > 200 && near(r, g, b, 0x15, 0x61, 0x7b)) counts.line += 1;
+    if (a > 200 && near(r, g, b, R0, G0, B0)) counts.line += 1;
     else if (a > 30 && a < 90 && near(r, g, b, 230, 140, 40)) counts.extrapolation += 1;
     else if (a > 30 && a < 90 && near(r, g, b, 110, 125, 135)) counts.model_fill += 1;
   }

@@ -166,7 +166,8 @@ def test_the_page_and_its_static_files_are_served(tmp_path: Path) -> None:
         home = client.get("/")
     assert page.status_code == 200
     # 段 2-2b 起多載入畫吸音曲線的圖表庫（跟結果頁同一份內附檔）
-    assert re.findall(r'<script src="/static/([^"]+)"', page.text) == [
+    # #1351 起換新外框：第一支是全站共用的頂列與功能列
+    assert re.findall(r'<script src="/static/([^"]+)"', page.text) == ["app_shell.js",
         CHART_LIBRARY[0].removeprefix(STATIC), "material-cutaway.js", "material-ui.js", "material-kind.js", "material-list.js", "material-elements.js", "materials.js"]
     assert [asset.status_code for asset in assets] == [200] * 9
     assert 'href="/materials"' in home.text

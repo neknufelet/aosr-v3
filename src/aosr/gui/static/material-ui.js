@@ -32,6 +32,8 @@ function el(tag, attributes = {}, ...children) {
 }
 
 const byId = (id) => document.getElementById(id);
+// 畫圖用的顏色從外框色票讀（#1351）；讀 body 不讀根元素，嵌進分區頁時 body 上換成淺色那一組也跟著換。
+const tokenColor = (name, fallback) => getComputedStyle(document.body).getPropertyValue(name).trim() || fallback;
 async function api(path, options = {}) {
   const reply = await fetch(path, options);
   let body;
@@ -130,8 +132,9 @@ function drawPlot(reply, height = 320) {
   };
   plot = new uPlot({width: chartWidth(), height, legend: {show: false},
     scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}, y: {range: [0, 1]}},
-    axes: [{label: "頻率（Hz）"}, {label: "無規入射吸音係數"}],
-    series: [{}, {label: "吸音係數", stroke: "#15617b", width: 2, points: {show: false}}],
+    axes: [{label: "頻率（Hz）"}, {label: "無規入射吸音係數"}].map(axis => ({...axis, stroke: tokenColor("--soft", "#53636b"),
+      grid: {stroke: tokenColor("--line", "#e1eaed"), width: 1}, ticks: {stroke: tokenColor("--line", "#e1eaed"), width: 1}})),
+    series: [{}, {label: "吸音係數", stroke: tokenColor("--fix", "#15617b"), width: 2, points: {show: false}}],
     hooks: {drawClear: [shade], draw: reference ? [(u) => placeBand(u, reference)] : []}},
     [reply.frequencies_hz, reply.absorption], byId("curve-chart"));
 }
