@@ -101,7 +101,8 @@ def _view(jobs: GradientJobs, job_id: str) -> Record:
 
 def _clean(page: Page, errors: list[str]) -> None:
     assert errors == []
-    text = page.locator("main").inner_text()
+    # 換新外框（#1287）後頁面分左欄（設定）與中間（main）兩塊、連線狀態在頂列：整份 body 都要乾淨，不只 main。
+    text = page.locator("body").inner_text()
     assert not RAW_VALUES.search(text), RAW_VALUES.search(text)
 
 

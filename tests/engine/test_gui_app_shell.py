@@ -11,7 +11,7 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import STATIC, GuiSettings, create_app
 
-ADOPTED = {"/room-model": "room_model"}  # 已換新外框的頁 → 它的腳本前綴
+ADOPTED = {"/room-model": "room_model", "/gradient": "gradient", "/search-start": "search_start"}  # 已換新外框的頁 → 它的腳本前綴
 
 
 def _app(tmp_path: Path) -> TestClient:
@@ -47,7 +47,9 @@ def test_adopted_pages_use_the_new_frame_and_keep_every_script_id(tmp_path: Path
             assert "app_shell.js" in scripts and '<body class="app">' in html
             ids = set(re.findall(r'id="([^"]+)"', html))
             for script in STATIC.glob(f"{prefix}*.js"):
-                wanted = set(re.findall(r'\$\("([\w-]+)"\)', script.read_text(encoding="utf-8")))
+                code = script.read_text(encoding="utf-8")
+                wanted = set(re.findall(r'(?:\$|\bbyId)\("([\w-]+)"\)', code))
+                wanted -= set(re.findall(r'if \((?:\$|byId)\("([\w-]+)"\)\)', code))  # 先問在不在的是腳本自己生的節點
                 assert wanted <= ids, (script.name, wanted - ids)
 
 

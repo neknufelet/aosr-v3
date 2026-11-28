@@ -3,18 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>第三階段搜尋</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <title>挑材料（第三階段搜尋）</title>
+  <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/gradient.css">
+  <script src="/static/app_shell.js" defer></script>
   <script src="/static/gradient.js" defer></script>
 </head>
-<body><main>
-  <header><h1>第三階段搜尋：每一區貼什麼材料</h1>
-    <p><a id="back-to-input">回方案輸入頁</a>　<a href="/materials">材料庫</a>　<a href="/searches">第二階段搜尋進度</a></p>
-    <p>方案裡有任何一區在立面圖上設成「交給搜尋」，就從這裡開。搜尋要用這份切法的替身（加快搜尋用的簡化模型）；沒有就先建一份。
-      建替身與搜尋都要好幾小時，整台機器同時只跑一件。搜尋做完要再跑「終點」（用完整模型重算一次），之後才能拿去算結果頁。</p>
-    <p id="connection" aria-live="polite">正在讀取…</p>
-  </header>
+<body class="app">
+<div class="app-cols">
+  <aside class="app-left">
+    <p class="page-links"><a id="back-to-input">回方案輸入頁</a></p>
+    <div data-top-tools><p id="connection" aria-live="polite">正在讀取…</p></div>
+    <details class="about"><summary>這一頁做什麼</summary>
+      <p>方案裡有任何一區在立面圖上設成「交給搜尋」，就從這裡開。搜尋要用這份切法的替身（加快搜尋用的簡化模型）；沒有就先建一份。
+        建替身與搜尋都要好幾小時，整台機器同時只跑一件。搜尋做完要再跑「終點」（用完整模型重算一次），之後才能拿去算結果頁。</p></details>
 
   <section id="scheme-block">
     <h2>1. 選方案</h2>
@@ -41,6 +43,8 @@
     <p id="form-message" aria-live="polite"></p>
   </section>
 
+  </aside>
+  <main class="app-center">
   <section id="plan-block" hidden>
     <h2>3. 預覽：每一區怎麼做</h2>
     <p id="plan-summary"></p>
@@ -60,7 +64,7 @@
         <label>停止殘差<input id="stop-residual" type="number" min="0" step="any"></label>
       </div>
       <p class="hint">停止規則不變：殘差達標或預算用完就停；建完一定跑留出驗證，兩把尺都過、准用閘門核過才放進來用。改的值照實記進替身身分。</p>
-      <p><button id="build-surrogate" type="button">建替身</button></p>
+      <p><button id="build-surrogate" type="button" class="primary">建替身</button></p>
     </div>
     <div id="surrogate-build" hidden>
       <h3>建替身進度</h3>
@@ -77,7 +81,7 @@
   <section id="start-block" hidden>
     <h2>5. 開始搜尋</h2>
     <p id="busy-line" class="notice" hidden></p>
-    <p><button id="start" type="button">開始搜尋</button></p>
+    <p><button id="start" type="button" class="primary">開始搜尋</button></p>
     <p id="start-message" aria-live="polite"></p>
   </section>
 
@@ -108,5 +112,7 @@
     <p id="job-message" aria-live="polite"></p>
     <details><summary>每一步的輸出最後幾行</summary><div id="job-steps"></div></details>
   </section>
-</main></body>
+  </main>
+</div>
+</body>
 </html>
