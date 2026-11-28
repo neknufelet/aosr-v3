@@ -21,6 +21,7 @@ from aosr.geometry.shoebox import Wall
 from aosr.gradient.six_category_chain import impedance_function, design_materials
 from aosr.physics.fem_reduced import BuildLedger, ReducedMatrices, ReducedModel
 from aosr.reporting.compare import compare_results
+from aosr.scoring.ranking_models import RankingResult
 from aosr.materials.construction_models import Assembly, MeasuredImpedance
 from aosr.physics.report_surfaces import WholeWallZone
 from aosr.reporting.scheme import Scheme
@@ -49,14 +50,18 @@ def _with_measured_floor(scheme: Scheme) -> Scheme:
         update={'surface_zones_by_wall': zones})}).model_dump())
 
 
-def _within_bound(scheme: Scheme, c: SixCategoryConstants, saved: endpoint_six.SixComparison, items: tuple[SurfaceDesign, ...],
-                  values: np.ndarray, pressure: np.ndarray, settings: MaterialGradientSettings) -> bool:
-    """JAX 終點分數對正式 numpy 排名總分，差在登記的六類容差加權和內（沿用 slow_six_category_endpoint 那一把）。"""
+def _ranked(scheme: Scheme, items: tuple[SurfaceDesign, ...], values: np.ndarray, pressure: np.ndarray,
+            settings: MaterialGradientSettings) -> RankingResult:
+    """正式 numpy 排名：照設計匯出材料、用這份聲壓重算一次（獨立於終點自己的 numpy 那一條）。"""
     from aosr.gradient.endpoint import materials_from_surfaces, scene_with_materials
 
     exported = scheme.model_copy(update={'scene': scene_with_materials(scheme.scene, materials_from_surfaces(items, values, settings))})
-    ranked = compare_results((numpy_result(exported, pressure.transpose(1, 2, 0)),),
+    return compare_results((numpy_result(exported, pressure.transpose(1, 2, 0)),),
         quality_targets=load_quality_targets(config_path('quality_targets.toml')), run_date=date.today())
+
+
+def _within_bound(c: SixCategoryConstants, saved: endpoint_six.SixComparison, ranked: RankingResult) -> bool:
+    """JAX 終點分數對正式 numpy 排名總分，差在登記的六類容差加權和內（沿用 slow_six_category_endpoint 那一把）。"""
     costs = np.asarray([next(line.category_cost for line in ranked.rankable[0].categories
         if line.identity.category.value == name) for name in endpoint_six.CATEGORY_NAMES])
     assert saved.full.product_total is not None
@@ -108,15 +113,15 @@ def main(output: Path, measured: bool = False) -> None:
                                      jnp.asarray(constant_absorption_mask(design_materials(items), c.union_frequencies_hz)))
         actual.append(np.asarray([*saved.full.categories, saved.full.objective_total, saved.full.product_total]).tobytes() ==
             np.asarray([*(float(v) for v in expected[:6]), float(expected.objective_total), float(expected.product_total)]).tobytes())
-    reference = numpy_result(exported, full.transpose(1, 2, 0))
-    ranking = compare_results((reference,), quality_targets=load_quality_targets(config_path('quality_targets.toml')), run_date=date.today())
+    # 終點那一場的正式排名只算一次：數值相等與容差那兩項比的是同一份匯出與同一份聲壓（#1363：重算一場約占這支六分之一）。
+    ranking = _ranked(scheme, designs, theta, full, settings)
     numpy_equal = six.endpoint.numpy_total == ranking.rankable[0].total_cost
     gain = six.improvement.full
     improved = [*gain.categories, gain.objective_total, gain.product_total]
     expected_gain = np.asarray([*six.baseline.full.categories, six.baseline.full.objective_total, six.baseline.full.product_total]) - np.asarray([*six.endpoint.full.categories, six.endpoint.full.objective_total, six.endpoint.full.product_total])
     improvement = np.asarray(improved).tobytes() == expected_gain.tobytes()
-    bounds = [_within_bound(scheme, c, saved, items, values, pressure, settings)
-              for saved, items, values, pressure in ((six.endpoint, designs, theta, full), (six.baseline, originals, np.empty(0), baseline))]
+    bounds = [_within_bound(c, six.endpoint, ranking),
+              _within_bound(c, six.baseline, _ranked(scheme, originals, np.empty(0), baseline, settings))]
     kinds = sorted({type(material).__name__ for material in design_materials(originals)})
     output.write_text(json.dumps({'jax_bitwise': actual, 'numpy_bitwise': numpy_equal, 'improvement_bitwise': improvement,
                                   'within_registered_sum_bound': bounds, 'measured_kept': MeasuredImpedance.__name__ in kinds}))
