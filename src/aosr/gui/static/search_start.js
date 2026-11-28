@@ -211,7 +211,6 @@ function clearForm() {
   put("axis-offset", 0);
   document.querySelector("input[name=stage][value=two]").checked = true;
   byId("seat-locked").checked = false;
-  byId("liar").checked = true;
   byId("keep-out").replaceChildren();
   byId("speaker-areas").replaceChildren();
   loadedTime = null;
@@ -359,14 +358,14 @@ async function loadScheme() {
 }
 
 async function loadPrevious(read) {
-  const reply = await api("/api/search-jobs/previous");
+  const [reply, defaults] = await Promise.all([api("/api/search-jobs/previous"), readAdvancedDefaults()]);
   const pick = byId("previous-pick");
   pick.replaceChildren();
   if (read !== facts) return;  // 等回覆時又讀了別份方案：這一份回覆不用
   // 回 200 但內容不是清單（例如不是 JSON）也當讀失敗：照講一句、補預設，表單照樣亮得出來。
   if (!reply.ok || !Array.isArray(reply.body.searches) || !Array.isArray(reply.body.skipped)) {
     say("previous-message", reply.body.error || "之前的搜尋讀不懂（伺服器回的內容不對），預算與停止那幾格要自己填", true);
-    defaultAdvanced();
+    defaultAdvanced(defaults);
     return;
   }
   previous = reply.body.searches;
@@ -384,17 +383,36 @@ async function loadPrevious(read) {
   } else {
     say("previous-message", previous.length ? `這份方案還沒搜過；要沿用別份方案的設定就選一場按「帶入」${skipped}`
       : "還沒有任何一場搜尋可以帶入：預算與停止那幾格要自己填");
-    defaultAdvanced();
+    defaultAdvanced(defaults);
   }
 }
 
-// 取樣與工作行程的預設（主對話定的工程值，非產品規格）：一間房 6 支工作行程、每批 6 題、起點隨機 12 題、種子取今天日期。
-function defaultAdvanced() {
+// 取樣與工作行程的預設（工程值，非產品規格）住進階參數清單（#1343，/api/params）；這裡不另寫一份數字。
+// 清單讀一次就留著；讀不到時那幾格留空、講一句，不退回寫死的數字。種子沒有固定值：取今天日期。
+let advancedDefaults = null;
+
+async function readAdvancedDefaults() {
+  if (advancedDefaults) return advancedDefaults;
+  const reply = await api("/api/params");
+  if (!reply.ok || !Array.isArray(reply.body.params)) return null;
+  advancedDefaults = Object.fromEntries(reply.body.params.map((param) => [param.key, param.default]));
+  return advancedDefaults;
+}
+
+function defaultAdvanced(defaults) {
   const today = new Date();
-  put("startup", 12);
-  put("batch", 6);
-  put("workers", 6);
   put("seed", today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate());
+  if (!defaults) {
+    for (const id of ["startup", "batch", "workers"]) put(id, null);
+    byId("liar").checked = false;
+    say("advanced-message", "進階參數清單讀不到，取樣與工作行程那幾格要自己填", true);
+    return;
+  }
+  say("advanced-message", "");
+  put("startup", defaults["search.n_startup_trials"]);
+  put("batch", defaults["search.batch_size"]);
+  put("workers", defaults["search.max_workers"]);
+  byId("liar").checked = defaults["search.constant_liar"] !== false;
 }
 
 function loadPreviousChoice() {

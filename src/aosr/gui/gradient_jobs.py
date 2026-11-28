@@ -40,7 +40,7 @@ from starlette.routing import Route
 
 from aosr.config.construction_presets import load_construction_presets
 from aosr.config.material_gradient import (
-    MOUNT_ON_WALL, MOUNT_RIGID, MaterialGradientSettings, fixed_target_id, is_fixed_target, load_material_gradient_settings,
+    MOUNT_RIGID, MaterialGradientSettings, fixed_target_id, is_fixed_target, load_material_gradient_settings,
 )
 from aosr.config.surrogate_training import load_surrogate_training_settings
 from aosr.config.paths import config_path
@@ -611,7 +611,7 @@ class GradientJobs:
                 "surrogate": {"found": not missing and refused is None, "slot": str(path.parent), "missing": missing,
                               "message": "要先建替身" if missing else refused},
                 "defaults": {"max_steps": settings.descent.max_steps, "family": settings.family[0].id,
-                             "families": [family.id for family in settings.family], "mount": MOUNT_ON_WALL,
+                             "families": [family.id for family in settings.family], "mount": GradientRequest().mount,
                              "device": GradientRequest().device},
                 "busy": busy}
 
