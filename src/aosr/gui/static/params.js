@@ -56,6 +56,34 @@ function table(page, params) {
       el("thead", {}, head), el("tbody", {}, ...params.map(row)))));
 }
 
+// 吸音模型目錄：外殼 <details> 寫在 HTML、預設收起；這裡只填內容，不打開。
+function cite(citation) {
+  if (!citation) return "repo 未列引用";
+  return [citation.authors.join("、"), citation.year, citation.reference, citation.doi].join("；");
+}
+
+function rangeText(span) {
+  const rows = span.rows.map((item) => `${item.name} ${Array.isArray(item.value) ? item.value.join("、") : item.value}${item.unit ? " " + item.unit : ""}`);
+  return [span.note, ...rows].join("；");
+}
+
+function modelCard(model) {
+  const params = model.params.length
+    ? el("ul", {class: "mparams"}, ...model.params.map((param) =>
+      el("li", {text: [param.name, param.unit, param.bounds].filter(Boolean).join("｜")})))
+    : el("p", {class: "faint", text: "沒有可填參數"});
+  const line = (label, text, at) => el("p", {class: "mline"},
+    el("span", {class: "mlabel", text: label}), text, at ? el("span", {class: "mat", text: `（${at}）`}) : null);
+  return el("article", {class: "model"},
+    el("h3", {text: model.name}),
+    el("p", {class: "say", text: model.blurb}),
+    params,
+    line("有效範圍", rangeText(model.range), model.range.at),
+    line("引用", cite(model.citation), model.citation ? model.citation.at : null),
+    line("程式", [model.code, ...model.compute.filter((name) => name !== model.code)].join("、"), null),
+    line("來源", model.origin.text, model.origin.at));
+}
+
 async function load() {
   const message = byId("message");
   let body;
@@ -74,6 +102,8 @@ async function load() {
     .map((page) => [page, body.params.filter((param) => param.page === page.id)])
     .filter(([, params]) => params.length)
     .map(([page, params]) => table(page, params)));
+  byId("catalogue").textContent = `目錄檔：${body.catalogue}`;
+  byId("model-list").replaceChildren(...body.models.map(modelCard));
 }
 
 window.addEventListener("DOMContentLoaded", load);
