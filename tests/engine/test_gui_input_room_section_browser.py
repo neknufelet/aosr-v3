@@ -528,8 +528,10 @@ def test_result_line_follows_a_running_then_finished_calculation(tmp_path: Path,
         _opened(page, ROOM)
         page.locator("#calculate").click()
         expect(page.locator("#room-result-title")).to_have_text("正在算")
-        expect(page.locator("#room-result-text")).to_have_text(re.compile(r"^已跑 \d+ 秒；算完這裡會出現「看結果 ▸」$"))
-        expect(page.locator("#next-title")).to_have_text(re.compile(r"^正在算這一份：已跑 \d+ 秒$"))
+        # 秒數是伺服器記到小數一位（jobs.py 的 elapsed_s），頁面每秒輪詢一次照原樣寫：只在剛好落在整秒時才是整數。
+        # 第一次輪詢晚了 0.05 秒以上（慢機器），之後每一次都是「已跑 N.1 秒」，只認整數就一直等不到（#1371 雲端紅）。
+        expect(page.locator("#room-result-text")).to_have_text(re.compile(r"^已跑 \d+(\.\d)? 秒；算完這裡會出現「看結果 ▸」$"))
+        expect(page.locator("#next-title")).to_have_text(re.compile(r"^正在算這一份：已跑 \d+(\.\d)? 秒$"))
         (tmp_path / "release").write_text("", encoding="utf-8")
         expect(page.locator("#room-result-title")).to_have_text("算好的結果", timeout=20_000)
         expect(page.locator("#room-result-link")).to_be_visible()
