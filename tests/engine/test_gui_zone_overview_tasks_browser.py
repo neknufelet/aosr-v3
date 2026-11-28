@@ -19,7 +19,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from pydantic import TypeAdapter
 
 from aosr.materials.library import LibraryEntry, dump_user_library
-from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import CANDIDATES_SHOWN, open_groups
 from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._input_page_steps import open_scheme, open_zone_page
 from tests.engine._construction_cases import construction
@@ -94,7 +94,8 @@ def _click_zone(page: Page, zone: str) -> None:
 def _settled(page: Page) -> None:
     """一批改動送完、畫面放開、平面圖檢查回來了（成不成都算）、限制檢查也回來畫好了。"""
     page.wait_for_function("""() => { const page = document.getElementById('zone-page');
-        return !page.inert && !inputBusy && !(Number(page.dataset.changing) > 0) && zoneLimitsShown === zoneLimitsGeneration; }""")
+        return !page.inert && !inputBusy && !(Number(page.dataset.changing) > 0) && zoneLimitsShown === zoneLimitsGeneration
+            && """ + CANDIDATES_SHOWN + "; }")
 
 
 def _apply(page: Page) -> None:

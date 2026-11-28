@@ -6,6 +6,8 @@ from urllib.parse import quote, urlsplit
 
 from playwright.sync_api import Locator, Page, expect
 
+from tests.engine._zone_material_steps import CANDIDATES_SHOWN
+
 
 def scheme_open_button(page: Page, name: str) -> Locator:
     # 先等方案清單讀到這一份：存檔、另存之後清單是解鎖後才重讀的，選單若在清單回來前就打開，
@@ -31,10 +33,11 @@ def open_scheme(page: Page, name: str) -> None:
 # 限制檢查晚一點回來會把立面圖與分區頁整頁重畫（zone_limits.js 的 showZoneLimits → renderElevation → renderZoneOverview），
 # 在那之前量的元素會被換掉：量位置回 None、點到被換掉的鈕逾時（11-27 雲端底列、立面圖兩支）。
 # 只在沒有攔著 /api/plan 或 /api/zone-limits 的時候用：攔著時檢查回不來，會一直等。
+# 分區頁面板裡「由程式最佳化」那份清單的判決也要回來畫好（_zone_material_steps.CANDIDATES_SHOWN）。
 SETTLED = """() => { const zone = document.getElementById('zone-page');
     return !document.querySelector('main').inert && !zone.inert && !inputBusy && !(Number(zone.dataset.changing) > 0)
         && zoneLimitsFresh() && zoneLimitsShown === zoneLimitsGeneration
-        && document.getElementById('check-state').dataset.kind !== 'pending'; }"""
+        && document.getElementById('check-state').dataset.kind !== 'pending' && """ + CANDIDATES_SHOWN + "; }"
 
 
 def wait_settled(page: Page) -> None:

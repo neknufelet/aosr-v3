@@ -9,7 +9,7 @@ from typing import cast
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import reference_only
-from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import CANDIDATES_SHOWN, open_groups
 from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._zone_panel_steps import apply_and_return, choose_fixed, choose_mode, edit_candidates, expect_mode, open_panel
 from tests.engine._construction_gui_server import real_server
@@ -109,7 +109,8 @@ def _prepare(tmp_path: Path, lists: dict[str, list[str]] | None = None, document
 
 def _settled(page: Page) -> None:
     page.wait_for_function("""() => { const page = document.getElementById('zone-page');
-        return !page.inert && !inputBusy && !(Number(page.dataset.changing) > 0) && zoneLimitsShown === zoneLimitsGeneration; }""")
+        return !page.inert && !inputBusy && !(Number(page.dataset.changing) > 0) && zoneLimitsShown === zoneLimitsGeneration
+            && """ + CANDIDATES_SHOWN + "; }")
 
 
 def _open_page(page: Page) -> None:
@@ -214,6 +215,7 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
         open_groups(page)
         _click_zone(page, "y0/s")
         page.locator("#zone-panel-mode-search").check()
+        _settled(page)
         page.locator("#zone-panel-picker-search").focus()
         row = page.locator(f"#zone-panel-pick-{HIT}")
         expect(row.locator(".zv-covered-why")).to_be_visible()
@@ -222,8 +224,17 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
         expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_count(0)
         expect(row.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["search_why"]))
         # 名稱那一格不被那一句壓窄（#1340：勾選列照非勾選列的格子放，名稱擠成一字一行）：名稱寬過 150 像素、跟那一句左緣對齊。
-        name = cast(dict[str, float], row.locator(".zv-material-text").evaluate("n => n.getBoundingClientRect().toJSON()"))
-        why = cast(dict[str, float], row.locator(".zv-covered-why").evaluate("n => n.getBoundingClientRect().toJSON()"))
+        # 量的時候每一次都從文件重新找那一列，等兩格都排出寬度才讀（#1231：#1365、#1371 雲端兩格都量到全 0——
+        # Playwright 先找到那一列、再進頁面量，中間面板一重畫，量到的就是被換下來的舊列；在同一次 evaluate 裡量兩格也躲不掉）。
+        # 每一格都要剛好一個（跟逐格用定位器量時一樣嚴：同一列冒出兩個名稱格照樣紅）。
+        measured = page.wait_for_function("""id => { const row = document.getElementById(id);
+            if (!row) return null;
+            const found = ['.zv-material-text', '.zv-covered-why'].map(selector => row.querySelectorAll(selector));
+            if (found.some(list => list.length !== 1)) return {counts: found.map(list => list.length)};
+            const boxes = found.map(list => list[0].getBoundingClientRect().toJSON());
+            return boxes.every(box => box.width > 0) ? boxes : null; }""", arg=f"zone-panel-pick-{HIT}").json_value()
+        assert isinstance(measured, list), measured
+        name, why = cast(list[dict[str, float]], measured)
         assert name["width"] > 150 and abs(name["left"] - why["left"]) < 1, (name, why)
         plain = page.locator(f"#zone-panel-pick-{PLAIN_ID}")
         expect(plain).to_be_enabled()
