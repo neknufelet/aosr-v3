@@ -519,7 +519,7 @@ function drawMap(faces, roles, room) {
                           role: "img", "aria-label": "四面牆、地板、天花"});
   const defs = svg("defs");
   const pattern = svg("pattern", {id: "zv-hatch", width: 7, height: 7, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)"});
-  pattern.append(svg("line", {x1: 0, y1: 0, x2: 0, y2: 7, stroke: "#7d8a8c", "stroke-width": 1.6}));
+  pattern.append(svg("line", {x1: 0, y1: 0, x2: 0, y2: 7, stroke: getComputedStyle(document.getElementById("zone-page")).getPropertyValue("--still-mark").trim() || "#7d8a8c", "stroke-width": 1.6}));
   defs.append(pattern); map.append(defs);
   const miniSize = [15, 15 * sideWidth / frontWidth];
   // 樣稿的排法：上排前牆、右牆，下排後牆、左牆（前後同寬排同一欄）。
@@ -2474,7 +2474,7 @@ function symmetryBox() {
   box.append(head, body);
   return box;
 }
-// 配對細節的小圖：那一面牆、第二區現在的框（黃）、第一區對過來的框（斜線），對稱軸在這一面上就畫出來。
+// 配對細節的小圖：那一面牆、第二區現在的框（橘）、第一區對過來的框（斜線），對稱軸在這一面上就畫出來。
 function missFigure(entry) {
   const {views, wallSize, screenBox, flip} = window.elevationGeometry;
   const {wall} = entry.figure, [width, height] = wallSize(wall);
@@ -2508,7 +2508,7 @@ function symmetryDetailCard() {
     part.append(name);
     if (entry.figure) {
       const key = el("div", "zv-sym-quiet");
-      key.append("黃色：", zonesBrief([entry.firstItem, entry.secondItem]), " 現在的位置；斜線：", zonesBrief([entry.firstItem]), " 對過來的位置");
+      key.append("橘色：", zonesBrief([entry.firstItem, entry.secondItem]), " 現在的位置；斜線：", zonesBrief([entry.firstItem]), " 對過來的位置");
       part.append(missFigure(entry), key);
     }
     part.append(el("p", null).appendChild(withZones(entry.detail, entry)).parentElement);

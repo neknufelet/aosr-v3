@@ -414,7 +414,7 @@ def test_send_to_search_waits_until_every_red_box_is_handled(tmp_path: Path, bro
         page.locator("#elevation-wall-x0").click()
         edit_candidates(page, "x0", "whole_wall", add=("none",))
         expect(page.locator("#zone-to-search")).to_be_enabled()
-        expect(note).to_have_text("交出黃色的 2 區；下一頁按「開始搜尋」才開始算")
+        expect(note).to_have_text("交出橘色的 2 區；下一頁按「開始搜尋」才開始算")
         assert watched.page_errors == [] and watched.console_errors == []
 
 

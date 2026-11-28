@@ -64,7 +64,7 @@ def test_each_group_cap_sits_under_its_zone_in_the_list_once(tmp_path: Path, bro
         warn = row.locator(".limit-warn")
         expect(warn).to_have_count(1)
         expect(warn).to_contain_text("深背岩棉（自填）：不可用")
-        assert warn.evaluate("node => getComputedStyle(node).color") == "rgb(154, 91, 0)"
+        assert warn.evaluate("node => getComputedStyle(node).color") == "rgb(217, 164, 90)"  # 色票 --warn（#1360 深底）
         expect(page.locator("[id^=depth-target-]")).to_have_count(len(targets))
         # 舊做法表整張拆了（#1265 單元 3 之二第二趟）：逐組上限只在右欄那一區底下。舊表「這一區沒給」那一格跟著表走（丙）。
         expect(page.locator("#zone-table-fold")).to_have_count(0)

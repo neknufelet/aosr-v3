@@ -412,7 +412,7 @@ def test_nothing_new_on_the_panel_is_smaller_than_thirteen_pixels_or_too_pale_to
         depth = page.locator("#zone-panel-depth")
         expect(depth).to_have_attribute("placeholder", "空白＝不限")
         assert page.locator("#zone-panel input[type=number][placeholder]:not(#zone-panel-depth)").count() == 0
-        assert depth.evaluate("e => getComputedStyle(e, '::placeholder').color") == "rgb(73, 92, 102)"
+        assert depth.evaluate("e => getComputedStyle(e, '::placeholder').color") == "rgb(160, 167, 173)"  # 色票 --soft（#1360 深底）
         expect(page.get_by_role("searchbox", name="找材料")).to_be_visible()
         small = [row for row in [*panel, *card] if cast(float, row["size"]) < 13]
         pale = [row for row in [*panel, *card] if cast(float, row["contrast"]) < 4.5]

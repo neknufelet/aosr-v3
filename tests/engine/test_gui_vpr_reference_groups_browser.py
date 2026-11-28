@@ -65,7 +65,7 @@ def test_the_old_table_search_row_is_stopped_and_says_the_refusal_in_red(tmp_pat
         page.wait_for_function(_UNLOCKED_AND_VERDICT_SHOWN)
         expect(page.locator("#zone-to-search")).to_be_enabled()
         expect(page.locator("#zone-to-search-note")).to_have_class("note")
-        expect(page.locator("#zone-to-search-note")).to_have_text("交出黃色的 2 區；下一頁按「開始搜尋」才開始算")
+        expect(page.locator("#zone-to-search-note")).to_have_text("交出橘色的 2 區；下一頁按「開始搜尋」才開始算")
         assert (watched.console_errors, watched.page_errors) == ([], [])
 
 

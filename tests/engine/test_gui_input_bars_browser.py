@@ -39,7 +39,7 @@ def test_saved_idle_and_sticky_results_jump(tmp_path: Path, browser: Browser, re
         expect(page.locator("#save-id")).to_have_value(ROOM)
         expect(page.locator("#save-state")).to_have_text("都存好了（還沒算過）")
         expect(page.locator("#next-title")).to_have_text("改好了就選一個往下走")
-        expect(page.locator("#zone-to-search-note")).to_contain_text("交出黃色的 1 區")
+        expect(page.locator("#zone-to-search-note")).to_contain_text("交出橘色的 1 區")
         page.locator("#save").click()
         expect(page.locator("#save-feedback")).to_have_text("方案沒有變動")
         page.locator("#show-results").click()
