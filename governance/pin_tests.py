@@ -9,7 +9,7 @@
 **兩個用法。**
 
 * ``uv run python -m governance.pin_tests``：跑清單上的考卷，把「哪一顆提交、樹乾不乾淨、離開碼」寫進
-  ``governance/receipts/local`` 底下的 ``pins.json``（被忽略的目錄）。``--list`` 只印清單不跑，``--jobs N`` 調考卷工人數。
+  ``governance/receipts/local`` 底下的 ``pins.json``（被忽略的目錄）。``--list`` 只印清單不跑，``--jobs N`` 調考卷工人數（不給就開 4 個，理由見 ``main``）。
 * ``uv run python -m governance.pin_tests gate --command '<整行指令>'``：指令裡沒有 git push 回 0；有的話，
   那棵樹相對 ``origin/main`` 動過 ``GATED`` 列的路徑，就要有一張指到此刻 HEAD、乾淨、離開碼 0 的收據，否則回 1
   並說要跑哪一行；``--cwd`` 給那一行指令執行時所在的目錄。施工機器上的 push 掛鉤（推之前自動執行的小程式）
@@ -352,7 +352,9 @@ def _push_problems(directory: str, sources: Sequence[str] | None, git: Git) -> l
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m governance.pin_tests", description="推之前跑釘住數值的考卷")
     parser.add_argument("mode", nargs="?", choices=("run", "gate"), default="run")
-    parser.add_argument("--jobs", type=int, default=None, help="考卷工人數（不給就照 pyproject 的設定）")
+    # 不給 --jobs 就開 4 個工人，不照 pyproject 的「有幾核開幾個」：施工機器 16 核、同時有別的工作在跑時，開 16 個讓
+    # 開子行程的考卷逾時（2026-11-28 實測兩題報錯、收據假紅）；開 4 個同一批 1000 題全過，牆鐘一樣約 4 分半。
+    parser.add_argument("--jobs", type=int, default=4, help="考卷工人數（不給就開 4 個）")
     parser.add_argument("--list", action="store_true", help="只印清單，不跑")
     parser.add_argument("--command", default="", help="gate：要判的那一整行殼層指令")
     parser.add_argument("--cwd", default="", help="gate：那一行指令會在哪個目錄執行（不給就是現在這個目錄）")
