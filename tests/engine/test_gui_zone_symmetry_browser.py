@@ -20,6 +20,7 @@ from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_ide
 from tests.engine._zone_symmetry_room import CENTRED, FRONT_PAIR, NAME, SIDE, Box, Doc, symmetry_document
 from tests.engine.test_gui_browser import _open, _serve, browser as browser
 from tests.engine.test_gui_zone_elevation_browser import _cut_by, _open_scheme, _write
+from tests.engine._zone_material_steps import CANDIDATES_SHOWN
 from tests.engine.test_gui_zone_material_pick_browser import _TEXT_STYLES
 
 WOOLS = ["glass_wool_48k", "glass_wool_24k", "glass_wool_96k", "none"]
@@ -47,7 +48,8 @@ def _prepare(tmp_path: Path, cuts: dict[str, list[Box]], design: Doc | None) -> 
 
 def _settled(page: Page) -> None:
     page.wait_for_function("""() => { const page = document.getElementById('zone-page');
-        return !page.inert && !inputBusy && !(Number(page.dataset.changing) > 0) && zoneLimitsShown === zoneLimitsGeneration; }""")
+        return !page.inert && !inputBusy && !(Number(page.dataset.changing) > 0) && zoneLimitsShown === zoneLimitsGeneration
+            && """ + CANDIDATES_SHOWN + "; }")
 
 
 def _open_page(page: Page) -> None:

@@ -9,7 +9,7 @@ from typing import cast
 from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.gui import reference_only
-from tests.engine._zone_material_steps import open_groups
+from tests.engine._zone_material_steps import CANDIDATES_SHOWN, open_groups
 from tests.engine._zone_material_steps import pick_fixed_row, row_options
 from tests.engine._zone_panel_steps import apply_and_return, choose_fixed, choose_mode, edit_candidates, expect_mode, open_panel
 from tests.engine._construction_gui_server import real_server
@@ -109,7 +109,8 @@ def _prepare(tmp_path: Path, lists: dict[str, list[str]] | None = None, document
 
 def _settled(page: Page) -> None:
     page.wait_for_function("""() => { const page = document.getElementById('zone-page');
-        return !page.inert && !inputBusy && !(Number(page.dataset.changing) > 0) && zoneLimitsShown === zoneLimitsGeneration; }""")
+        return !page.inert && !inputBusy && !(Number(page.dataset.changing) > 0) && zoneLimitsShown === zoneLimitsGeneration
+            && """ + CANDIDATES_SHOWN + "; }")
 
 
 def _open_page(page: Page) -> None:
@@ -222,8 +223,10 @@ def test_such_a_construction_is_greyed_out_of_the_panel_list_and_the_add_box_wit
         expect(page.locator(f"#zone-panel-row-{HIT}")).to_have_count(0)
         expect(row.locator(".zv-covered-why")).to_have_text(cast(str, WORDS["search_why"]))
         # 名稱那一格不被那一句壓窄（#1340：勾選列照非勾選列的格子放，名稱擠成一字一行）：名稱寬過 150 像素、跟那一句左緣對齊。
-        name = cast(dict[str, float], row.locator(".zv-material-text").evaluate("n => n.getBoundingClientRect().toJSON()"))
-        why = cast(dict[str, float], row.locator(".zv-covered-why").evaluate("n => n.getBoundingClientRect().toJSON()"))
+        # 先等清單畫的是判決後那一版，兩格在同一次排版裡量（#1231：暫定列量到一半被重畫換掉，名稱格方框全 0）。
+        _settled(page)
+        name, why = cast(list[dict[str, float]], row.evaluate("""row => ['.zv-material-text', '.zv-covered-why'].map(selector =>
+            row.querySelector(selector).getBoundingClientRect().toJSON())"""))
         assert name["width"] > 150 and abs(name["left"] - why["left"]) < 1, (name, why)
         plain = page.locator(f"#zone-panel-pick-{PLAIN_ID}")
         expect(plain).to_be_enabled()
