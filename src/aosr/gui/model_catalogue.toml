@@ -22,7 +22,7 @@ code = "src/aosr/materials/construction_models.py::PorousLayer"
 variant = "komatsu"
 compute = ["src/aosr/materials/transfer_matrix.py::equivalent_fluid_model", "src/aosr/materials/transfer_matrix.py::porous_layer"]
 params = ["PorousLayer.thickness_m", "PorousLayer.flow_resistivity_pa_s_m2", "PorousLayer.material_class"]
-blurb = "棉類吸音材只靠流阻與厚度算出等效流體；範圍外照算，但會標外推或類別不在擬合範圍。"
+blurb = "棉類吸音材只靠流阻與厚度算出等效流體；流阻在手動試算範圍外拒收，低於樣品下限、頻率外推、泡棉照算但標註。"
 range = { registry = "komatsu", at = "src/aosr/config/data/porous_model_ranges.toml:1", mark = "Komatsu" }
 citation = { authors = ["Komatsu"], year = 2008, registry = "komatsu", at = "src/aosr/config/data/porous_model_ranges.toml:14" }
 origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
@@ -58,7 +58,7 @@ code = "src/aosr/materials/construction_models.py::PorousLayer"
 variant = "mechel_1976"
 compute = ["src/aosr/materials/transfer_matrix.py::equivalent_fluid_model", "src/aosr/materials/transfer_matrix.py::porous_layer"]
 params = ["PorousLayer.thickness_m", "PorousLayer.flow_resistivity_pa_s_m2", "PorousLayer.porosity", "PorousLayer.material_class"]
-blurb = "經驗式加低頻延伸，要孔隙率；在分界處會跳一階，梯度不可靠，可選、不當預設。"
+blurb = "經驗式加低頻延伸，要孔隙率，而且孔隙率不大於一（這條不在欄位定義裡，見 construction_models.py 第 5 行）；在分界處會跳一階，梯度不可靠，可選、不當預設。"
 range = { note = "未列有效範圍", at = "src/aosr/materials/construction.py:6", mark = "Mechel 1976" }
 citation = { authors = ["Mechel"], year = 1976, at = "src/aosr/materials/construction.py:6" }
 origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
@@ -104,8 +104,8 @@ compute = ["src/aosr/materials/transfer_matrix.py::perforated_panel_layer"]
 params = ["MicroPerforatedLayer.thickness_m", "MicroPerforatedLayer.hole_diameter_m", "MicroPerforatedLayer.open_area",
           "MicroPerforatedLayer.hole_spacing_m", "MicroPerforatedLayer.hole_pattern", "MicroPerforatedLayer.hole_spacing_2_m",
           "MicroPerforatedLayer.surface_mass_kg_m2"]
-blurb = "微穿孔薄片（算法 barrier_mpp，自帶修正），板質量並聯；不收背面貼布。"
-range = { note = "孔徑分界照文獻兩派出處（孔徑欄的可填範圍就是那條界）；1–2 mm 兩種板都能選", at = "docs/decisions/wall-constructions-three-lanes-komatsu-measured-table.md:118", mark = "Atalla" }
+blurb = "微穿孔薄片（算法 barrier_mpp，自帶修正），板質量並聯；不收背面貼布。跟一般圓孔板照孔徑分界、由人選，界線見孔徑欄。"
+range = { note = "未列有效範圍" }
 origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
 
 [[model]]
@@ -116,8 +116,8 @@ compute = ["src/aosr/materials/transfer_matrix.py::perforated_panel_layer"]
 params = ["PerforatedLayer.thickness_m", "PerforatedLayer.hole_diameter_m", "PerforatedLayer.open_area",
           "PerforatedLayer.hole_spacing_m", "PerforatedLayer.hole_pattern", "PerforatedLayer.hole_spacing_2_m",
           "PerforatedLayer.surface_mass_kg_m2"]
-blurb = "集中孔道薄片（算法 barrier）加末端修正 jb，板質量並聯；可選背面貼布。"
-range = { note = "孔徑分界照文獻兩派出處（孔徑欄的可填範圍就是那條界）；1–2 mm 兩種板都能選", at = "docs/decisions/wall-constructions-three-lanes-komatsu-measured-table.md:118", mark = "Atalla" }
+blurb = "集中孔道薄片（算法 barrier）加末端修正 jb，板質量並聯；可選背面貼布。跟微孔板照孔徑分界、由人選，界線見孔徑欄。"
+range = { note = "未列有效範圍" }
 origin = { text = "改寫自 rinaldipp/tmm（MIT 授權）", at = "src/aosr/materials/transfer_matrix.py:3", mark = "rinaldipp/tmm" }
 
 [[model]]

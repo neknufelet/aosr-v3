@@ -127,12 +127,12 @@ def test_komatsu_range_and_reference_come_from_the_range_registry() -> None:
 
 
 def test_catalogue_toml_writes_no_range_numbers() -> None:
-    """範圍與參數界線都現讀：目錄檔的範圍欄位不准出現數字＋單位的寫法（「1–2 mm」那句說明除外）。"""
+    """範圍與參數界線都現讀：目錄檔的範圍欄位不准出現數字＋單位的寫法。"""
     with CATALOGUE.open("rb") as handle:
         raw = tomllib.load(handle)
     for model in raw["model"]:
         note = model["range"].get("note", "")
-        assert not re.search(r"\d+(\.\d+)?\s*(Pa|Hz|kg|m²|m\b)", note.replace("1–2 mm", "")), model["id"]
+        assert not re.search(r"\d+(\.\d+)?\s*(Pa|Hz|kg|m²|m\b)", note), model["id"]
 
 
 def test_api_serves_the_catalogue_and_page_folds_it(tmp_path: Path) -> None:
@@ -151,6 +151,20 @@ def test_api_serves_the_catalogue_and_page_folds_it(tmp_path: Path) -> None:
     assert "body.models" in script and not re.search(r"\.open\s*=|setAttribute\(\"open\"", script)
 
 
+def _bad_sample(tmp_path: Path, model: str) -> Path:
+    params = "" if "params =" in model else "params = []\n"
+    path = tmp_path / "catalogue.toml"
+    path.write_text('[[model]]\nid = "m"\nname = "名"\ncode = "src/aosr/gui/model_catalogue.py::Model"\ncompute = ["src/aosr/gui/model_catalogue.py::Model"]\n'
+                    f'blurb = "說明"\n{params}origin = {{ text = "t", at = "x.py:1", mark = "t" }}\n{model}\n', encoding="utf-8")
+    return path
+
+
+def test_bad_sample_base_loads_without_the_bad_part(tmp_path: Path) -> None:
+    """壞樣本的控制組：同一份底稿不加壞料要載得進來，壞樣本紅才是那一格的錯。"""
+    catalogue = load_model_catalogue(_bad_sample(tmp_path, 'range = { note = "未列有效範圍" }\ncitation = { authors = ["A"], at = "x.py:1" }'))
+    assert catalogue.model[0].range.note == NO_RANGE
+
+
 @pytest.mark.parametrize("model", [
     'range = { note = "大概 100 Hz 以上" }\ncitation = { authors = ["A"], at = "x.py:1" }',
     'range = { note = "未列有效範圍", at = "x.py:1" }',
@@ -159,9 +173,5 @@ def test_api_serves_the_catalogue_and_page_folds_it(tmp_path: Path) -> None:
     'range = { note = "未列有效範圍" }\nparams = ["PorousLayer.made_up"]',
 ], ids=["range note without source", "at without mark", "registry and note", "registry and copied doi", "made-up param"])
 def test_bad_catalogue_refuses_to_load(tmp_path: Path, model: str) -> None:
-    params = "" if "params =" in model else "params = []\n"
-    path = tmp_path / "catalogue.toml"
-    path.write_text('[[model]]\nid = "m"\nname = "名"\ncode = "src/aosr/gui/model_catalogue.py::Model"\ncompute = ["src/aosr/gui/model_catalogue.py::Model"]\n'
-                    f'blurb = "說明"\n{params}origin = {{ text = "t", at = "x.py:1", mark = "t" }}\n{model}\n', encoding="utf-8")
     with pytest.raises(ValidationError):
-        load_model_catalogue(path)
+        load_model_catalogue(_bad_sample(tmp_path, model))
