@@ -25,7 +25,6 @@ from tests.engine.test_gui_compare_view import moved_primary_result, shorter_roo
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 A_ID = "b" * 32
-HEAD = "#page-head, #server-notice, #run-notices"  # 舊頁首含提醒；#1350 提醒搬到中間最上面，範圍照舊
 B_ID = "c" * 32
 
 
@@ -257,7 +256,7 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             assert page.locator("#version-text").inner_text() == data.version_text == "兩份相同"
             technical = page.locator("#identity-technical")
             assert technical.evaluate("el => el.open") is False
-            assert not re.search(r"[0-9a-f]{7,}", "\n".join(page.locator(HEAD).all_inner_texts()))
+            assert not re.search(r"[0-9a-f]{7,}", "\n".join(page.locator("#page-head, #server-notice, #run-notices").all_inner_texts()))  # 舊頁首含提醒（#1350 搬到中間），範圍照舊
             codes = technical.text_content() or ""
             assert all(code in codes for code in (data.a.fingerprint_text, data.b.fingerprint_text,
                                                   data.a.engine_text, data.b.engine_text))
